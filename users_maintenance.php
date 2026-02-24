@@ -1,8 +1,7 @@
 <?php
-session_start();
-include 'db_config.php';
+require_once 'auth_check.php';
 
-if (!isset($_SESSION['user_level']) || $_SESSION['user_level'] !== 'admin') {
+if ($_SESSION['user_level'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
@@ -91,6 +90,21 @@ $users_result = $conn->query($users_sql);
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
 
+        /* Modal Styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-overlay.show { display: flex; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
+        .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
+        .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
+        .modal-actions { display: flex; gap: 12px; }
+        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
+        .btn-cancel { background: #f3f4f6; color: #374151; }
+        .btn-cancel:hover { background: #e5e7eb; }
+        .btn-confirm { background: #e11d48; color: white; text-decoration: none; }
+        .btn-confirm:hover { background: #be123c; }
+
         /* Main Content Styles */
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
@@ -153,11 +167,11 @@ $users_result = $conn->query($users_sql);
                 </ul>
             </li>
             <li><a href="manage_limits.php" class="nav-link">QR Limits</a></li>
-            <li><a href="#" class="nav-link">Reports</a></li>
+            <li><a href="login_logs_view.php" class="nav-link">Login Logs</a></li>
             <li><a href="#" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
-            <a href="logout.php" class="logout-btn">Logout</a>
+            <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
         </div>
     </aside>
 
@@ -255,12 +269,35 @@ $users_result = $conn->query($users_sql);
         </div>
     </main>
 
+    <!-- Logout Modal -->
+    <div class="modal-overlay" id="logoutModal">
+        <div class="modal-content">
+            <div class="modal-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </div>
+            <h3 class="modal-title">Ready to Leave?</h3>
+            <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
+                <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
+            </div>
+        </div>
+    </div>
+
     <script>
         function toggleSubmenu(menuId, element) {
             const menu = document.getElementById(menuId);
             const caret = element.querySelector('.caret');
             menu.classList.toggle('open');
             caret.classList.toggle('open');
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('logoutModal');
+            if (event.target == modal) {
+                modal.classList.remove('show');
+            }
         }
     </script>
 </body>

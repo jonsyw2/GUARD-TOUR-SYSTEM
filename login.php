@@ -1,9 +1,33 @@
+<?php
+require_once 'db_config.php';
+require_once 'jwt_helper.php';
+
+// Check if already authenticated via token
+if (isset($_COOKIE['jwt_token'])) {
+    $jwt_token = $_COOKIE['jwt_token'];
+    $decoded_payload = verify_jwt($jwt_token);
+    
+    if ($decoded_payload !== false) {
+        $level = $decoded_payload['user_level'];
+        if ($level === 'admin') header("Location: admin_dashboard.php");
+        else if ($level === 'agency') header("Location: agency_dashboard.php");
+        else if ($level === 'client') header("Location: client_dashboard.php");
+        exit();
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - OJT System</title>
+    <script>
+        // Prevent going back to the login page via browser back button after successful login/logout
+        if (window.history.replaceState) {
+            window.history.replaceState(null, null, window.location.href);
+        }
+    </script>
     <style>
         :root {
             --primary: #4f46e5;

@@ -1,6 +1,7 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_level']) || $_SESSION['user_level'] !== 'client') {
+require_once 'auth_check.php';
+
+if ($_SESSION['user_level'] !== 'client') {
     header("Location: login.php");
     exit();
 }
