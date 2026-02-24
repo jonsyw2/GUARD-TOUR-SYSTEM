@@ -27,6 +27,14 @@ if (isset($_COOKIE['jwt_token'])) {
         if (window.history.replaceState) {
             window.history.replaceState(null, null, window.location.href);
         }
+
+        // Clear inputs on page load to ensure placeholders are visible and prevent browser autofill
+        window.addEventListener('DOMContentLoaded', (event) => {
+            const usernameField = document.getElementById('username');
+            const passwordField = document.getElementById('password');
+            if (usernameField) usernameField.value = '';
+            if (passwordField) passwordField.value = '';
+        });
     </script>
     <style>
         :root {
@@ -140,14 +148,14 @@ if (isset($_COOKIE['jwt_token'])) {
     <div class="container">
         <h1>Welcome</h1>
         <p>Please enter your details to login</p>
-        <form action="login_action.php" method="POST">
+        <form action="login_action.php" method="POST" autocomplete="off">
             <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required placeholder="Enter your username">
+                <input type="text" id="username" name="username" required placeholder="Enter your username" autocomplete="off">
             </div>
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required placeholder="••••••••">
+                <input type="password" id="password" name="password" required placeholder="Enter password" autocomplete="new-password">
             </div>
             <button type="submit">Login</button>
         </form>
