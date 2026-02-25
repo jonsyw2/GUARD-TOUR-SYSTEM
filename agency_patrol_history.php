@@ -1,48 +1,40 @@
 <?php
 require_once 'auth_check.php';
 
-if ($_SESSION['user_level'] !== 'client') {
+if ($_SESSION['user_level'] !== 'agency') {
     header("Location: login.php");
     exit();
 }
 
-$client_id = $_SESSION['user_id'];
+$agency_id = $_SESSION['user_id'];
 
-// Get all agency_client mapping IDs for this client
-$maps_sql = "SELECT id, agency_id FROM agency_clients WHERE client_id = $client_id";
-$maps_res = $conn->query($maps_sql);
+// Fetch all clients for this agency to populate filter
+$clients_sql = "
+    SELECT ac.id as mapping_id, u.username as client_name 
+    FROM agency_clients ac
+    JOIN users u ON ac.client_id = u.id
+    WHERE ac.agency_id = $agency_id
+    ORDER BY u.username ASC
+";
+$clients_res = $conn->query($clients_sql);
 $mapping_ids = [];
-$agency_ids = [];
-if ($maps_res && $maps_res->num_rows > 0) {
-    while($r = $maps_res->fetch_assoc()) {
-        $mapping_ids[] = (int)$r['id'];
-        $agency_ids[] = (int)$r['agency_id'];
-    }
+if ($clients_res) {
+    while($r = $clients_res->fetch_assoc()) $mapping_ids[] = (int)$r['mapping_id'];
 }
-$agency_ids = array_unique($agency_ids);
+$mapping_ids_str = empty($mapping_ids) ? "0" : implode(',', $mapping_ids);
 
-// If no assigned mapping, they have no data to view
-if (empty($mapping_ids)) {
-    $mapping_ids_str = "0";
-    $agency_ids_str = "0";
-} else {
-    $mapping_ids_str = implode(',', $mapping_ids);
-    $agency_ids_str = implode(',', $agency_ids);
-}
+// Reset pointer for filter dropdown
+if ($clients_res) mysqli_data_seek($clients_res, 0);
 
-// Fetch filter options: Guards
-$guards_sql = "SELECT id, name FROM guards WHERE agency_id IN ($agency_ids_str) ORDER BY name ASC";
+// Fetch guards for filtering
+$guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY name ASC";
 $guards_res = $conn->query($guards_sql);
-
-// Fetch filter options: Checkpoints
-$checkpoints_sql = "SELECT id, name FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) ORDER BY name ASC";
-$checkpoints_res = $conn->query($checkpoints_sql);
 
 // Handle Filter Submissions
 $filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-7 days'));
 $filter_end = $_GET['end_date'] ?? date('Y-m-d');
 $filter_guard = $_GET['guard_id'] ?? '';
-$filter_checkpoint = $_GET['checkpoint_id'] ?? '';
+$filter_client = $_GET['mapping_id'] ?? '';
 $filter_shift = $_GET['shift'] ?? '';
 
 // Build dynamic WHERE clause
@@ -60,9 +52,9 @@ if (!empty($filter_guard)) {
     $g_id = (int)$filter_guard;
     $where_clauses[] = "s.guard_id = $g_id";
 }
-if (!empty($filter_checkpoint)) {
-    $c_id = (int)$filter_checkpoint;
-    $where_clauses[] = "s.checkpoint_id = $c_id";
+if (!empty($filter_client)) {
+    $m_id = (int)$filter_client;
+    $where_clauses[] = "c.agency_client_id = $m_id";
 }
 if (!empty($filter_shift)) {
     $shift = $conn->real_escape_string($filter_shift);
@@ -77,12 +69,15 @@ $history_sql = "
         s.scan_time,
         c.name as checkpoint_name,
         g.name as guard_name,
+        u.username as client_name,
         s.status,
         s.shift,
         s.justification
     FROM scans s
     JOIN checkpoints c ON s.checkpoint_id = c.id
     JOIN guards g ON s.guard_id = g.id
+    JOIN agency_clients ac ON c.agency_client_id = ac.id
+    JOIN users u ON ac.client_id = u.id
     WHERE $where_sql
     ORDER BY s.scan_time DESC
     LIMIT 200
@@ -96,7 +91,7 @@ $history_res = $conn->query($history_sql);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patrol History - Client Portal</title>
+    <title>Patrol History - Agency Portal</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
@@ -107,7 +102,7 @@ $history_res = $conn->query($history_sql);
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
-        .nav-link:hover, .nav-link.active { background-color: #1f2937; color: #fff; border-left-color: #3b82f6; }
+        .nav-link:hover, .nav-link.active { background-color: #1f2937; color: #fff; border-left-color: #10b981; }
         .sidebar-footer { padding: 20px; border-top: 1px solid #374151; }
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
@@ -117,21 +112,21 @@ $history_res = $conn->query($history_sql);
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
         .user-info { display: flex; align-items: center; gap: 12px; }
-        .badge { background: #dbeafe; color: #3b82f6; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge { background: #d1fae5; color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
 
-        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .content-area { padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; }
 
         .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); margin-bottom: 24px;}
         .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
 
         /* Filter Form */
         .filter-form { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
-        .form-group { flex: 1; min-width: 200px; }
+        .form-group { flex: 1; min-width: 180px; }
         .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: #4b5563; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;}
         .form-control { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; background-color: #f9fafb; transition: all 0.2s; }
-        .form-control:focus { outline: none; border-color: #3b82f6; background-color: #fff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
-        .btn-primary { padding: 10px 20px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; }
-        .btn-primary:hover { background-color: #2563eb; }
+        .form-control:focus { outline: none; border-color: #10b981; background-color: #fff; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+        .btn-primary { padding: 10px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; }
+        .btn-primary:hover { background-color: #059669; }
 
         /* Table */
         .table-container { overflow-x: auto; }
@@ -169,14 +164,15 @@ $history_res = $conn->query($history_sql);
     <!-- Sidebar -->
     <aside class="sidebar">
         <div class="sidebar-header">
-            Client Portal
+            Agency Portal
         </div>
         <ul class="nav-links">
-            <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
-            <li><a href="client_qrs.php" class="nav-link">Checkpoints</a></li>
-            <li><a href="client_patrol_history.php" class="nav-link active">Patrol History</a></li>
-            <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>
-            <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
+            <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
+            <li><a href="manage_qrs.php" class="nav-link">Manage QRs</a></li>
+            <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
+            <li><a href="agency_patrol_history.php" class="nav-link active">Patrol History</a></li>
+            <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
+            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -187,10 +183,10 @@ $history_res = $conn->query($history_sql);
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>Activity Logs & Patrol History</h2>
+            <h2>Detailed Activity Logs</h2>
             <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
-                <span class="badge">CLIENT</span>
+                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Agency'; ?></strong></span>
+                <span class="badge">AGENCY</span>
             </div>
         </header>
 
@@ -198,7 +194,7 @@ $history_res = $conn->query($history_sql);
             
             <div class="card">
                 <div class="card-header">Filter Patrol History</div>
-                <form class="filter-form" method="GET" action="client_patrol_history.php">
+                <form class="filter-form" method="GET" action="agency_patrol_history.php">
                     <div class="form-group">
                         <label class="form-label" for="start_date">Date From</label>
                         <input type="date" id="start_date" name="start_date" class="form-control" value="<?php echo htmlspecialchars($filter_start); ?>">
@@ -208,23 +204,23 @@ $history_res = $conn->query($history_sql);
                         <input type="date" id="end_date" name="end_date" class="form-control" value="<?php echo htmlspecialchars($filter_end); ?>">
                     </div>
                     <div class="form-group">
+                        <label class="form-label" for="mapping_id">Client Site</label>
+                        <select id="mapping_id" name="mapping_id" class="form-control">
+                            <option value="">-- All Clients --</option>
+                            <?php if ($clients_res && $clients_res->num_rows > 0): ?>
+                                <?php while($c = $clients_res->fetch_assoc()): ?>
+                                    <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['client_name']); ?></option>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label" for="guard_id">Guard</label>
                         <select id="guard_id" name="guard_id" class="form-control">
                             <option value="">-- All Guards --</option>
                             <?php if ($guards_res && $guards_res->num_rows > 0): ?>
                                 <?php while($g = $guards_res->fetch_assoc()): ?>
                                     <option value="<?php echo $g['id']; ?>" <?php if($filter_guard == $g['id']) echo 'selected'; ?>><?php echo htmlspecialchars($g['name']); ?></option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="checkpoint_id">Location</label>
-                        <select id="checkpoint_id" name="checkpoint_id" class="form-control">
-                            <option value="">-- All Locations --</option>
-                            <?php if ($checkpoints_res && $checkpoints_res->num_rows > 0): ?>
-                                <?php while($c = $checkpoints_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $c['id']; ?>" <?php if($filter_checkpoint == $c['id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['name']); ?></option>
                                 <?php endwhile; ?>
                             <?php endif; ?>
                         </select>
@@ -240,7 +236,7 @@ $history_res = $conn->query($history_sql);
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button type="submit" class="btn-primary">Apply Filters</button>
-                        <a href="client_patrol_history.php" class="btn-primary" style="background: #94a3b8; text-decoration: none;">Reset</a>
+                        <a href="agency_patrol_history.php" class="btn-primary" style="background: #94a3b8; text-decoration: none;">Reset</a>
                     </div>
                 </form>
             </div>
@@ -251,11 +247,12 @@ $history_res = $conn->query($history_sql);
                         <thead>
                             <tr>
                                 <th>Date & Time</th>
+                                <th>Client</th>
                                 <th>Shift</th>
-                                <th>Checkpoint Name</th>
-                                <th>Guard Name</th>
+                                <th>Checkpoint</th>
+                                <th>Guard</th>
                                 <th>Status</th>
-                                <th>Justification/Remarks</th>
+                                <th>Remarks</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -263,6 +260,7 @@ $history_res = $conn->query($history_sql);
                                 <?php while($row = $history_res->fetch_assoc()): ?>
                                     <tr>
                                         <td><strong><?php echo date('M d, Y h:i A', strtotime($row['scan_time'])); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($row['client_name']); ?></td>
                                         <td><span style="font-size: 0.85rem; color: #6b7280;"><?php echo htmlspecialchars($row['shift'] ?? 'N/A'); ?></span></td>
                                         <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
@@ -278,7 +276,7 @@ $history_res = $conn->query($history_sql);
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="6" class="empty-state">No patrol activity found for the selected criteria.</td>
+                                    <td colspan="7" class="empty-state">No patrol activity found for the selected criteria.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>

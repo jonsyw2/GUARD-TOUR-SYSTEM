@@ -9,9 +9,23 @@ if (isset($_COOKIE['jwt_token'])) {
     
     if ($decoded_payload !== false) {
         $level = $decoded_payload['user_level'];
-        if ($level === 'admin') header("Location: admin_dashboard.php");
-        else if ($level === 'agency') header("Location: agency_dashboard.php");
-        else if ($level === 'client') header("Location: client_dashboard.php");
+        switch ($level) {
+            case 'admin':
+                header("Location: admin_dashboard.php");
+                break;
+            case 'agency':
+                header("Location: agency_dashboard.php");
+                break;
+            case 'client':
+                header("Location: client_dashboard.php");
+                break;
+            case 'guard':
+                header("Location: guard_dashboard.php");
+                break;
+            default:
+                // Optionally handle unknown user levels or do nothing
+                break;
+        }
         exit();
     }
 }
