@@ -9,11 +9,11 @@ if ($_SESSION['user_level'] !== 'admin') {
 $message = '';
 $message_type = '';
 
-// Handle Add User
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_user'])) {
+// Handle Add Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $new_username = $conn->real_escape_string($_POST['new_username']);
     $password = password_hash($_POST['new_password'], PASSWORD_DEFAULT);
-    $user_level = $conn->real_escape_string($_POST['user_level']);
+    $user_level = 'client';
     
     // Check if username exists
     $checkSql = "SELECT id FROM users WHERE username = '$new_username'";
@@ -25,17 +25,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_user'])) {
     } else {
         $sql = "INSERT INTO users (username, password, user_level) VALUES ('$new_username', '$password', '$user_level')";
         if ($conn->query($sql) === TRUE) {
-            $message = "User created successfully!";
+            $message = "Client created successfully!";
             $message_type = "success";
         } else {
-            $message = "Error creating user: " . $conn->error;
+            $message = "Error creating client: " . $conn->error;
             $message_type = "error";
         }
     }
 }
 
-// Handle Delete User
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_user'])) {
+// Handle Delete Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
     $delete_id = (int)$_POST['delete_id'];
     
     // Prevent admin from deleting themselves
@@ -43,19 +43,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_user'])) {
         $message = "You cannot delete your own account.";
         $message_type = "error";
     } else {
-        $del_sql = "DELETE FROM users WHERE id = $delete_id";
+        $del_sql = "DELETE FROM users WHERE id = $delete_id AND user_level = 'client'";
         if ($conn->query($del_sql) === TRUE) {
-            $message = "User deleted successfully!";
+            $message = "Client deleted successfully!";
             $message_type = "success";
         } else {
-            $message = "Error deleting user: " . $conn->error;
+            $message = "Error deleting client: " . $conn->error;
             $message_type = "error";
         }
     }
 }
 
-// Fetch all users
-$users_sql = "SELECT id, username, user_level FROM users ORDER BY user_level ASC, username ASC";
+// Fetch all clients
+$users_sql = "SELECT id, username, user_level FROM users WHERE user_level = 'client' ORDER BY username ASC";
 $users_result = $conn->query($users_sql);
 
 ?>
@@ -64,7 +64,7 @@ $users_result = $conn->query($users_sql);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Maintenance - Admin Dashboard</title>
+    <title>Client Maintenance - Admin Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
@@ -163,7 +163,7 @@ $users_result = $conn->query($users_sql);
                 </div>
                 <ul class="submenu open" id="maintenanceMenu">
                     <li><a href="agency_maintenance.php" class="submenu-link">Agency Maintenance</a></li>
-                    <li><a href="users_maintenance.php" class="submenu-link active">User Maintenance</a></li>
+                    <li><a href="client_maintenance.php" class="submenu-link active">Client Maintenance</a></li>
                 </ul>
             </li>
             <li><a href="manage_limits.php" class="nav-link">QR Limits</a></li>
@@ -179,7 +179,7 @@ $users_result = $conn->query($users_sql);
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>User Maintenance</h2>
+            <h2>Client Maintenance</h2>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Admin'; ?></strong></span>
                 <span class="badge">admin</span>
@@ -197,32 +197,23 @@ $users_result = $conn->query($users_sql);
             <div class="grid-container">
                 <!-- Add User Form -->
                 <div class="card">
-                    <h3 class="card-header">Create New User</h3>
-                    <form action="users_maintenance.php" method="POST">
+                    <h3 class="card-header">Create New Client</h3>
+                    <form action="client_maintenance.php" method="POST">
                         <div class="form-group">
-                            <label class="form-label" for="new_username">User Name</label>
-                            <input type="text" id="new_username" name="new_username" class="form-control" required placeholder="Enter username">
+                            <label class="form-label" for="new_username">Client Name</label>
+                            <input type="text" id="new_username" name="new_username" class="form-control" required placeholder="Enter client username">
                         </div>
                         <div class="form-group">
                             <label class="form-label" for="new_password">Password</label>
                             <input type="password" id="new_password" name="new_password" class="form-control" required placeholder="Assign password">
                         </div>
-                        <div class="form-group">
-                            <label class="form-label" for="user_level">Role / User Level</label>
-                            <select id="user_level" name="user_level" class="form-control" required>
-                                <option value="" disabled selected>-- Select Role --</option>
-                                <option value="admin">Admin</option>
-                                <option value="agency">Agency</option>
-                                <option value="client">Client</option>
-                            </select>
-                        </div>
-                        <button type="submit" name="add_user" class="btn">Create User</button>
+                        <button type="submit" name="add_client" class="btn">Create Client</button>
                     </form>
                 </div>
 
                 <!-- Users List -->
                 <div class="card">
-                    <h3 class="card-header">All Users Directory</h3>
+                    <h3 class="card-header">All Clients Directory</h3>
                     <div class="table-container">
                         <table>
                             <thead>
@@ -247,9 +238,9 @@ $users_result = $conn->query($users_sql);
                                             <td>
                                                 <!-- Cannot delete if the user is the one currently logged in -->
                                                 <?php if($row['id'] != ($_SESSION['user_id'] ?? null) && $row['username'] != $_SESSION['username']): ?>
-                                                    <form action="users_maintenance.php" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this user? This cannot be undone.');">
+                                                    <form action="client_maintenance.php" method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this client? This cannot be undone.');">
                                                         <input type="hidden" name="delete_id" value="<?php echo $row['id']; ?>">
-                                                        <button type="submit" name="delete_user" class="btn btn-danger">Delete</button>
+                                                        <button type="submit" name="delete_client" class="btn btn-danger">Delete</button>
                                                     </form>
                                                 <?php endif; ?>
                                             </td>
@@ -257,7 +248,7 @@ $users_result = $conn->query($users_sql);
                                     <?php endwhile; ?>
                                 <?php else: ?>
                                     <tr>
-                                        <td colspan="4" class="empty-state">No users found.</td>
+                                        <td colspan="4" class="empty-state">No clients found.</td>
                                     </tr>
                                 <?php endif; ?>
                             </tbody>

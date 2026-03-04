@@ -320,7 +320,7 @@ $clients_list = $conn->query("SELECT id, username FROM users WHERE user_level = 
                 </div>
                 <ul class="submenu" id="maintenanceMenu">
                     <li><a href="agency_maintenance.php" class="submenu-link">Agency Maintenance</a></li>
-                    <li><a href="users_maintenance.php" class="submenu-link">User Maintenance</a></li>
+                    <li><a href="client_maintenance.php" class="submenu-link">Client Maintenance</a></li>
                 </ul>
             </li>
             <li><a href="manage_limits.php" class="nav-link">QR Limits</a></li>

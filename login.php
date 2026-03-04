@@ -173,9 +173,6 @@ if (isset($_COOKIE['jwt_token'])) {
             </div>
             <button type="submit">Login</button>
         </form>
-        <div class="footer">
-            Don't have an account? <a href="register.php">Register here</a>
-        </div>
     </div>
 </body>
 </html>
