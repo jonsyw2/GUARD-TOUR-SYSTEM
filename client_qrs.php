@@ -28,6 +28,7 @@ if (empty($mapping_ids)) {
 
 $message = '';
 $message_type = '';
+$show_limit_modal = false;
 
 // Handle creating QR Checkpoint
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
@@ -53,23 +54,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
                 $message = "QR creation is currently disabled for this site.";
                 $message_type = "error";
             } else {
-                // Check usage
-                $count_res = $conn->query("SELECT COUNT(*) as c FROM checkpoints WHERE agency_client_id = $mapping_id");
-                $current_usage = $count_res->fetch_assoc()['c'];
+            } else {
+                // Check Global Agency QR Limit
+                $limit_check = $conn->query("
+                    SELECT u.qr_limit, 
+                    (SELECT COUNT(*) FROM checkpoints cp 
+                     JOIN agency_clients ac_inner ON cp.agency_client_id = ac_inner.id 
+                     WHERE ac_inner.agency_id = ac.agency_id) as total_agency_qrs
+                    FROM agency_clients ac
+                    JOIN users u ON ac.agency_id = u.id
+                    WHERE ac.id = $mapping_id
+                ");
                 
-                if ($current_usage >= $mapping['qr_limit'] && !$mapping['qr_override']) {
-                    $message = "QR limit reached for this site. Contact your agency to increase your limit.";
-                    $message_type = "error";
-                } else {
-                    $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint, scan_interval) VALUES ($mapping_id, '$qr_name', '$checkpoint_code', '$checkpoint_code', $is_zero_checkpoint, $scan_interval)";
-                    if ($conn->query($insert_sql)) {
-                        $message = "Checkpoint '$qr_name' created successfully!";
-                        $message_type = "success";
-                    } else {
-                        $message = "Database error: " . $conn->error;
+                if ($limit_check && $limit_check->num_rows > 0) {
+                    $limit_data = $limit_check->fetch_assoc();
+                    if ($limit_data['qr_limit'] > 0 && $limit_data['total_agency_qrs'] >= $limit_data['qr_limit'] && !$mapping['qr_override']) {
+                        $message = "QR limit reached for your agency ($limit_data[qr_limit] QRs max). Please contact the agency administrator.";
                         $message_type = "error";
+                        $show_limit_modal = true;
+                    } else {
+                        $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint, scan_interval) VALUES ($mapping_id, '$qr_name', '$checkpoint_code', '$checkpoint_code', $is_zero_checkpoint, $scan_interval)";
+                        if ($conn->query($insert_sql)) {
+                            $message = "Checkpoint '$qr_name' created successfully!";
+                            $message_type = "success";
+                        } else {
+                            $message = "Database error: " . $conn->error;
+                            $message_type = "error";
+                        }
                     }
                 }
+            }
             }
         }
     }
@@ -135,10 +149,11 @@ $limits_sql = "
         ac.id as mapping_id, 
         u.username as agency_name,
         ac.site_name,
-        ac.qr_limit, 
+        u.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
-        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qrs
+        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_site_qrs,
+        (SELECT COUNT(*) FROM checkpoints cp2 JOIN agency_clients ac2 ON cp2.agency_client_id = ac2.id WHERE ac2.agency_id = u.id) as agency_total_qrs
     FROM agency_clients ac
     JOIN users u ON ac.agency_id = u.id
     WHERE ac.client_id = $client_id
@@ -294,7 +309,7 @@ $qrs_result = $conn->query($qrs_sql);
                     Manage Checkpoints
                 </div>
                 
-                <?php if ($message): ?>
+                <?php if ($message && !$show_limit_modal): ?>
                     <div class="alert alert-<?php echo $message_type; ?>">
                         <?php echo $message; ?>
                     </div>
@@ -350,11 +365,12 @@ $qrs_result = $conn->query($qrs_sql);
                             <div style="margin-bottom: 15px;">
                                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px;">
                                     <strong><?php echo $l['site_name'] ?: 'Site #' . $l['mapping_id']; ?></strong>
-                                    <span><?php echo $l['current_qrs']; ?> / <?php echo $l['qr_limit']; ?> used</span>
+                                    <span>Global Pool: <?php echo $l['agency_total_qrs']; ?> / <?php echo $l['qr_limit']; ?> used</span>
                                 </div>
                                 <div style="width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;">
-                                    <div style="width: <?php echo min(100, ($l['qr_limit'] > 0 ? ($l['current_qrs'] / $l['qr_limit']) * 100 : 0)); ?>%; height: 100%; background: #3b82f6;"></div>
+                                    <div style="width: <?php echo min(100, ($l['qr_limit'] > 0 ? ($l['agency_total_qrs'] / $l['qr_limit']) * 100 : 0)); ?>%; height: 100%; background: #3b82f6;"></div>
                                 </div>
+                                <small style="font-size: 0.7rem; color: #64748b;">This site has <?php echo $l['current_site_qrs']; ?> QRs.</small>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -485,6 +501,16 @@ $qrs_result = $conn->query($qrs_sql);
         </div>
     </div>
 
+    <!-- Limit Reached Modal -->
+    <div id="limitModal" class="modal-overlay <?php echo $show_limit_modal ? 'show' : ''; ?>">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <h3 style="margin-bottom: 10px;">Limit Reached</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn btn-primary" style="background: #111827;" onclick="document.getElementById('limitModal').classList.remove('show')">Understand</button>
+        </div>
+    </div>
+
     <script>
         const limitsData = <?php echo json_encode($limits_data); ?>;
 
@@ -503,8 +529,8 @@ $qrs_result = $conn->query($qrs_sql);
             if (parseInt(limit.is_disabled) === 1) {
                 warning.innerHTML = '<div class="alert-warning" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca; margin-bottom:15px;">QR creation is disabled for this site.</div>';
                 submitBtn.disabled = true;
-            } else if (parseInt(limit.current_qrs) >= parseInt(limit.qr_limit) && parseInt(limit.qr_override) === 0) {
-                warning.innerHTML = '<div class="alert-warning" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca; margin-bottom:15px;">QR limit reached for this site.</div>';
+            } else if (parseInt(limit.qr_limit) > 0 && parseInt(limit.agency_total_qrs) >= parseInt(limit.qr_limit) && parseInt(limit.qr_override) === 0) {
+                warning.innerHTML = '<div class="alert-warning" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca; margin-bottom:15px;">Agency QR limit reached (' + limit.qr_limit + '). Creation is disabled.</div>';
                 submitBtn.disabled = true;
             }
         }

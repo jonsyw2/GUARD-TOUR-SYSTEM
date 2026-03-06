@@ -32,9 +32,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     $verify_res = $conn->query($verify_sql);
     
     if ($verify_res && $verify_res->num_rows > 0) {
-        $update_sql = "UPDATE agency_clients SET qr_limit = $new_limit, site_name = '$site_name' WHERE id = $mapping_id";
+        $update_sql = "UPDATE agency_clients SET site_name = '$site_name' WHERE id = $mapping_id";
         if ($conn->query($update_sql)) {
-            $message = "QR limit and site name updated successfully!";
+            $message = "Site name updated successfully!";
             $message_type = "success";
         } else {
             $message = "Database error: " . $conn->error;
@@ -53,12 +53,13 @@ $clients_sql = "
         ac.id as mapping_id, 
         c.username AS client_name, 
         ac.site_name,
-        ac.qr_limit, 
+        u.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
         (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qrs
     FROM agency_clients ac
     JOIN users c ON ac.client_id = c.id
+    JOIN users u ON ac.agency_id = u.id
     WHERE ac.agency_id = $agency_id
     ORDER BY c.username ASC
 ";
@@ -184,8 +185,10 @@ $checkpoints_result = $conn->query($checkpoints_sql);
         </div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
+            <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_qrs.php" class="nav-link active">Manage QRs</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
+            <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
@@ -241,12 +244,6 @@ $checkpoints_result = $conn->query($checkpoints_sql);
                                 <label class="form-label" for="site_name">Site Name / Description</label>
                                 <input type="text" id="site_name" name="site_name" class="form-control" placeholder="e.g. Main Factory, West Wing" required>
                                 <small style="color: #6b7280; font-size: 0.75rem;">This label will appear in the client's dropdown.</small>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label class="form-label" for="qr_limit">QR Checkpoint Limit</label>
-                                <input type="number" id="qr_limit" name="qr_limit" class="form-control" min="1" placeholder="e.g. 10" required>
-                                <small style="color: #6b7280; font-size: 0.75rem;">This client can create up to this number of QR checkpoints.</small>
                             </div>
                             
                             <button type="submit" name="update_limit" class="btn">Update Site Configuration</button>
@@ -389,7 +386,6 @@ $checkpoints_result = $conn->query($checkpoints_sql);
 
             const client = clientsData.find(c => parseInt(c.mapping_id) === mappingId);
             if (client) {
-                limitInput.value = client.qr_limit;
                 siteNameInput.value = client.site_name || '';
             }
         }
