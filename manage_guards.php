@@ -12,6 +12,7 @@ $message = '';
 $message_type = '';
 $show_key_modal = false;
 $show_limit_modal = false;
+$show_status_modal = false;
 $generated_key = '';
 
 if (isset($_SESSION['guard_created_key'])) {
@@ -38,6 +39,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     $first_name = $conn->real_escape_string($_POST['first_name']);
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
+    $address = $conn->real_escape_string($_POST['address']);
+    $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
+    $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
+    $client_mapping_id = isset($_POST['assign_to_client']) ? (int)$_POST['assign_to_client'] : null;
     
     // Format Full Name: Last, First Middle
     $fullname = $last_name . ", " . $first_name . " " . $middle_name;
@@ -67,7 +72,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
                 $user_id = $conn->insert_id;
                 
                 // 2. Create Guard entry
-                $conn->query("INSERT INTO guards (user_id, agency_id, name) VALUES ($user_id, $agency_id, '$fullname')");
+                $conn->query("INSERT INTO guards (user_id, agency_id, name, address, lesp_no, lesp_expiry) VALUES ($user_id, $agency_id, '$fullname', '$address', '$lesp_no', '$lesp_expiry')");
+                $guard_id = $conn->insert_id;
+
+                // 3. Optional Client Assignment
+                if ($client_mapping_id) {
+                    $conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $client_mapping_id)");
+                }
                 
                 $conn->commit();
                 $_SESSION['guard_created_key'] = $unique_key;
@@ -77,6 +88,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
                 $conn->rollback();
                 $message = "Error creating guard: " . $e->getMessage();
                 $message_type = "error";
+                $show_status_modal = true;
             }
         }
     }
@@ -88,15 +100,41 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
     $first_name = $conn->real_escape_string($_POST['first_name']);
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
+    $address = $conn->real_escape_string($_POST['address']);
+    $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
+    $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
+    $client_mapping_id = isset($_POST['client_mapping_id']) ? (int)$_POST['client_mapping_id'] : null;
     
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
-    if ($conn->query("UPDATE guards SET name = '$fullname' WHERE id = $guard_id")) {
-        $message = "Guard details updated successfully!";
+    $conn->begin_transaction();
+    try {
+        // Update Guard Details
+        $conn->query("UPDATE guards SET name = '$fullname', address = '$address', lesp_no = '$lesp_no', lesp_expiry = '$lesp_expiry' WHERE id = $guard_id");
+        
+        // Handle Assignment Update
+        if ($client_mapping_id) {
+            // Check if already assigned
+            $check = $conn->query("SELECT id FROM guard_assignments WHERE guard_id = $guard_id");
+            if ($check->num_rows > 0) {
+                $conn->query("UPDATE guard_assignments SET agency_client_id = $client_mapping_id WHERE guard_id = $guard_id");
+            } else {
+                $conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $client_mapping_id)");
+            }
+        } else {
+            // Remove assignment if "No Assignment" selected
+            $conn->query("DELETE FROM guard_assignments WHERE guard_id = $guard_id");
+        }
+        
+        $conn->commit();
+        $message = "Guard details and assignment updated successfully!";
         $message_type = "success";
-    } else {
-        $message = "Error updating guard: " . $conn->error;
+        $show_status_modal = true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = "Error updating guard: " . $e->getMessage();
         $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -117,11 +155,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_guard'])) {
             $conn->commit();
             $message = "Guard account deleted successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } catch (Exception $e) {
             $conn->rollback();
             $message = "Error deleting guard: " . $e->getMessage();
             $message_type = "error";
+            $show_status_modal = true;
         }
+    }
+}
+
+// Handle Unassigning Guard from Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['unassign_guard'])) {
+    $assignment_id = (int)$_POST['assignment_id'];
+    if ($conn->query("DELETE FROM guard_assignments WHERE id = $assignment_id")) {
+        $message = "Guard unassigned successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } else {
+        $message = "Error unassigning guard: " . $conn->error;
+        $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -145,43 +199,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
             $message = "Guard assigned to client successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } else {
             $message = "Error assigning guard: " . $conn->error;
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
 
-// Fetch Guards created by this agency
-$guards_sql = "SELECT g.id, g.name, u.username, g.created_at FROM guards g JOIN users u ON g.user_id = u.id WHERE g.agency_id = $agency_id ORDER BY g.created_at DESC";
+// Fetch Guards created by this agency with current assignment info
+$guards_sql = "SELECT g.id, g.name, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, 
+                      GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
+                      GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
+               FROM guards g 
+               JOIN users u ON g.user_id = u.id 
+               LEFT JOIN guard_assignments ga ON g.id = ga.guard_id
+               LEFT JOIN agency_clients ac ON ga.agency_client_id = ac.id
+               LEFT JOIN users cu ON ac.client_id = cu.id
+               WHERE g.agency_id = $agency_id 
+               GROUP BY g.id
+               ORDER BY g.created_at DESC";
 $guards_res = $conn->query($guards_sql);
 
 // Fetch assigned clients for the dropdown
-$clients_sql = "
-    SELECT ac.id as mapping_id, u.username as client_name 
-    FROM agency_clients ac 
-    JOIN users u ON ac.client_id = u.id 
-    WHERE ac.agency_id = $agency_id 
-    ORDER BY u.username ASC
-";
+$clients_sql = "SELECT ac.id as mapping_id, u.username as client_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 if ($clients_res) {
     while($row = $clients_res->fetch_assoc()) $clients_data[] = $row;
 }
-
-// Fetch current assignments for the table
-$assignments_sql = "
-    SELECT ga.id, g.name as guard_name, u.username as client_name, ga.assigned_at
-    FROM guard_assignments ga
-    JOIN guards g ON ga.guard_id = g.id
-    JOIN agency_clients ac ON ga.agency_client_id = ac.id
-    JOIN users u ON ac.client_id = u.id
-    WHERE g.agency_id = $agency_id
-    ORDER BY ga.assigned_at DESC
-";
-$assignments_res = $conn->query($assignments_sql);
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -255,9 +302,10 @@ $assignments_res = $conn->query($assignments_sql);
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_qrs.php" class="nav-link">Manage QRs</a></li>
+
             <li><a href="manage_guards.php" class="nav-link active">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
@@ -273,153 +321,115 @@ $assignments_res = $conn->query($assignments_sql);
         </header>
 
         <div class="content-area">
-            <?php if ($message && !$show_limit_modal): ?>
-                <div class="alert alert-<?php echo $message_type; ?>">
-                    <?php echo $message; ?>
-                </div>
-            <?php endif; ?>
 
-            <div class="tabs-container">
-                <div class="tabs-nav">
-                    <button class="tab-btn active" onclick="switchTab('registerTab', this)">Register New Guard</button>
-                    <button class="tab-btn" onclick="switchTab('assignTab', this)">Assign Guard to Client</button>
-                </div>
-
-                <!-- Register Tab Content -->
-                <div id="registerTab" class="tab-content active">
-                    <div class="card" style="max-width: 600px; margin: 0 auto;">
-                        <h3 class="card-header">Register New Guard</h3>
-                        <form action="manage_guards.php" method="POST">
+            <div class="card" style="max-width: 800px; margin: 0 auto 32px;">
+                <h3 class="card-header">Register New Guard</h3>
+                <form action="manage_guards.php" method="POST">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                        <div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                <div class="form-group">
+                                    <label class="form-label">First Name</label>
+                                    <input type="text" name="first_name" class="form-control" placeholder="e.g. John" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Middle Name (Optional)</label>
+                                    <input type="text" name="middle_name" class="form-control" placeholder="e.g. Quincey">
+                                </div>
+                            </div>
                             <div class="form-group">
                                 <label class="form-label">Last Name</label>
                                 <input type="text" name="last_name" class="form-control" placeholder="e.g. Doe" required>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">First Name</label>
-                                <input type="text" name="first_name" class="form-control" placeholder="e.g. John" required>
+                                <label class="form-label">Permanent Address</label>
+                                <textarea name="address" class="form-control" rows="2" placeholder="Full residential address" required></textarea>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                <div class="form-group">
+                                    <label class="form-label">LESP No.</label>
+                                    <input type="text" name="lesp_no" class="form-control" placeholder="License Number" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">LESP Expiry Date</label>
+                                    <input type="date" name="lesp_expiry" class="form-control" required>
+                                </div>
                             </div>
                             <div class="form-group">
-                                <label class="form-label">Middle Name (Optional)</label>
-                                <input type="text" name="middle_name" class="form-control" placeholder="e.g. Quincey">
+                                <label class="form-label">Assign to Client (Optional)</label>
+                                <select name="assign_to_client" class="form-control">
+                                    <option value="">-- No Direct Assignment --</option>
+                                    <?php foreach($clients_data as $client): ?>
+                                        <option value="<?php echo $client['mapping_id']; ?>"><?php echo htmlspecialchars($client['client_name']); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
                             </div>
                             <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 20px;">
                                 An access key will be automatically generated upon account creation.
                             </p>
-                            <button type="submit" name="create_guard" class="btn">Create Account</button>
-                        </form>
+                            <button type="submit" name="create_guard" class="btn">Create Guard Account</button>
+                        </div>
                     </div>
-                </div>
-
-                <!-- Assign Tab Content -->
-                <div id="assignTab" class="tab-content">
-                    <div class="card" style="max-width: 600px; margin: 0 auto;">
-                        <h3 class="card-header">Assign Guard to Client</h3>
-                        <?php if ($guards_res->num_rows == 0): ?>
-                            <p class="empty-state">No guards created yet.</p>
-                        <?php elseif (empty($clients_data)): ?>
-                            <p class="empty-state">No clients assigned to your agency.</p>
-                        <?php else: ?>
-                            <form action="manage_guards.php" method="POST">
-                                <div class="form-group">
-                                    <label class="form-label">Select Guard</label>
-                                    <select name="guard_id" class="form-control" required>
-                                        <option value="" disabled selected>-- Choose Guard --</option>
-                                        <?php 
-                                        $guards_res->data_seek(0);
-                                        while($g = $guards_res->fetch_assoc()): ?>
-                                            <option value="<?php echo $g['id']; ?>"><?php echo htmlspecialchars($g['name']); ?> [<?php echo htmlspecialchars($g['username']); ?>]</option>
-                                        <?php endwhile; ?>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Select Client</label>
-                                    <select name="agency_client_id" class="form-control" required>
-                                        <option value="" disabled selected>-- Choose Client --</option>
-                                        <?php foreach($clients_data as $client): ?>
-                                            <option value="<?php echo $client['mapping_id']; ?>"><?php echo htmlspecialchars($client['client_name']); ?></option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                                <button type="submit" name="assign_guard" class="btn">Assign to Site</button>
-                            </form>
-                        <?php endif; ?>
-                    </div>
-                </div>
+                </form>
             </div>
 
-            <!-- List Guards -->
-            <div class="card" style="margin-bottom: 24px;">
-                <h3 class="card-header">Active Guards</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Access Key</th>
-                            <th>Created</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php 
-                        $guards_res->data_seek(0);
-                        if ($guards_res->num_rows > 0): ?>
-                            <?php while($row = $guards_res->fetch_assoc()): 
-                                // Parse name for editing: "Last, First Middle"
-                                $full_name_raw = $row['name'];
-                                $parts = explode(',', $full_name_raw);
-                                $last = trim($parts[0] ?? '');
-                                $first_mid = trim($parts[1] ?? '');
-                                $first_parts = explode(' ', $first_mid);
-                                $first = trim($first_parts[0] ?? '');
-                                unset($first_parts[0]);
-                                $middle = trim(implode(' ', $first_parts));
-                            ?>
-                                <tr>
-                                    <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                    <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
-                                    <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
-                                    <td>
-                                        <div style="display: flex; gap: 8px;">
-                                            <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #6366f1;">Edit</button>
-                                            <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444;">Delete</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr><td colspan="3" class="empty-state">No personnel records found.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- List Assignments -->
+            <!-- Active Guards Table -->
             <div class="card">
-                <h3 class="card-header">Client Assignments</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Guard Name</th>
-                            <th>Client / Site</th>
-                            <th>Assigned Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if ($assignments_res && $assignments_res->num_rows > 0): ?>
-                            <?php while($row = $assignments_res->fetch_assoc()): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
-                                    <td><strong><?php echo htmlspecialchars($row['client_name']); ?></strong></td>
-                                    <td><?php echo date('M d, Y', strtotime($row['assigned_at'])); ?></td>
-                                </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr><td colspan="3" class="empty-state">No active client assignments.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
+                <h3 class="card-header">Active Guards Personnel</h3>
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Guard Name</th>
+                                <th>Access Key</th>
+                                <th>Assigned Client</th>
+                                <th>Date Created</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if ($guards_res && $guards_res->num_rows > 0): ?>
+                                <?php while($row = $guards_res->fetch_assoc()): 
+                                    $parts = explode(", ", $row['name']);
+                                    $last = $parts[0] ?? '';
+                                    $fm = $parts[1] ?? '';
+                                    $fm_parts = explode(" ", $fm);
+                                    $first = $fm_parts[0] ?? '';
+                                    $middle = $fm_parts[1] ?? '';
+                                ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                        <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
+                                        <td>
+                                            <?php if ($row['client_names']): ?>
+                                                <?php $names = explode(', ', $row['client_names']); ?>
+                                                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                                                    <?php foreach($names as $name): ?>
+                                                        <span class="badge" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;"><?php echo htmlspecialchars($name); ?></span>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php else: ?>
+                                                <span style="color: #9ca3af; font-size: 0.8rem;">None</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
+                                        <td>
+                                            <div style="display: flex; gap: 8px;">
+                                                <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #6366f1; width: auto;">Edit</button>
+                                                <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <tr><td colspan="5" class="empty-state">No guards registered yet.</td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-        </div>
     </main>
 
     <!-- Success Key Modal -->
@@ -438,6 +448,18 @@ $assignments_res = $conn->query($assignments_sql);
         </div>
     </div>
 
+    <!-- Status Process Modal (Generic) -->
+    <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+        <div class="modal-content" style="text-align: center; max-width: 400px;">
+            <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+            </div>
+            <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
+        </div>
+    </div>
+
     <!-- Limit Reached Modal -->
     <div id="limitModal" class="modal <?php echo $show_limit_modal ? 'show' : ''; ?>">
         <div class="modal-content">
@@ -450,21 +472,46 @@ $assignments_res = $conn->query($assignments_sql);
 
     <!-- Edit Guard Modal -->
     <div id="editGuardModal" class="modal">
-        <div class="modal-content" style="max-width: 450px;">
+        <div class="modal-content" style="max-width: 500px;">
             <h3 style="margin-bottom: 20px;">Edit Guard Details</h3>
             <form action="manage_guards.php" method="POST">
                 <input type="hidden" name="guard_id" id="edit_guard_id">
+                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">First Name</label>
+                        <input type="text" name="first_name" id="edit_first_name" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Middle Name</label>
+                        <input type="text" name="middle_name" id="edit_middle_name" class="form-control">
+                    </div>
+                </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Last Name</label>
                     <input type="text" name="last_name" id="edit_last_name" class="form-control" required>
                 </div>
                 <div class="form-group" style="text-align: left;">
-                    <label class="form-label">First Name</label>
-                    <input type="text" name="first_name" id="edit_first_name" class="form-control" required>
+                    <label class="form-label">Permanent Address</label>
+                    <textarea name="address" id="edit_address" class="form-control" rows="2" required></textarea>
+                </div>
+                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">LESP No.</label>
+                        <input type="text" name="lesp_no" id="edit_lesp_no" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">LESP Expiry Date</label>
+                        <input type="date" name="lesp_expiry" id="edit_lesp_expiry" class="form-control" required>
+                    </div>
                 </div>
                 <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Middle Name (Optional)</label>
-                    <input type="text" name="middle_name" id="edit_middle_name" class="form-control">
+                    <label class="form-label">Assigned Client</label>
+                    <select name="client_mapping_id" id="edit_client_id" class="form-control">
+                        <option value="">-- No Assignment / Unassign --</option>
+                        <?php foreach($clients_data as $client): ?>
+                            <option value="<?php echo $client['mapping_id']; ?>"><?php echo htmlspecialchars($client['client_name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('editGuardModal')">Cancel</button>
@@ -490,6 +537,22 @@ $assignments_res = $conn->query($assignments_sql);
         </div>
     </div>
 
+    <!-- Unassign Confirmation Modal -->
+    <div id="unassignModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <h3 style="margin-bottom: 10px;">Confirm Unassignment</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to unassign <strong id="unassign_guard_name"></strong> from <strong id="unassign_client_name"></strong>?</p>
+            <form action="manage_guards.php" method="POST">
+                <input type="hidden" name="assignment_id" id="unassign_id">
+                <div style="display: flex; gap: 12px;">
+                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('unassignModal')">Cancel</button>
+                    <button type="submit" name="unassign_guard" class="btn" style="background: #ef4444;">Unassign Guard</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="logoutModal">
         <div class="modal-content">
             <h3 style="margin-bottom: 20px;">Ready to Leave?</h3>
@@ -502,16 +565,11 @@ $assignments_res = $conn->query($assignments_sql);
 
     <script>
         function switchTab(tabId, btn) {
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            btn.classList.add('active');
+            return; // Tabs removed
         }
 
         // Auto-switch to appropriate tab if form was submitted
-        <?php if (isset($_POST['assign_guard'])): ?>
-        switchTab('assignTab', document.querySelectorAll('.tab-btn')[1]);
-        <?php endif; ?>
+        // Tabs removed
 
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
@@ -526,11 +584,15 @@ $assignments_res = $conn->query($assignments_sql);
         }
         
         // Correction: Fixed modal ID naming consistency
-        function openEditModal(id, last, first, middle) {
+        function openEditModal(id, last, first, middle, address, lesp_no, lesp_expiry, client_id) {
             document.getElementById('edit_guard_id').value = id;
             document.getElementById('edit_last_name').value = last;
             document.getElementById('edit_first_name').value = first;
             document.getElementById('edit_middle_name').value = middle;
+            document.getElementById('edit_address').value = address;
+            document.getElementById('edit_lesp_no').value = lesp_no;
+            document.getElementById('edit_lesp_expiry').value = lesp_expiry;
+            document.getElementById('edit_client_id').value = client_id;
             document.getElementById('editGuardModal').classList.add('show');
         }
 
@@ -540,16 +602,27 @@ $assignments_res = $conn->query($assignments_sql);
             document.getElementById('deleteGuardModal').classList.add('show');
         }
 
+        function openUnassignModal(id, guard, client) {
+            document.getElementById('unassign_id').value = id;
+            document.getElementById('unassign_guard_name').textContent = guard;
+            document.getElementById('unassign_client_name').textContent = client;
+            document.getElementById('unassignModal').classList.add('show');
+        }
+
         window.onclick = function(event) {
             const logoutModal = document.getElementById('logoutModal');
             const successModal = document.getElementById('successKeyModal');
+            const statusModal = document.getElementById('statusModal');
             const editModal = document.getElementById('editGuardModal');
             const deleteModal = document.getElementById('deleteGuardModal');
+            const unassignModal = document.getElementById('unassignModal');
             
             if (event.target == logoutModal) logoutModal.classList.remove('show');
             if (event.target == successModal) successModal.classList.remove('show');
+            if (event.target == statusModal) statusModal.classList.remove('show');
             if (event.target == editModal) editModal.classList.remove('show');
             if (event.target == deleteModal) deleteModal.classList.remove('show');
+            if (event.target == unassignModal) unassignModal.classList.remove('show');
         }
     </script>
 </body>

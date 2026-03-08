@@ -21,12 +21,13 @@ $conn->query("
 ");
 
 // Fetch mapping info for this client
-$mapping_sql = "SELECT id, qr_limit, qr_override FROM agency_clients WHERE client_id = $client_id LIMIT 1";
+$mapping_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked FROM agency_clients WHERE client_id = $client_id LIMIT 1";
 $mapping_res = $conn->query($mapping_sql);
 $mapping = $mapping_res->fetch_assoc();
 $mapping_id = $mapping['id'] ?? null;
 $qr_limit = (int)($mapping['qr_limit'] ?? 0);
 $qr_override = (int)($mapping['qr_override'] ?? 0);
+$is_patrol_locked = (int)($mapping['is_patrol_locked'] ?? 0);
 
 if (!$mapping_id) {
     die("Error: No agency-client mapping found for this account.");
@@ -34,16 +35,21 @@ if (!$mapping_id) {
 
 $message = '';
 $message_type = '';
+$show_status_modal = false;
 
 // Handle Save
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
     $checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
     $intervals = $_POST['intervals'] ?? [];
     
-    // Validate limit
-    if (count($checkpoint_ids) > $qr_limit && !$qr_override) {
+    if ($is_patrol_locked) {
+        $message = "Error: Patrol configuration is locked by your agency and cannot be modified.";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else if (count($checkpoint_ids) > $qr_limit && !$qr_override) {
         $message = "Error: You cannot exceed the limit of $qr_limit checkpoints in your tour.";
         $message_type = "error";
+        $show_status_modal = true;
     } else {
         // Clear existing and save new
         $conn->begin_transaction();
@@ -58,10 +64,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
             $conn->commit();
             $message = "Tour sequence saved successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } catch (Exception $e) {
             $conn->rollback();
             $message = "Error saving tour: " . $e->getMessage();
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -75,7 +83,7 @@ while ($row = $checkpoints_res->fetch_assoc()) {
 
 // Fetch current assignments
 $assignments_res = $conn->query("
-    SELECT ta.checkpoint_id, ta.interval_minutes, cp.name 
+    SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, cp.name 
     FROM tour_assignments ta 
     JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
     WHERE ta.agency_client_id = $mapping_id 
@@ -163,12 +171,14 @@ while ($row = $assignments_res->fetch_assoc()) {
     <main class="main-content">
         <header class="topbar">
             <h2>Tour Assignment Setup</h2>
+            <?php if ($is_patrol_locked): ?>
+                <div style="background: #fff7ed; color: #9a3412; padding: 10px 20px; border-radius: 8px; border: 1px solid #fed7aa; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                    <span>🔒 Patrol configuration is managed and locked by your agency.</span>
+                </div>
+            <?php endif; ?>
         </header>
 
         <div class="content-area">
-            <?php if ($message): ?>
-                <div class="alert alert-<?php echo $message_type; ?>"><?php echo $message; ?></div>
-            <?php endif; ?>
 
             <div class="card">
                 <div class="card-header">
@@ -187,26 +197,47 @@ while ($row = $assignments_res->fetch_assoc()) {
                                 <span class="checkpoint-name"><?php echo htmlspecialchars($item['name']); ?></span>
                                 <input type="hidden" name="checkpoint_ids[]" value="<?php echo $item['checkpoint_id']; ?>">
                                 <div class="interval-input">
-                                    <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0">
+                                    <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                     <small>min</small>
                                 </div>
-                                <button type="button" class="remove-btn" onclick="removeItem(this)">&times;</button>
+                                <div class="interval-input" style="width: 140px;">
+                                    <small>Stay:</small>
+                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes']; ?>" min="0" disabled>
+                                    <small>min</small>
+                                </div>
+                                <?php if (!$is_patrol_locked): ?>
+                                    <button type="button" class="remove-btn" onclick="removeItem(this)">&times;</button>
+                                <?php endif; ?>
                             </div>
                         <?php endforeach; ?>
                     </div>
 
-                    <div class="add-area">
-                        <select id="checkpoint-select" class="select-control">
-                            <option value="">-- Select Checkpoint to Add --</option>
-                            <?php foreach ($available_checkpoints as $cp): ?>
-                                <option value="<?php echo $cp['id']; ?>"><?php echo htmlspecialchars($cp['name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                        <button type="button" class="btn-add" onclick="addItem()">Add to Sequence</button>
-                    </div>
+                    <?php if (!$is_patrol_locked): ?>
+                        <div class="add-area">
+                            <select id="checkpoint-select" class="select-control">
+                                <option value="">-- Select Checkpoint to Add --</option>
+                                <?php foreach ($available_checkpoints as $cp): ?>
+                                    <option value="<?php echo $cp['id']; ?>"><?php echo htmlspecialchars($cp['name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn-add" onclick="addItem()">Add to Sequence</button>
+                        </div>
 
-                    <button type="submit" name="save_tour" class="save-btn">Save Tour Sequence</button>
+                        <button type="submit" name="save_tour" class="save-btn">Save Tour Sequence</button>
+                    <?php endif; ?>
                 </form>
+            </div>
+        </div>
+
+        <!-- Status Process Modal -->
+        <div id="statusModal" class="modal-overlay <?php echo $show_status_modal ? 'show' : ''; ?>">
+            <div class="modal-content" style="max-width: 400px;">
+                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+                </div>
+                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+                <button class="save-btn" style="margin-top: 0;" onclick="closeModal('statusModal')">Done</button>
             </div>
         </div>
     </main>
@@ -222,7 +253,13 @@ while ($row = $assignments_res->fetch_assoc()) {
         </div>
     </div>
 
+    </div>
+
     <script>
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
         const qrLimit = <?php echo $qr_limit; ?>;
         const qrOverride = <?php echo $qr_override; ?>;
         const tourList = document.getElementById('tour-list');

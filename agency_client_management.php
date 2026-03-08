@@ -9,6 +9,7 @@ if ($_SESSION['user_level'] !== 'agency') {
 $agency_id = $_SESSION['user_id'] ?? null;
 $message = '';
 $message_type = '';
+$show_status_modal = false;
 
 // Handle Company Details Update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
@@ -46,9 +47,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     if ($conn->query($sql)) {
         $message = "Client details updated successfully!";
         $message_type = "success";
+        $show_status_modal = true;
     } else {
         $message = "Error updating details: " . $conn->error;
         $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -62,6 +65,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
     if ($check && $check->num_rows > 0) {
         $message = "Guard is already assigned to this client.";
         $message_type = "error";
+        $show_status_modal = true;
     } else {
         // The user has moved guard limits to the Agency level. 
         // Guards are already limit-checked during creation in manage_guards.php.
@@ -69,9 +73,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
             $message = "Guard assigned successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } else {
             $message = "Error assigning guard: " . $conn->error;
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -139,8 +145,8 @@ if ($guards_res) {
         .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #374151; }
         .btn-outline:hover { background: #f9fafb; }
 
-        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
         .modal.show { display: flex; }
         
         .form-group { margin-bottom: 16px; }
@@ -155,9 +161,10 @@ if ($guards_res) {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link active">Client Management</a></li>
-            <li><a href="manage_qrs.php" class="nav-link">Manage QRs</a></li>
+
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
@@ -173,9 +180,6 @@ if ($guards_res) {
         </header>
 
         <div class="content-area">
-            <?php if ($message): ?>
-                <div class="alert alert-<?php echo $message_type; ?>"><?php echo $message; ?></div>
-            <?php endif; ?>
 
             <div class="card">
                 <h3 class="card-header">Assigned Clients</h3>
@@ -280,6 +284,18 @@ if ($guards_res) {
                 <button class="btn-sm btn-outline" style="flex:1;" onclick="closeModal('logoutModal')">Cancel</button>
                 <a href="logout.php" class="btn-sm btn-primary" style="flex:1; background: #ef4444; border:none; text-decoration:none; display:flex; align-items:center; justify-content:center;">Log Out</a>
             </div>
+        </div>
+    </div>
+
+    <!-- Status Process Modal (Generic) -->
+    <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+        <div class="modal-content" style="max-width: 400px;">
+            <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+            </div>
+            <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn-sm btn-primary" style="width: 100%; padding: 10px;" onclick="closeModal('statusModal')">Done</button>
         </div>
     </div>
 

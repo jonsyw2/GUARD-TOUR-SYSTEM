@@ -22,6 +22,7 @@ $message = '';
 $message_type = '';
 $show_key_modal = false;
 $show_limit_modal = false;
+$show_status_modal = false;
 $generated_key = '';
 
 if (isset($_SESSION['inspector_created_key'])) {
@@ -81,6 +82,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
                 $conn->rollback();
                 $message = "Error creating inspector: " . $e->getMessage();
                 $message_type = "error";
+                $show_status_modal = true;
             }
         }
     }
@@ -98,9 +100,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_inspector'])) {
     if ($conn->query("UPDATE inspectors SET name = '$fullname' WHERE id = $inspector_id")) {
         $message = "Inspector details updated successfully!";
         $message_type = "success";
+        $show_status_modal = true;
     } else {
         $message = "Error updating inspector: " . $conn->error;
         $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -117,10 +121,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_inspector'])) {
             $conn->commit();
             $message = "Inspector account deleted successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } catch (Exception $e) {
             $conn->rollback();
             $message = "Error deleting inspector: " . $e->getMessage();
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -167,7 +173,7 @@ $inspectors_res = $conn->query($inspectors_sql);
         th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
         .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
         .modal.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 450px; text-align: center; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 450px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
     </style>
 </head>
 <body>
@@ -176,9 +182,10 @@ $inspectors_res = $conn->query($inspectors_sql);
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_qrs.php" class="nav-link">Manage QRs</a></li>
+
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link active">Manage Inspectors</a></li>
+            <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
@@ -191,7 +198,6 @@ $inspectors_res = $conn->query($inspectors_sql);
     <main class="main-content">
         <header class="topbar"><h2>Inspector Management</h2></header>
         <div class="content-area">
-            <?php if ($message && !$show_limit_modal): ?><div class="alert alert-<?php echo $message_type; ?>"><?php echo $message; ?></div><?php endif; ?>
             
             <div style="display: grid; grid-template-columns: 400px 1fr; gap: 24px;">
                 <div class="card">
@@ -250,6 +256,18 @@ $inspectors_res = $conn->query($inspectors_sql);
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+
+        <!-- Status Process Modal (Generic) -->
+        <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+            <div class="modal-content" style="max-width: 400px;">
+                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+                </div>
+                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+                <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
             </div>
         </div>
     </main>

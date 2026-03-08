@@ -8,6 +8,7 @@ if ($_SESSION['user_level'] !== 'admin') {
 
 $message = '';
 $message_type = '';
+$show_status_modal = false;
 
 // Handle updating limit
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
@@ -21,9 +22,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     if ($conn->query($update_sql) === TRUE) {
         $message = "QR Configuration updated successfully.";
         $message_type = "success";
+        $show_status_modal = true;
     } else {
         $message = "Error updating configuration: " . $conn->error;
         $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -56,11 +59,6 @@ include 'admin_layout/sidebar.php';
         <?php include 'admin_layout/topbar.php'; ?>
 
         <div class="content-area">
-            <?php if ($message): ?>
-                <div class="alert alert-<?php echo $message_type; ?>">
-                    <?php echo ($message_type === 'success' ? '✅' : '❌'); ?> <?php echo $message; ?>
-                </div>
-            <?php endif; ?>
 
             <div class="card">
                 <div class="card-header"><h3>Active QR Boundary Configurations</h3></div>
@@ -146,6 +144,33 @@ include 'admin_layout/sidebar.php';
                 </div>
             </div>
         </div>
+            </div>
+        </div>
+
+        <!-- Status Process Modal (Generic) -->
+        <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+            <div class="modal-content">
+                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+                </div>
+                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+                <button class="btn btn-primary" style="width: 100%; border: none;" onclick="closeModal('statusModal')">Done</button>
+            </div>
+        </div>
+
+        <style>
+            /* Modal Styles */
+            .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+            .modal.show { display: flex; }
+            .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+        </style>
+
+        <script>
+            function closeModal(modalId) {
+                document.getElementById(modalId).classList.remove('show');
+            }
+        </script>
     </main>
 
 <?php include 'admin_layout/footer.php'; ?>

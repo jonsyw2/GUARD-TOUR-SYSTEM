@@ -13,6 +13,7 @@ $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS inspector_qr_limit INT 
 
 $message = '';
 $message_type = '';
+$show_status_modal = false;
 
 // Handle Add Agency
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
@@ -29,15 +30,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     if ($result->num_rows > 0) {
         $message = "Agency username already exists!";
         $message_type = "error";
+        $show_status_modal = true;
     } else {
         $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_qr_limit) 
                 VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_qr_limit)";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } else {
             $message = "Error adding agency: " . $conn->error;
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -55,19 +59,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_client'])) {
         if ($assignment_result->num_rows > 0) {
             $message = "This client is already assigned to this agency!";
             $message_type = "error";
+            $show_status_modal = true;
         } else {
             $sql = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
             if ($conn->query($sql) === TRUE) {
                 $message = "Client assigned to agency successfully!";
                 $message_type = "success";
+                $show_status_modal = true;
             } else {
                 $message = "Error assigning client: " . $conn->error;
                 $message_type = "error";
+                $show_status_modal = true;
             }
         }
     } else {
         $message = "Please select both an agency and a client.";
         $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -84,6 +92,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_assign_client'])) 
     if ($result->num_rows > 0) {
         $message = "Client username already exists!";
         $message_type = "error";
+        $show_status_modal = true;
     } else {
         // Start transaction
         $conn->begin_transaction();
@@ -104,10 +113,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_assign_client'])) 
             $conn->commit();
             $message = "Client created and assigned successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } catch (Exception $e) {
             $conn->rollback();
             $message = $e->getMessage();
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -141,12 +152,6 @@ include 'admin_layout/sidebar.php';
         <?php include 'admin_layout/topbar.php'; ?>
 
         <div class="content-area">
-            <?php if ($message): ?>
-                <div class="alert alert-<?php echo $message_type; ?>">
-                    <span><?php echo $message_type === 'success' ? '✅' : '❌'; ?></span>
-                    <?php echo $message; ?>
-                </div>
-            <?php endif; ?>
 
             <div class="tab-nav">
                 <button class="tab-btn active" onclick="switchTab('tab-agencies')">Agencies</button>
@@ -166,6 +171,11 @@ include 'admin_layout/sidebar.php';
                 .limit-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: #f1f5f9; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; color: var(--secondary); }
                 .unassign-link { color: var(--danger); font-weight: 600; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; transition: all 0.2s; }
                 .unassign-link:hover { background: #fee2e2; }
+
+                /* Modal Styles */
+                .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+                .modal.show { display: flex; }
+                .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
             </style>
 
             <!-- TAB: AGENCIES -->
@@ -329,6 +339,18 @@ include 'admin_layout/sidebar.php';
                 </div>
             </div>
         </div>
+
+        <!-- Status Process Modal (Generic) -->
+        <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+            <div class="modal-content">
+                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+                </div>
+                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+                <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
+            </div>
+        </div>
     </main>
 
     <script>
@@ -350,6 +372,10 @@ include 'admin_layout/sidebar.php';
                 document.getElementById('form-assign-existing').style.display = 'none';
                 document.getElementById('form-assign-new').style.display = 'block';
             }
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
         }
     </script>
 
