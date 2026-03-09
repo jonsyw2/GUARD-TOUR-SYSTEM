@@ -402,9 +402,9 @@ $checkpoints_result = $conn->query($checkpoints_sql);
             // Clear previous QR
             document.getElementById('qrcode').innerHTML = '';
             
-            // Generate New QR
+            // Generate New QR with structured JSON directly compatible with mobile integrations
             new QRCode(document.getElementById("qrcode"), {
-                text: code,
+                text: JSON.stringify({ type: "checkpoint", code: code }),
                 width: 200,
                 height: 200,
                 colorDark : "#000000",
