@@ -191,7 +191,7 @@ $qrs_result = $conn->query($qrs_sql);
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0;}
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -279,6 +279,7 @@ $qrs_result = $conn->query($qrs_sql);
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="client_qrs.php" class="nav-link active">Checkpoints</a></li>
+            <li><a href="manage_tour.php" class="nav-link">My Tours</a></li>
             <li><a href="client_guards.php" class="nav-link">My Guards</a></li>
             <li><a href="client_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>
@@ -399,7 +400,7 @@ $qrs_result = $conn->query($qrs_sql);
                                         <td><?php echo $last_scan; ?></td>
                                         <td>
                                             <div style="display: flex; gap: 8px;">
-                                                <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Generate Qr</button>
+                                                <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Show</button>
                                                 <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Download Qr</button>
                                                 <?php if (!$row['is_zero_checkpoint']): ?>
                                                 <form action="client_qrs.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this checkpoint?');">
@@ -459,8 +460,8 @@ $qrs_result = $conn->query($qrs_sql);
             <h3 class="modal-title no-print">Checkpoint QR Code</h3>
             <div class="qr-display" id="qrContainer">
                 <p id="checkpointLabel" style="font-size: 1.1rem; font-weight: 600; color: #374151; margin-bottom: 20px;"></p>
-                <div id="qrcode" class="qr-img"></div>
-                <div class="code-display" id="codeLabel"></div>
+                <div id="qrcode" class="qr-img" style="display:flex; justify-content:center; align-items:center;"></div>
+                <div class="code-display" id="codeLabel" style="margin-top: 20px;"></div>
             </div>
             <div class="modal-actions no-print" style="margin-top: 20px;">
                 <button class="btn-modal btn-cancel" onclick="document.getElementById('printQRModal').classList.remove('show');">Close</button>

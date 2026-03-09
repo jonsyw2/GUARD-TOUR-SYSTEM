@@ -174,6 +174,7 @@ $history_res = $conn->query($history_sql);
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="client_qrs.php" class="nav-link">Checkpoints</a></li>
+            <li><a href="manage_tour.php" class="nav-link">My Tours</a></li>
             <li><a href="client_guards.php" class="nav-link">My Guards</a></li>
             <li><a href="client_patrol_history.php" class="nav-link active">Patrol History</a></li>
             <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>

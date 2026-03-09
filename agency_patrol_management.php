@@ -606,7 +606,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         <small id="qr-limit-text" style="color: #6b7280; font-weight: 500;"></small>
                                     </div>
                                 </div>
-                                <button type="submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px;">Update Site Configuration</button>
+                                <button type="submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px;">Site Configuration</button>
                             </form>
                         <?php endif; ?>
                     </div>
