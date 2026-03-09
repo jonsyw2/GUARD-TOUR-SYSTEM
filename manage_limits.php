@@ -39,7 +39,7 @@ $mapping_sql = "
         ac.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
-        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qrs
+        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)) as current_qrs
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id

@@ -5,6 +5,41 @@ if ($_SESSION['user_level'] !== 'agency') {
     header("Location: login.php");
     exit();
 }
+
+$agency_id = $_SESSION['user_id'];
+
+// Fetch Stats
+$total_clients = $conn->query("SELECT COUNT(*) as count FROM agency_clients WHERE agency_id = $agency_id")->fetch_assoc()['count'];
+$total_guards = $conn->query("SELECT COUNT(*) as count FROM guards WHERE agency_id = $agency_id")->fetch_assoc()['count'];
+
+// Get mapping IDs for this agency to filter checkpoints/scans
+$mapping_ids_res = $conn->query("SELECT id FROM agency_clients WHERE agency_id = $agency_id");
+$mapping_ids = [];
+while($r = $mapping_ids_res->fetch_assoc()) $mapping_ids[] = (int)$r['id'];
+$mapping_ids_str = !empty($mapping_ids) ? implode(',', $mapping_ids) : '0';
+
+$total_checkpoints = $conn->query("SELECT COUNT(*) as count FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) AND is_zero_checkpoint = 0")->fetch_assoc()['count'];
+
+$scans_today = 0;
+if ($mapping_ids_str !== '0') {
+    $scans_today = $conn->query("
+        SELECT COUNT(*) as count FROM scans s 
+        JOIN checkpoints c ON s.checkpoint_id = c.id 
+        WHERE c.agency_client_id IN ($mapping_ids_str) AND DATE(s.scan_time) = CURDATE()
+    ")->fetch_assoc()['count'];
+}
+
+// Fetch 5 recent scans
+$recent_scans = $conn->query("
+    SELECT g.name as guard_name, c.name as checkpoint_name, s.scan_time, ac.site_name
+    FROM scans s
+    JOIN guards g ON s.guard_id = g.id
+    JOIN checkpoints c ON s.checkpoint_id = c.id
+    JOIN agency_clients ac ON c.agency_client_id = ac.id
+    WHERE ac.agency_id = $agency_id
+    ORDER BY s.scan_time DESC
+    LIMIT 5
+");
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -15,14 +50,25 @@ if ($_SESSION['user_level'] !== 'agency') {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; }
+        :root {
+            --primary: #10b981;
+            --primary-dark: #059669;
+            --bg-main: #f3f4f6;
+            --sidebar-bg: #111827;
+            --card-bg: #ffffff;
+            --text-main: #111827;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
+        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
-        .nav-link:hover, .nav-link.active { background-color: #1f2937; color: #fff; border-left-color: #10b981; }
+        .nav-link:hover, .nav-link.active { background-color: #1f2937; color: #fff; border-left-color: var(--primary); }
         .sidebar-footer { padding: 20px; border-top: 1px solid #374151; }
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
@@ -90,9 +136,82 @@ if ($_SESSION['user_level'] !== 'agency') {
 
         <!-- Content Area -->
         <div class="content-area">
-            <div class="card">
-                <h3 class="card-header">Agency Dashboard</h3>
-                <p style="color: #6b7280; font-size: 1rem; line-height: 1.5;">This is the agency portal. Use the sidebar to navigate to "Manage QRs" to create checkpoints for your assigned clients.</p>
+            <style>
+                .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 32px; }
+                .stat-card { background: white; padding: 28px; border-radius: 16px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 20px; border: 1px solid var(--border); transition: transform 0.2s; }
+                .stat-card:hover { transform: translateY(-4px); }
+                .stat-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
+                .stat-info .label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+                .stat-info .value { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
+                
+                .list-layout { display: grid; grid-template-columns: 1fr; gap: 24px; }
+                .activity-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                .activity-table th, .activity-table td { padding: 16px; text-align: left; border-bottom: 1px solid var(--border); }
+                .activity-table th { font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; background: #f9fafb; }
+                .activity-table td { font-size: 0.9rem; }
+            </style>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: #dcfce7; color: #166534;">💼</div>
+                    <div class="stat-info">
+                        <div class="label">Total sites</div>
+                        <div class="value"><?php echo $total_clients; ?></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: #dbeafe; color: #1e40af;">👮</div>
+                    <div class="stat-info">
+                        <div class="label">Total Guards</div>
+                        <div class="value"><?php echo $total_guards; ?></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: #fef9c3; color: #854d0e;">📍</div>
+                    <div class="stat-info">
+                        <div class="label">Checkpoints</div>
+                        <div class="value"><?php echo $total_checkpoints; ?></div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: #f0fdf4; color: #166534; border: 2px solid #10b981;">✅</div>
+                    <div class="stat-info">
+                        <div class="label">Scans Today</div>
+                        <div class="value"><?php echo $scans_today; ?></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="list-layout">
+                <div class="card">
+                    <div class="card-header">Latest Patrol Activity</div>
+                    <div style="overflow-x: auto;">
+                        <table class="activity-table">
+                            <thead>
+                                <tr>
+                                    <th>Guard</th>
+                                    <th>Checkpoint</th>
+                                    <th>Site</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if ($recent_scans && $recent_scans->num_rows > 0): ?>
+                                    <?php while($scan = $recent_scans->fetch_assoc()): ?>
+                                        <tr>
+                                            <td><strong><?php echo htmlspecialchars($scan['guard_name']); ?></strong></td>
+                                            <td><?php echo htmlspecialchars($scan['checkpoint_name']); ?></td>
+                                            <td><span class="badge" style="background: #f1f5f9; color: #475569;"><?php echo htmlspecialchars($scan['site_name']); ?></span></td>
+                                            <td style="color: var(--text-muted);"><?php echo date('h:i A', strtotime($scan['scan_time'])); ?></td>
+                                        </tr>
+                                    <?php endwhile; ?>
+                                <?php else: ?>
+                                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px;">No patrol activity recorded yet.</td></tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </main>

@@ -19,6 +19,9 @@ $clients_count = $clients_count_result ? $clients_count_result->fetch_assoc()['c
 // Fetch lists
 $agencies_list = $conn->query("SELECT id, username FROM users WHERE user_level = 'agency' ORDER BY username ASC LIMIT 10");
 $clients_list = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC LIMIT 10");
+
+// Fetch 5 most recent login logs
+$recent_logins = $conn->query("SELECT username, ip_address, status, timestamp FROM login_logs ORDER BY timestamp DESC LIMIT 5");
 ?>
 <?php
 $page_title = 'Admin Dashboard';
@@ -118,6 +121,42 @@ include 'admin_layout/sidebar.php';
                     </div>
                 </div>
             </div>
+
+            <!-- Recent Login Logs Section -->
+            <div class="card" style="margin-top: 32px;">
+                <div class="card-header"><h3>Recent Login Activity</h3></div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>IP Address</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if ($recent_logins && $recent_logins->num_rows > 0): ?>
+                                <?php while($log = $recent_logins->fetch_assoc()): ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($log['username']); ?></strong></td>
+                                        <td style="color: #64748b; font-family: monospace;"><?php echo htmlspecialchars($log['ip_address']); ?></td>
+                                        <td><?php echo date('M d, Y h:i A', strtotime($log['timestamp'])); ?></td>
+                                        <td>
+                                            <span class="status-badge <?php echo $log['status'] === 'SUCCESS' ? 'status-success' : 'status-danger'; ?>">
+                                                <?php echo htmlspecialchars($log['status']); ?>
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; ?>
+                            <?php else: ?>
+                                <tr><td colspan="4" class="empty-state">No recent login activity found.</td></tr>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
         </div>
     </main>
 
