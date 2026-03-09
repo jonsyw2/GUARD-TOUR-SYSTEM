@@ -50,6 +50,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 case 'guard':
                     header("Location: guard_dashboard.php");
                     break;
+                case 'inspector':
+                    header("Location: inspector_dashboard.php");
+                    break;
                 default:
                     echo "<script>alert('Invalid user level!'); window.location.href='login.php';</script>";
                     break;

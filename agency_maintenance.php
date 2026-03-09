@@ -6,13 +6,22 @@ if ($_SESSION['user_level'] !== 'admin') {
     exit();
 }
 
+// Ensure limits columns exist in users table
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guard_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS inspector_qr_limit INT DEFAULT 0");
+
 $message = '';
 $message_type = '';
+$show_status_modal = false;
 
 // Handle Add Agency
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $agency_name = $conn->real_escape_string($_POST['agency_name']);
     $password = password_hash($_POST['agency_password'], PASSWORD_DEFAULT);
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_qr_limit = (int)$_POST['inspector_qr_limit'];
     
     // Check if username exists
     $checkSql = "SELECT id FROM users WHERE username = '$agency_name'";
@@ -21,14 +30,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     if ($result->num_rows > 0) {
         $message = "Agency username already exists!";
         $message_type = "error";
+        $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, password, user_level) VALUES ('$agency_name', '$password', 'agency')";
+        $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_qr_limit) 
+                VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_qr_limit)";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
+            $show_status_modal = true;
         } else {
             $message = "Error adding agency: " . $conn->error;
             $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -46,31 +59,80 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_client'])) {
         if ($assignment_result->num_rows > 0) {
             $message = "This client is already assigned to this agency!";
             $message_type = "error";
+            $show_status_modal = true;
         } else {
             $sql = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
             if ($conn->query($sql) === TRUE) {
                 $message = "Client assigned to agency successfully!";
                 $message_type = "success";
+                $show_status_modal = true;
             } else {
                 $message = "Error assigning client: " . $conn->error;
                 $message_type = "error";
+                $show_status_modal = true;
             }
         }
     } else {
         $message = "Please select both an agency and a client.";
         $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
+// Handle Add and Assign Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_assign_client'])) {
+    $agency_id = (int)$_POST['agency_id'];
+    $client_username = $conn->real_escape_string($_POST['client_username']);
+    $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
+
+    // Check if client username exists
+    $checkSql = "SELECT id FROM users WHERE username = '$client_username'";
+    $result = $conn->query($checkSql);
+
+    if ($result->num_rows > 0) {
+        $message = "Client username already exists!";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else {
+        // Start transaction
+        $conn->begin_transaction();
+        try {
+            // Insert new client
+            $sql_user = "INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')";
+            if (!$conn->query($sql_user)) {
+                throw new Exception("Error creating client user: " . $conn->error);
+            }
+            $client_id = $conn->insert_id;
+
+            // Assign to agency
+            $sql_assign = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
+            if (!$conn->query($sql_assign)) {
+                throw new Exception("Error assigning client to agency: " . $conn->error);
+            }
+
+            $conn->commit();
+            $message = "Client created and assigned successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = $e->getMessage();
+            $message_type = "error";
+            $show_status_modal = true;
+        }
     }
 }
 
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username FROM users WHERE user_level = 'agency' ORDER BY username ASC");
+$agencies_result = $conn->query("SELECT id, username, qr_limit, guard_limit, inspector_qr_limit FROM users WHERE user_level = 'agency' ORDER BY username ASC");
 
 // Fetch all clients for dropdowns
 $clients_result = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
 
 // Fetch agency-client mappings
 $mapping_sql = "
-    SELECT ac.id, a.username AS agency_name, c.username AS client_name, ac.created_at
+    SELECT ac.id, a.username AS agency_name, c.username AS client_name, ac.created_at, 
+           a.qr_limit, a.guard_limit, a.inspector_qr_limit
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id
@@ -79,256 +141,243 @@ $mapping_sql = "
 $mappings_result = $conn->query($mapping_sql);
 
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agency Maintenance - Admin Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; }
+<?php
+$page_title = 'Agency Maintenance';
+$header_title = 'Security Agency Management';
+include 'admin_layout/head.php';
+include 'admin_layout/sidebar.php';
+?>
 
-        /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
-        .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
-        .nav-links { list-style: none; flex: 1; padding-top: 15px; }
-        .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
-        .nav-link:hover, .nav-link.active { background-color: #1f2937; color: #fff; border-left-color: #3b82f6; }
-        
-        /* Submenu Styles */
-        .has-submenu { cursor: pointer; justify-content: space-between; }
-        .submenu { display: none; background-color: #0f172a; list-style: none; padding-left: 0; }
-        .submenu.open { display: block; }
-        .submenu-link { padding: 12px 24px 12px 48px; display: block; color: #9ca3af; text-decoration: none; font-size: 0.95rem; transition: all 0.2s; }
-        .submenu-link:hover, .submenu-link.active { color: #fff; background-color: #1f2937; }
-        .caret { transition: transform 0.2s; font-size: 0.8rem; }
-        .caret.open { transform: rotate(180deg); }
-
-        .sidebar-footer { padding: 20px; border-top: 1px solid #374151; }
-        .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
-        .logout-btn:hover { background-color: #dc2626; }
-
-        /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
-        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
-        .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
-        .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
-        .modal-actions { display: flex; gap: 12px; }
-        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
-        .btn-cancel { background: #f3f4f6; color: #374151; }
-        .btn-cancel:hover { background: #e5e7eb; }
-        .btn-confirm { background: #e11d48; color: white; text-decoration: none; }
-        .btn-confirm:hover { background: #be123c; }
-
-        /* Main Content Styles */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
-        .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
-        .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
-        .user-info { display: flex; align-items: center; gap: 12px; }
-        .badge { background: #e0e7ff; color: #4f46e5; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-
-        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
-
-        .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: 500; display: flex; align-items: center; }
-        .alert-success { background-color: #d1fae5; color: #065f46; border: 1px solid #34d399; }
-        .alert-error { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
-
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px; align-items: start;}
-        @media (max-width: 768px) { .grid-container { grid-template-columns: 1fr; } }
-        
-        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); }
-        .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
-        
-        .form-group { margin-bottom: 16px; }
-        .form-label { display: block; font-sm: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 8px; }
-        .form-control { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); font-size: 0.95rem; transition: border-color 0.2s; }
-        .form-control:focus { outline: none; border-color: #3b82f6; ring: 2px solid #93c5fd; }
-        .btn { padding: 10px 18px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background-color 0.2s; width: 100%; font-size: 1rem; }
-        .btn:hover { background-color: #2563eb; }
-
-        .table-container { overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; }
-        td { color: #1f2937; font-size: 0.95rem; }
-        tbody tr:hover { background-color: #f9fafb; }
-        .empty-state { text-align: center; padding: 30px; color: #6b7280; font-style: italic; }
-    </style>
-</head>
-<body>
-
-    <!-- Sidebar -->
-    <aside class="sidebar">
-        <div class="sidebar-header">
-            Admin Panel
-        </div>
-        <ul class="nav-links">
-            <li><a href="admin_dashboard.php" class="nav-link">Dashboard</a></li>
-            <li>
-                <div class="nav-link has-submenu" onclick="toggleSubmenu('maintenanceMenu', this)">
-                    <span>Maintenance</span>
-                    <span class="caret open">&#9660;</span>
-                </div>
-                <ul class="submenu open" id="maintenanceMenu">
-                    <li><a href="agency_maintenance.php" class="submenu-link active">Agency Maintenance</a></li>
-                    <li><a href="users_maintenance.php" class="submenu-link">User Maintenance</a></li>
-                </ul>
-            </li>
-            <li><a href="manage_limits.php" class="nav-link">QR Limits</a></li>
-            <li><a href="login_logs_view.php" class="nav-link">Login Logs</a></li>
-            <li><a href="#" class="nav-link">Settings</a></li>
-        </ul>
-        <div class="sidebar-footer">
-            <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
-        </div>
-    </aside>
-
-    <!-- Main Content -->
     <main class="main-content">
-        <!-- Topbar -->
-        <header class="topbar">
-            <h2>Agency Maintenance</h2>
-            <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Admin'; ?></strong></span>
-                <span class="badge">admin</span>
-            </div>
-        </header>
+        <?php include 'admin_layout/topbar.php'; ?>
 
-        <!-- Content Area -->
         <div class="content-area">
-            <?php if ($message): ?>
-                <div class="alert alert-<?php echo $message_type; ?>">
-                    <?php echo $message; ?>
-                </div>
-            <?php endif; ?>
 
-            <div class="grid-container">
-                <!-- Add Agency Form -->
-                <div class="card">
-                    <h3 class="card-header">Add New Agency</h3>
-                    <form action="agency_maintenance.php" method="POST">
-                        <div class="form-group">
-                            <label class="form-label" for="agency_name">Agency Name</label>
-                            <input type="text" id="agency_name" name="agency_name" class="form-control" required placeholder="Enter agency name">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="agency_password">Password</label>
-                            <input type="password" id="agency_password" name="agency_password" class="form-control" required placeholder="Assign a password">
-                        </div>
-                        <button type="submit" name="add_agency" class="btn">Create Agency</button>
-                    </form>
+            <div class="tab-nav">
+                <button class="tab-btn active" onclick="switchTab('tab-agencies')">Agencies</button>
+                <button class="tab-btn" onclick="switchTab('tab-assignments')">Client Assignments</button>
+            </div>
+
+            <style>
+                .tab-nav { display: flex; gap: 8px; margin-bottom: 32px; background: #e2e8f0; padding: 6px; border-radius: var(--radius-lg); width: fit-content; }
+                .tab-btn { padding: 10px 24px; border: none; background: transparent; color: var(--text-muted); font-weight: 600; cursor: pointer; border-radius: var(--radius-md); transition: all 0.2s; }
+                .tab-btn.active { background: var(--card-bg); color: var(--primary); box-shadow: var(--shadow); }
+                .tab-pane { display: none; animation: fadeIn 0.4s ease; }
+                .tab-pane.active { display: block; }
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+                .form-toggle { display: grid; grid-template-columns: 1fr 1fr; background: #f1f5f9; padding: 5px; border-radius: 10px; margin-bottom: 30px; }
+                .toggle-btn { padding: 10px; border: none; background: transparent; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-muted); transition: all 0.2s; text-align: center; }
+                .toggle-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+                .limit-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: #f1f5f9; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; color: var(--secondary); }
+                .unassign-link { color: var(--danger); font-weight: 600; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; transition: all 0.2s; }
+                .unassign-link:hover { background: #fee2e2; }
+
+                /* Modal Styles */
+                .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+                .modal.show { display: flex; }
+                .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+            </style>
+
+            <!-- TAB: AGENCIES -->
+            <div id="tab-agencies" class="tab-pane active">
+                <div class="card" style="max-width: 600px;">
+                    <div class="card-header"><h3>Add New Agency</h3></div>
+                    <div class="card-body">
+                        <form action="agency_maintenance.php" method="POST" autocomplete="off">
+                            <div class="form-group">
+                                <label class="form-label">Agency Name</label>
+                                <input type="text" name="agency_name" class="form-control" required placeholder="Ex: Shield Security" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Security Password</label>
+                                <input type="password" name="agency_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
+                            </div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
+                                <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Inspector QR</label><input type="number" name="inspector_qr_limit" class="form-control" value="0" min="0"></div>
+                            </div>
+                            <button type="submit" name="add_agency" class="btn btn-primary">Create Agency Profile</button>
+                        </form>
+                    </div>
                 </div>
 
-                <!-- Assign Client Form -->
                 <div class="card">
-                    <h3 class="card-header">Assign Client to Agency</h3>
-                    <form action="agency_maintenance.php" method="POST">
-                        <div class="form-group">
-                            <label class="form-label" for="agency_id">Select Agency</label>
-                            <select id="agency_id" name="agency_id" class="form-control" required>
-                                <option value="" disabled selected>-- Choose Agency --</option>
+                    <div class="card-header"><h3>Registered Agencies</h3></div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Agency Username</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
                                 <?php 
-                                if($agencies_result && $agencies_result->num_rows > 0) {
-                                    $agencies_result->data_seek(0);
-                                    while($agency = $agencies_result->fetch_assoc()) {
-                                        echo '<option value="'.$agency['id'].'">'.htmlspecialchars($agency['username']).'</option>';
-                                    }
-                                }
-                                ?>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="client_id">Select Client</label>
-                            <select id="client_id" name="client_id" class="form-control" required>
-                                <option value="" disabled selected>-- Choose Client --</option>
-                                <?php 
-                                if($clients_result && $clients_result->num_rows > 0) {
-                                    $clients_result->data_seek(0);
-                                    while($client = $clients_result->fetch_assoc()) {
-                                        echo '<option value="'.$client['id'].'">'.htmlspecialchars($client['username']).'</option>';
-                                    }
-                                }
-                                ?>
-                            </select>
-                        </div>
-                        <button type="submit" name="assign_client" class="btn">Assign Client</button>
-                    </form>
+                                $agencies_result->data_seek(0);
+                                if ($agencies_result->num_rows > 0): 
+                                    while($row = $agencies_result->fetch_assoc()): ?>
+                                    <tr>
+                                        <td>#<?php echo $row['id']; ?></td>
+                                        <td>
+                                            <strong><?php echo htmlspecialchars($row['username']); ?></strong>
+                                            <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
+                                                QR: <?php echo $row['qr_limit']; ?> | 
+                                                Guards: <?php echo $row['guard_limit']; ?> | 
+                                                Insp: <?php echo $row['inspector_qr_limit']; ?>
+                                            </div>
+                                        </td>
+                                        <td><span style="color: var(--success); font-weight: 600;">● Active</span></td>
+                                    </tr>
+                                <?php endwhile; else: ?>
+                                    <tr><td colspan="3" class="empty-state">No agencies registered yet.</td></tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
-            <!-- List of Assignments -->
-            <div class="card">
-                <h3 class="card-header">Agency & Client Assignments</h3>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Agency Name</th>
-                                <th>Assigned Client</th>
-                                <th>Assignment Date</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if ($mappings_result && $mappings_result->num_rows > 0): ?>
-                                <?php while($row = $mappings_result->fetch_assoc()): ?>
+            <!-- TAB: ASSIGNMENTS -->
+            <div id="tab-assignments" class="tab-pane">
+                <div class="card" style="max-width: 800px;">
+                    <div class="card-header"><h3>Client Assignment Tool</h3></div>
+                    <div class="card-body">
+                        <div class="form-toggle">
+                            <button type="button" class="toggle-btn active" onclick="toggleAssignForm('existing', this)">Assign Existing Client</button>
+                            <button type="button" class="toggle-btn" onclick="toggleAssignForm('new', this)">Add & Assign New</button>
+                        </div>
+
+                        <!-- Form: Assign Existing -->
+                        <div id="form-assign-existing">
+                            <form action="agency_maintenance.php" method="POST">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">Target Agency</label>
+                                        <select name="agency_id" class="form-control" required>
+                                            <option value="" disabled selected>Select Agency</option>
+                                            <?php 
+                                            $agencies_result->data_seek(0);
+                                            while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                                            ?>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Available Client</label>
+                                        <select name="client_id" class="form-control" required>
+                                            <option value="" disabled selected>Select Client</option>
+                                            <?php 
+                                            $clients_result->data_seek(0);
+                                            while($c = $clients_result->fetch_assoc()) echo "<option value='{$c['id']}'>".htmlspecialchars($c['username'])."</option>";
+                                            ?>
+                                        </select>
+                                    </div>
+                                </div>
+                                <button type="submit" name="assign_client" class="btn btn-primary" style="margin-top: 20px;">Finalize Assignment</button>
+                            </form>
+                        </div>
+
+                        <!-- Form: Add & Assign New -->
+                        <div id="form-assign-new" style="display: none;">
+                            <form action="agency_maintenance.php" method="POST" autocomplete="off">
+                                <div class="form-group">
+                                    <label class="form-label">Target Agency</label>
+                                    <select name="agency_id" class="form-control" required>
+                                        <option value="" disabled selected>Select Agency</option>
+                                        <?php 
+                                        $agencies_result->data_seek(0);
+                                        while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                                        ?>
+                                    </select>
+                                </div>
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="form-label">New Client Name</label>
+                                        <input type="text" name="client_username" class="form-control" required placeholder="Account username">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Access Password</label>
+                                        <input type="password" name="client_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
+                                    </div>
+                                </div>
+                                <button type="submit" name="add_assign_client" class="btn btn-primary" style="margin-top: 20px;">Create Account & Assign</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>Current Business Assignments</h3></div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Agency</th>
+                                    <th>Assigned Client</th>
+                                    <th>Setup Date</th>
+                                    <th>Control</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if ($mappings_result && $mappings_result->num_rows > 0): 
+                                    while($row = $mappings_result->fetch_assoc()): ?>
                                     <tr>
                                         <td><strong><?php echo htmlspecialchars($row['agency_name']); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($row['client_name']); ?></td>
-                                        <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                         <td>
-                                            <a href="#" style="color: #ef4444; font-size: 0.875rem; text-decoration: none; font-weight: 500;">Unassign</a>
+                                            <div style="font-weight: 700; color: var(--text-main);"><?php echo htmlspecialchars($row['client_name']); ?></div>
                                         </td>
+                                        <td><span style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('M d, Y', strtotime($row['created_at'])); ?></span></td>
+                                        <td><a href="#" class="unassign-link">Unassign</a></td>
                                     </tr>
-                                <?php endwhile; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="4" class="empty-state">No clients have been assigned to any agencies yet.</td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+                                <?php endwhile; else: ?>
+                                    <tr><td colspan="4" class="empty-state">No business mappings found.</td></tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
+        </div>
 
+        <!-- Status Process Modal (Generic) -->
+        <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+            <div class="modal-content">
+                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+                </div>
+                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+                <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
+            </div>
         </div>
     </main>
 
-    <!-- Logout Modal -->
-    <div class="modal-overlay" id="logoutModal">
-        <div class="modal-content">
-            <div class="modal-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-            </div>
-            <h3 class="modal-title">Ready to Leave?</h3>
-            <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
-            <div class="modal-actions">
-                <button class="btn-modal btn-cancel" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
-                <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
-            </div>
-        </div>
-    </div>
-
     <script>
-        function toggleSubmenu(menuId, element) {
-            const menu = document.getElementById(menuId);
-            const caret = element.querySelector('.caret');
-            menu.classList.toggle('open');
-            caret.classList.toggle('open');
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
         }
 
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
+        function toggleAssignForm(type, btn) {
+            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            if(type === 'existing') {
+                document.getElementById('form-assign-existing').style.display = 'block';
+                document.getElementById('form-assign-new').style.display = 'none';
+            } else {
+                document.getElementById('form-assign-existing').style.display = 'none';
+                document.getElementById('form-assign-new').style.display = 'block';
             }
         }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
     </script>
-</body>
+
+<?php include 'admin_layout/footer.php'; ?>
 </html>

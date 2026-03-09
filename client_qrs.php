@@ -26,79 +26,117 @@ if (empty($mapping_ids)) {
     $mapping_ids_str = implode(',', $mapping_ids);
 }
 
+// Ensure every mapping has a starting point (is_zero_checkpoint = 1)
+if (!empty($mapping_ids)) {
+    foreach ($mapping_ids as $m_id) {
+        $check_stmt = "SELECT id FROM checkpoints WHERE agency_client_id = $m_id AND is_zero_checkpoint = 1 LIMIT 1";
+        $check_res = $conn->query($check_stmt);
+        if ($check_res && $check_res->num_rows == 0) {
+            $code_unique = false;
+            $start_code = "";
+            while (!$code_unique) {
+                $start_code = "START-" . $m_id . "-" . strtoupper(bin2hex(random_bytes(3)));
+                $c = $conn->query("SELECT id FROM checkpoints WHERE checkpoint_code = '$start_code'");
+                if ($c && $c->num_rows == 0) $code_unique = true;
+            }
+            $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint) VALUES ($m_id, 'Starting Point', '$start_code', '$start_code', 1)");
+        }
+    }
+}
+
 $message = '';
 $message_type = '';
+$show_limit_modal = false;
+$show_status_modal = false;
 
 // Handle creating QR Checkpoint
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
     $mapping_id = (int)$_POST['agency_client_id'];
     $qr_name = $conn->real_escape_string($_POST['qr_name']);
-    $checkpoint_code = $conn->real_escape_string($_POST['checkpoint_code']);
+    // Auto-generate a unique checkpoint code
+    $code_unique = false;
+    $checkpoint_code = "";
+    while (!$code_unique) {
+        $checkpoint_code = "CP-" . strtoupper(bin2hex(random_bytes(4)));
+        $check = $conn->query("SELECT id FROM checkpoints WHERE checkpoint_code = '$checkpoint_code'");
+        if ($check && $check->num_rows == 0) {
+            $code_unique = true;
+        }
+    }
     
-    // Check if code exists globally (codes should be unique)
-    $check_code = $conn->query("SELECT id FROM checkpoints WHERE checkpoint_code = '$checkpoint_code'");
-    if ($check_code && $check_code->num_rows > 0) {
-        $message = "Error: Code '$checkpoint_code' is already assigned to another checkpoint.";
-        $message_type = "error";
-    } else {
-        // Verify this mapping belongs to the client and check limits
-        $verify_sql = "SELECT id, qr_limit, qr_override, is_disabled FROM agency_clients WHERE id = $mapping_id AND client_id = $client_id";
-        $verify_res = $conn->query($verify_sql);
+    $is_zero_checkpoint = 0; // Manually created checkpoints are never zero checkpoints
+    $scan_interval = (int)($_POST['scan_interval'] ?? 0);
+    
+    // Verify this mapping belongs to the client and check limits
+    $verify_sql = "SELECT id, qr_limit, qr_override, is_disabled FROM agency_clients WHERE id = $mapping_id AND client_id = $client_id";
+    $verify_res = $conn->query($verify_sql);
         
         if ($verify_res && $verify_res->num_rows > 0) {
             $mapping = $verify_res->fetch_assoc();
             if ($mapping['is_disabled']) {
                 $message = "QR creation is currently disabled for this site.";
                 $message_type = "error";
+                $show_status_modal = true;
             } else {
-                // Check usage
-                $count_res = $conn->query("SELECT COUNT(*) as c FROM checkpoints WHERE agency_client_id = $mapping_id");
-                $current_usage = $count_res->fetch_assoc()['c'];
+                // Check Per-Site QR Limit (excludes starting point)
+                $limit_check = $conn->query("
+                    SELECT u.qr_limit, 
+                    (SELECT COUNT(*) FROM checkpoints cp 
+                     WHERE cp.agency_client_id = ac.id AND cp.is_zero_checkpoint = 0) as total_site_qrs
+                    FROM agency_clients ac
+                    JOIN users u ON ac.agency_id = u.id
+                    WHERE ac.id = $mapping_id
+                ");
                 
-                if ($current_usage >= $mapping['qr_limit'] && !$mapping['qr_override']) {
-                    $message = "QR limit reached for this site. Contact your agency to increase your limit.";
-                    $message_type = "error";
-                } else {
-                    $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data) VALUES ($mapping_id, '$qr_name', '$checkpoint_code', '$checkpoint_code')";
-                    if ($conn->query($insert_sql)) {
-                        $message = "Checkpoint '$qr_name' created successfully!";
-                        $message_type = "success";
-                    } else {
-                        $message = "Database error: " . $conn->error;
+                if ($limit_check && $limit_check->num_rows > 0) {
+                    $limit_data = $limit_check->fetch_assoc();
+                    if ($limit_data['qr_limit'] > 0 && $limit_data['total_site_qrs'] >= $limit_data['qr_limit'] && !$mapping['qr_override']) {
+                        $message = "QR limit reached for this site ($limit_data[qr_limit] QRs max). Please contact the agency administrator.";
                         $message_type = "error";
+                        $show_limit_modal = true;
+                    } else {
+                        $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint, scan_interval) VALUES ($mapping_id, '$qr_name', '$checkpoint_code', '$checkpoint_code', $is_zero_checkpoint, $scan_interval)";
+                        if ($conn->query($insert_sql)) {
+                            $message = "Checkpoint '$qr_name' created successfully!";
+                            $message_type = "success";
+                            $show_status_modal = true;
+                        } else {
+                            $message = "Database error: " . $conn->error;
+                            $message_type = "error";
+                            $show_status_modal = true;
+                        }
                     }
                 }
-            }
         }
     }
 }
 
-// Handle Editing QR Code
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_code'])) {
+
+// Handle Deleting QR Code
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_checkpoint'])) {
     $cp_id = (int)$_POST['checkpoint_id'];
-    $new_code = $conn->real_escape_string($_POST['new_code']);
     
     // Verify ownership
     $verify_own = $conn->query("
-        SELECT cp.id FROM checkpoints cp
+        SELECT cp.id, cp.is_zero_checkpoint FROM checkpoints cp
         JOIN agency_clients ac ON cp.agency_client_id = ac.id
         WHERE cp.id = $cp_id AND ac.client_id = $client_id
     ");
     
     if ($verify_own && $verify_own->num_rows > 0) {
-        // Check uniqueness
-        $check_unique = $conn->query("SELECT id FROM checkpoints WHERE checkpoint_code = '$new_code' AND id != $cp_id");
-        if ($check_unique && $check_unique->num_rows > 0) {
-            $message = "Error: Code '$new_code' is already in use.";
+        $cp_data = $verify_own->fetch_assoc();
+        if ($cp_data['is_zero_checkpoint']) {
+            $message = "Error: The Starting Point checkpoint cannot be deleted.";
             $message_type = "error";
+            $show_status_modal = true;
+        } else if ($conn->query("DELETE FROM checkpoints WHERE id = $cp_id")) {
+            $message = "Checkpoint deleted successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
         } else {
-            if ($conn->query("UPDATE checkpoints SET checkpoint_code = '$new_code', qr_code_data = '$new_code' WHERE id = $cp_id")) {
-                $message = "Checkpoint code updated successfully!";
-                $message_type = "success";
-            } else {
-                $message = "Update error: " . $conn->error;
-                $message_type = "error";
-            }
+            $message = "Delete error: " . $conn->error;
+            $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -109,10 +147,11 @@ $limits_sql = "
         ac.id as mapping_id, 
         u.username as agency_name,
         ac.site_name,
-        ac.qr_limit, 
+        u.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
-        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qrs
+        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_site_qrs,
+        (SELECT COUNT(*) FROM checkpoints cp2 JOIN agency_clients ac2 ON cp2.agency_client_id = ac2.id WHERE ac2.agency_id = u.id AND cp2.is_zero_checkpoint = 0) as agency_total_qrs
     FROM agency_clients ac
     JOIN users u ON ac.agency_id = u.id
     WHERE ac.client_id = $client_id
@@ -128,12 +167,14 @@ $qrs_sql = "
         c.name as checkpoint_name,
         c.checkpoint_code,
         c.agency_client_id,
+        c.is_zero_checkpoint,
+        c.scan_interval,
         MAX(s.scan_time) as last_scanned
     FROM checkpoints c
     LEFT JOIN scans s ON c.id = s.checkpoint_id
     WHERE c.agency_client_id IN ($mapping_ids_str)
     GROUP BY c.id
-    ORDER BY c.name ASC
+    ORDER BY c.is_zero_checkpoint DESC, c.name ASC
 ";
 $qrs_result = $conn->query($qrs_sql);
 
@@ -238,6 +279,7 @@ $qrs_result = $conn->query($qrs_sql);
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="client_qrs.php" class="nav-link active">Checkpoints</a></li>
+            <li><a href="client_guards.php" class="nav-link">My Guards</a></li>
             <li><a href="client_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
@@ -265,11 +307,6 @@ $qrs_result = $conn->query($qrs_sql);
                     Manage Checkpoints
                 </div>
                 
-                <?php if ($message): ?>
-                    <div class="alert alert-<?php echo $message_type; ?>">
-                        <?php echo $message; ?>
-                    </div>
-                <?php endif; ?>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
                     <!-- Create Form -->
@@ -296,8 +333,8 @@ $qrs_result = $conn->query($qrs_sql);
                                     <input type="text" name="qr_name" class="form-control" placeholder="e.g. Lobby Entrance" required>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">Unique Code</label>
-                                    <input type="text" name="checkpoint_code" class="form-control" placeholder="e.g. LOB-001" required>
+                                    <label class="form-label">Scan Interval (Minutes, 0 for unlimited)</label>
+                                    <input type="number" name="scan_interval" class="form-control" value="0" min="0" required>
                                 </div>
                                 <button type="submit" name="create_qr" class="btn" id="submitBtn">Create Checkpoint</button>
                             </form>
@@ -311,10 +348,10 @@ $qrs_result = $conn->query($qrs_sql);
                             <div style="margin-bottom: 15px;">
                                 <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 5px;">
                                     <strong><?php echo $l['site_name'] ?: 'Site #' . $l['mapping_id']; ?></strong>
-                                    <span><?php echo $l['current_qrs']; ?> / <?php echo $l['qr_limit']; ?> used</span>
+                                    <span>Site Limit: <?php echo $l['current_site_qrs']; ?> / <?php echo $l['qr_limit']; ?> used</span>
                                 </div>
                                 <div style="width: 100%; height: 6px; background: #e2e8f0; border-radius: 3px; overflow: hidden;">
-                                    <div style="width: <?php echo min(100, ($l['qr_limit'] > 0 ? ($l['current_qrs'] / $l['qr_limit']) * 100 : 0)); ?>%; height: 100%; background: #3b82f6;"></div>
+                                    <div style="width: <?php echo min(100, ($l['qr_limit'] > 0 ? ($l['current_site_qrs'] / $l['qr_limit']) * 100 : 0)); ?>%; height: 100%; background: #3b82f6;"></div>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -328,8 +365,9 @@ $qrs_result = $conn->query($qrs_sql);
                     <table>
                         <thead>
                             <tr>
+                                <th style="width: 50px;">No.</th>
                                 <th>Checkpoint Name</th>
-                                <th>Code</th>
+                                <th>Code / Settings</th>
                                 <th>Status</th>
                                 <th>Last Scanned</th>
                                 <th>Actions</th>
@@ -337,7 +375,7 @@ $qrs_result = $conn->query($qrs_sql);
                         </thead>
                         <tbody>
                             <?php if ($qrs_result && $qrs_result->num_rows > 0): ?>
-                                <?php while($row = $qrs_result->fetch_assoc()): ?>
+                                <?php $counter = 1; while($row = $qrs_result->fetch_assoc()): ?>
                                     <?php
                                         // A checkpoint is considered inactive if the admin disabled the assigned agency-client mapping.
                                         $is_disabled = $mapping_status[$row['agency_client_id']] ?? 0;
@@ -346,21 +384,36 @@ $qrs_result = $conn->query($qrs_sql);
                                         $last_scan = $row['last_scanned'] ? date('M d, Y h:i A', strtotime($row['last_scanned'])) : '<span style="color:#9ca3af">Never Scanned</span>';
                                     ?>
                                     <tr>
+                                        <td><?php echo $row['is_zero_checkpoint'] ? '0' : $counter++; ?></td>
                                         <td><strong><?php echo htmlspecialchars($row['checkpoint_name']); ?></strong></td>
-                                        <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></td>
+                                        <td>
+                                            <div style="margin-bottom: 4px;"><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></div>
+                                            <?php if ($row['is_zero_checkpoint']): ?>
+                                                <span style="display: inline-block; margin-top: 4px; font-size: 0.75rem; background: #dcfce7; color: #166534; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Qr code Starting Checkpoint </span>
+                                            <?php endif; ?>
+                                            <?php if ($row['scan_interval'] > 0): ?>
+                                                <span style="display: inline-block; margin-top: 4px; font-size: 0.75rem; background: #e0e7ff; color: #3730a3; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Interval: <?php echo $row['scan_interval']; ?> mins</span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td class="<?php echo $status_class; ?>">&#9679; <?php echo $status_text; ?></td>
                                         <td><?php echo $last_scan; ?></td>
                                         <td>
                                             <div style="display: flex; gap: 8px;">
-                                                <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto;" onclick="showPrintModal('<?php echo $row['checkpoint_code']; ?>', '<?php echo $row['checkpoint_name']; ?>')">Print</button>
-                                                <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #64748b;" onclick="showEditModal(<?php echo $row['id']; ?>, '<?php echo $row['checkpoint_code']; ?>')">Edit Code</button>
+                                                <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Generate Qr</button>
+                                                <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Download Qr</button>
+                                                <?php if (!$row['is_zero_checkpoint']): ?>
+                                                <form action="client_qrs.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this checkpoint?');">
+                                                    <input type="hidden" name="checkpoint_id" value="<?php echo $row['id']; ?>">
+                                                    <button type="submit" name="delete_checkpoint" class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #ef4444;">Delete</button>
+                                                </form>
+                                                <?php endif; ?>
                                             </div>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="5" class="empty-state">No checkpoints have been created for your locations yet.</td>
+                                    <td colspan="6" class="empty-state">No checkpoints have been created for your locations yet.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -368,6 +421,20 @@ $qrs_result = $conn->query($qrs_sql);
                 </div>
             </div>
 
+        </div>
+            </div>
+        </div>
+
+        <!-- Status Process Modal -->
+        <div id="statusModal" class="modal-overlay <?php echo $show_status_modal ? 'show' : ''; ?>">
+            <div class="modal-content" style="max-width: 400px;">
+                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+                </div>
+                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+                <button class="btn" style="width: 100%; border: none;" onclick="closeModal('statusModal')">Done</button>
+            </div>
         </div>
     </main>
 
@@ -397,27 +464,19 @@ $qrs_result = $conn->query($qrs_sql);
             </div>
             <div class="modal-actions no-print" style="margin-top: 20px;">
                 <button class="btn-modal btn-cancel" onclick="document.getElementById('printQRModal').classList.remove('show');">Close</button>
-                <button class="btn-modal" style="background: #111827; color: white;" onclick="window.print()">Print Code</button>
+                <button class="btn-modal" style="background: #111827; color: white;" onclick="window.print()">Print Document</button>
             </div>
         </div>
     </div>
 
-    <!-- Edit Code Modal -->
-    <div class="modal-overlay" id="editCodeModal">
-        <div class="modal-content" style="max-width: 400px;">
-            <h3 class="modal-title">Reassign Checkpoint Code</h3>
-            <p class="modal-text">Enter a new unique alphanumeric code for this checkpoint.</p>
-            <form action="client_qrs.php" method="POST">
-                <input type="hidden" name="checkpoint_id" id="edit_cp_id">
-                <div class="form-group" style="text-align: left;">
-                    <label class="form-label">New Code</label>
-                    <input type="text" name="new_code" id="edit_new_code" class="form-control" required>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn-modal btn-cancel" onclick="document.getElementById('editCodeModal').classList.remove('show');">Cancel</button>
-                    <button type="submit" name="update_code" class="btn-modal" style="background: #3b82f6; color: white;">Update Code</button>
-                </div>
-            </form>
+
+    <!-- Limit Reached Modal -->
+    <div id="limitModal" class="modal-overlay <?php echo $show_limit_modal ? 'show' : ''; ?>">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <h3 style="margin-bottom: 10px;">Limit Reached</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn btn-primary" style="background: #111827;" onclick="document.getElementById('limitModal').classList.remove('show')">Understand</button>
         </div>
     </div>
 
@@ -439,8 +498,8 @@ $qrs_result = $conn->query($qrs_sql);
             if (parseInt(limit.is_disabled) === 1) {
                 warning.innerHTML = '<div class="alert-warning" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca; margin-bottom:15px;">QR creation is disabled for this site.</div>';
                 submitBtn.disabled = true;
-            } else if (parseInt(limit.current_qrs) >= parseInt(limit.qr_limit) && parseInt(limit.qr_override) === 0) {
-                warning.innerHTML = '<div class="alert-warning" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca; margin-bottom:15px;">QR limit reached for this site.</div>';
+            } else if (parseInt(limit.qr_limit) > 0 && parseInt(limit.current_site_qrs) >= parseInt(limit.qr_limit) && parseInt(limit.qr_override) === 0) {
+                warning.innerHTML = '<div class="alert-warning" style="background:#fee2e2; color:#991b1b; border:1px solid #fecaca; margin-bottom:15px;">Per-site QR limit reached (' + limit.qr_limit + '). Creation is disabled.</div>';
                 submitBtn.disabled = true;
             }
         }
@@ -460,15 +519,51 @@ $qrs_result = $conn->query($qrs_sql);
             document.getElementById('printQRModal').classList.add('show');
         }
 
-        function showEditModal(id, currentCode) {
-            document.getElementById('edit_cp_id').value = id;
-            document.getElementById('edit_new_code').value = currentCode;
-            document.getElementById('editCodeModal').classList.add('show');
+        function downloadQR(code, name) {
+            // Create a temporary container for generating the QR
+            const tempDiv = document.createElement('div');
+            new QRCode(tempDiv, {
+                text: code,
+                width: 300,
+                height: 300,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+            
+            // QRCode.js creates either a canvas or uses img
+            setTimeout(() => {
+                let img = tempDiv.querySelector('img');
+                let canvas = tempDiv.querySelector('canvas');
+                
+                let fileUrl = '';
+                if (canvas) {
+                    fileUrl = canvas.toDataURL("image/png");
+                } else if (img && img.src) {
+                    fileUrl = img.src;
+                }
+                
+                if (fileUrl) {
+                    const a = document.createElement('a');
+                    a.href = fileUrl;
+                    a.download = `QR_${name.replace(/[^a-z0-9]/gi, '_')}_${code}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                } else {
+                    alert('Could not generate QR code for download.');
+                }
+            }, 300); // slight delay to allow rendering
+        }
+
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
         }
 
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const modals = ['logoutModal', 'printQRModal', 'editCodeModal'];
+            const modals = ['logoutModal', 'printQRModal', 'statusModal'];
             modals.forEach(id => {
                 const modal = document.getElementById(id);
                 if (event.target == modal) {
