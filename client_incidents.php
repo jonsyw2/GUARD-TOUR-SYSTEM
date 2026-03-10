@@ -135,6 +135,7 @@ $incidents_result = $conn->query($incidents_sql);
             <li><a href="manage_tour.php" class="nav-link">Checkpoint Management</a></li>
             <li><a href="client_guards.php" class="nav-link">My Guards</a></li>
             <li><a href="client_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="client_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="client_incidents.php" class="nav-link active">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
         </ul>
