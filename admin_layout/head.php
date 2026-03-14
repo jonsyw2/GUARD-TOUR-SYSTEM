@@ -48,7 +48,7 @@
         .logout-btn:hover { opacity: 0.9; }
 
         /* Main Content */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); background: var(--card-bg); }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--card-bg); }
         .topbar { background: var(--card-bg); padding: 16px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.5rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.5px; }
         .user-pill { padding: 6px 16px; background: #f1f5f9; border-radius: 9999px; display: flex; align-items: center; gap: 10px; font-size: 0.9rem; border: 1px solid var(--border); }
