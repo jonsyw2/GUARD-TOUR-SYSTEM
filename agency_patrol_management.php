@@ -18,9 +18,11 @@ if (!$agency_id && isset($_SESSION['username'])) {
     }
 }
 
-// Fetch checkpoints via AJAX
+// Fetch checkpoints and shifts via AJAX
 if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     $mapping_id = (int)$_GET['mapping_id'];
+    
+    // Checkpoints
     $cp_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 ORDER BY id ASC");
     $checkpoints = [];
     if ($cp_res) {
@@ -28,8 +30,18 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
             $checkpoints[] = $row;
         }
     }
+    
+    // Shifts
+    $shift_res = $conn->query("SELECT id, shift_name FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
+    $shifts = [];
+    if ($shift_res) {
+        while ($row = $shift_res->fetch_assoc()) {
+            $shifts[] = $row;
+        }
+    }
+    
     header('Content-Type: application/json');
-    echo json_encode(['checkpoints' => $checkpoints]);
+    echo json_encode(['checkpoints' => $checkpoints, 'shifts' => $shifts]);
     exit();
 }
 
@@ -44,12 +56,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $intervals = $_POST['intervals'] ?? [];
     $durations = $_POST['durations'] ?? [];
     $is_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
+    $shift_type = $conn->real_escape_string($_POST['shift_type'] ?? 'Day Shift');
     
     $conn->begin_transaction();
     try {
-        // Update Lock Status
-        $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ? WHERE id = ? AND agency_id = ?");
-        $stmt->bind_param("iii", $is_locked, $mapping_id, $agency_id);
+        // Update Lock Status and Shift Type
+        $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ?, shift_type = ? WHERE id = ? AND agency_id = ?");
+        $stmt->bind_param("isii", $is_locked, $shift_type, $mapping_id, $agency_id);
         $stmt->execute();
 
         // Clear existing and save new assignments
@@ -143,6 +156,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                     $current_index++;
                 }
 
+                // Handle shifts update
+                $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
+                $site_shifts = $_POST['shifts'] ?? [];
+                foreach ($site_shifts as $s_name) {
+                    $s_name = trim($conn->real_escape_string($s_name));
+                    if (!empty($s_name)) {
+                        $conn->query("INSERT INTO shifts (agency_client_id, shift_name) VALUES ($mapping_id, '$s_name')");
+                    }
+                }
+
                 $conn->commit();
                 $message = "Site configuration and checkpoints updated successfully!";
                 $message_type = "success";
@@ -168,6 +191,7 @@ $clients_sql = "
         u.username AS client_name, 
         ac.site_name, 
         ac.is_patrol_locked,
+        ac.shift_type,
         ag_u.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
@@ -221,6 +245,15 @@ if ($selected_mapping_id) {
     while ($row = $assign_res->fetch_assoc()) {
         $current_assignments[] = $row;
     }
+
+    // Fetch shifts for selected client (Patrol Tab)
+    $client_shifts = [];
+    $shift_query = $conn->query("SELECT shift_name FROM shifts WHERE agency_client_id = $selected_mapping_id ORDER BY id ASC");
+    if ($shift_query) {
+        while ($s_row = $shift_query->fetch_assoc()) {
+            $client_shifts[] = $s_row['shift_name'];
+        }
+    }
 }
 
 // Fetch checkpoints for table view (Patrol Management Tab)
@@ -231,8 +264,8 @@ if ($selected_mapping_id) {
         FROM checkpoints cp
         JOIN agency_clients ac ON cp.agency_client_id = ac.id
         JOIN users c ON ac.client_id = c.id
-        WHERE ac.id = $selected_mapping_id AND cp.is_zero_checkpoint = 0
-        ORDER BY cp.created_at DESC
+        WHERE ac.id = $selected_mapping_id
+        ORDER BY cp.is_zero_checkpoint DESC, cp.created_at DESC
     ";
     $checkpoints_result = $conn->query($checkpoints_sql);
 }
@@ -257,9 +290,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -409,10 +442,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link active">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
@@ -480,10 +515,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
-                                                    <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="0" min="0">
-                                                    <label>min</label>
+                                                    <label>Shift Declare</label>
+                                                    <select name="shift_type" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                                                        <?php if (empty($client_shifts)): ?>
+                                                            <option value="Day Shift" <?php echo ($selected_client['shift_type'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                            <option value="Night Shift" <?php echo ($selected_client['shift_type'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                        <?php else: ?>
+                                                            <?php foreach ($client_shifts as $s_name): ?>
+                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($selected_client['shift_type'] ?? '') === $s_name ? 'selected' : ''; ?>>
+                                                                    <?php echo htmlspecialchars($s_name); ?>
+                                                                </option>
+                                                            <?php endforeach; ?>
+                                                        <?php endif; ?>
+                                                    </select>
                                                 </div>
+                                                <input type="hidden" name="durations[]" value="0">
                                             </div>
                                             <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                         </div>
@@ -503,11 +549,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
-                                                <div class="input-group">
-                                                    <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0">
-                                                    <label>min</label>
-                                                </div>
+                                                <input type="hidden" name="durations[]" value="1">
                                             </div>
                                             <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
                                         </div>
@@ -605,6 +647,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
                                         <button type="button" class="btn" style="background:#f3f4f6; color:#374151;" onclick="addCheckpointInput()">+ Add Checkpoint</button>
                                         <small id="qr-limit-text" style="color: #6b7280; font-weight: 500;"></small>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group" style="margin-top: 24px;">
+                                    <label class="form-label">Site Shifts</label>
+                                    <div id="shifts-container" style="display: flex; flex-direction: column; gap: 10px;">
+                                        <!-- Shift inputs populated here -->
+                                    </div>
+                                    <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+                                        <button type="button" class="btn" style="background:#f3f4f6; color:#374151;" onclick="addShiftInput()">+ Add Shift</button>
                                     </div>
                                 </div>
                                 <button type="submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px;">Site Configuration</button>
@@ -750,9 +802,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             const mappingId = parseInt(select.value);
             const siteNameInput = document.getElementById('site_name');
             const container = document.getElementById('checkpoints-container');
+            const shiftContainer = document.getElementById('shifts-container');
             const limitText = document.getElementById('qr-limit-text');
             
             container.innerHTML = '';
+            shiftContainer.innerHTML = '';
             limitText.textContent = '';
             
             if (!mappingId) return;
@@ -771,7 +825,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     limitText.dataset.limit = 'unlimited';
                 }
 
-                // Fetch existing checkpoints
+                // Fetch existing checkpoints and shifts
                 try {
                     const response = await fetch(`agency_patrol_management.php?ajax_checkpoints=1&mapping_id=${mappingId}`);
                     const data = await response.json();
@@ -783,11 +837,35 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     } else {
                         addCheckpointInput(); // Add at least one empty row
                     }
+
+                    if (data.shifts && data.shifts.length > 0) {
+                        data.shifts.forEach(sh => {
+                            addShiftInput(sh.shift_name, sh.id);
+                        });
+                    } else {
+                        // Default shifts if none exist
+                        addShiftInput('Day Shift');
+                        addShiftInput('Night Shift');
+                    }
                 } catch (e) {
-                    console.error('Error fetching checkpoints:', e);
+                    console.error('Error fetching site data:', e);
                     addCheckpointInput();
+                    addShiftInput();
                 }
             }
+        }
+
+        function addShiftInput(value = '', id = '') {
+            const container = document.getElementById('shifts-container');
+            const row = document.createElement('div');
+            row.className = 'shift-input-row';
+            row.style.display = 'flex';
+            row.style.gap = '10px';
+            row.innerHTML = `
+                <input type="text" name="shifts[]" class="form-control" placeholder="Shift Name (e.g. Day Shift)" value="${value.replace(/"/g, '&quot;')}" required>
+                <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; padding: 0 16px;" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(row);
         }
 
         function addCheckpointInput(value = '', id = '') {
@@ -847,11 +925,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <input type="number" name="intervals[]" value="0" min="0">
                         <label>min</label>
                     </div>
-                    <div class="input-group">
-                        <label>Duration</label>
-                        <input type="number" name="durations[]" value="0" min="0">
-                        <label>min</label>
-                    </div>
+                    <input type="hidden" name="durations[]" value="1">
                 </div>
                 <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
             `;

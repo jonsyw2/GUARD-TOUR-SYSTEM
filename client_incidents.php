@@ -33,7 +33,12 @@ $incidents_sql = "
         i.incident_type,
         i.description,
         i.status,
-        i.photo_path
+        i.photo_path,
+        i.report_category,
+        i.recorded_by,
+        i.noted_by,
+        i.investigated_by,
+        i.approved_by
     FROM incidents i
     LEFT JOIN checkpoints c ON i.checkpoint_id = c.id
     LEFT JOIN guards g ON i.guard_id = g.id
@@ -52,10 +57,10 @@ $incidents_result = $conn->query($incidents_sql);
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -98,7 +103,16 @@ $incidents_result = $conn->query($incidents_sql);
 
         .incident-title { font-size: 1.125rem; font-weight: 700; color: #111827; margin-bottom: 4px; }
         .incident-location { font-size: 0.85rem; color: #4b5563; margin-bottom: 12px; display: flex; align-items: center; gap: 4px; }
-        .incident-desc { font-size: 0.95rem; color: #374151; line-height: 1.5; margin-bottom: 16px; flex: 1; }
+        .incident-desc { font-size: 0.9rem; line-height: 1.6; color: #374151; margin-bottom: 16px; }
+
+        /* Modal Styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-overlay.show { display: flex; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative; }
+        .detail-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+        .detail-item { font-size: 0.85rem; }
+        .detail-label { color: #6b7280; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+        .detail-value { color: #111827; font-weight: 600; }
         
         .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 0.85rem; color: #6b7280; }
         .status { font-weight: 600; }
@@ -139,6 +153,9 @@ $incidents_result = $conn->query($incidents_sql);
             <li><a href="client_incidents.php" class="nav-link active">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
         </ul>
+        <div style="padding: 20px; font-size: 0.75rem; color: #6b7280; border-top: 1px solid #374151;">
+            <p>Professional Reporting System</p>
+        </div>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
         </div>
@@ -175,6 +192,9 @@ $incidents_result = $conn->query($incidents_sql);
                             $status_class = strtolower($row['status']) === 'active' ? 'status-active' : 'status-resolved';
                         ?>
                         <div class="incident-card <?php echo $type_class; ?>">
+                            <div style="position: absolute; top: 12px; left: 12px; z-index: 5; background: rgba(0,0,0,0.6); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase;">
+                                <?php echo ucfirst($row['report_category']); ?> Report
+                            </div>
                             <?php if (!empty($row['photo_path']) && $row['photo_path'] !== 'NULL'): ?>
                                 <img src="<?php echo htmlspecialchars($row['photo_path']); ?>" alt="Incident Evidence" class="card-image">
                             <?php else: ?>
@@ -184,16 +204,19 @@ $incidents_result = $conn->query($incidents_sql);
                             <div class="card-body">
                                 <div class="card-meta">
                                     <span class="incident-date"><?php echo date('M d, Y h:i A', strtotime($row['created_at'])); ?></span>
-                                    <span class="incident-type-badge <?php echo $badge_class; ?>"><?php echo $display_type; ?></span>
                                 </div>
-                                <h3 class="incident-title">Guard: <?php echo htmlspecialchars($row['guard_name']); ?></h3>
-                                <div class="incident-location">
-                                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                                    <?php echo htmlspecialchars($row['checkpoint_name'] ?? 'Unknown Location'); ?>
-                                </div>
+                                <h3 class="incident-title"><?php echo ucfirst($row['report_category']); ?> Report</h3>
                                 <p class="incident-desc"><?php echo nl2br(htmlspecialchars($row['description'])); ?></p>
                                 
-                                <div class="card-footer">
+                                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f1f5f9; font-size: 0.8rem; color: #64748b;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                        <span>Recorded by:</span>
+                                        <span style="font-weight: 600; color: #334155;"><?php echo htmlspecialchars($row['recorded_by'] ?: '---'); ?></span>
+                                    </div>
+                                    <button class="btn-detail" style="width: 100%; margin-top: 10px; padding: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; color: #3b82f6; font-weight: 600; cursor: pointer; font-size: 0.75rem;" onclick="showReportDetails('<?php echo addslashes($row['report_category']); ?>', '<?php echo addslashes($row['description']); ?>', '<?php echo addslashes($row['recorded_by']); ?>', '<?php echo addslashes($row['noted_by']); ?>', '<?php echo addslashes($row['investigated_by']); ?>', '<?php echo addslashes($row['approved_by']); ?>')">View Details (Noted/Approved)</button>
+                                </div>
+
+                                <div class="card-footer" style="margin-top: 10px;">
                                     <span>Status: <span class="status <?php echo $status_class; ?>"><?php echo htmlspecialchars($row['status']); ?></span></span>
                                 </div>
                             </div>
@@ -225,12 +248,60 @@ $incidents_result = $conn->query($incidents_sql);
         </div>
     </div>
 
+    <!-- Report Details Modal -->
+    <div class="modal-overlay" id="reportDetailModal">
+        <div class="modal-content">
+            <h3 id="modal_report_title" style="margin-bottom: 16px; font-size: 1.25rem; font-weight: 700; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Report Details</h3>
+            
+            <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
+                <p id="modal_report_desc" style="font-size: 0.95rem; line-height: 1.6; color: #374151;"></p>
+            </div>
+
+            <div class="detail-row">
+                <div class="detail-item">
+                    <div class="detail-label">Recorded by</div>
+                    <div class="detail-value" id="modal_recorded">---</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Noted by</div>
+                    <div class="detail-value" id="modal_noted">---</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Investigated by</div>
+                    <div class="detail-value" id="modal_investigated">---</div>
+                </div>
+                <div class="detail-item">
+                    <div class="detail-label">Approved by</div>
+                    <div class="detail-value" id="modal_approved">---</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 32px;">
+                <button class="btn-modal btn-cancel" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; background: white; border-radius: 8px; font-weight: 600; cursor: pointer;" onclick="document.getElementById('reportDetailModal').classList.remove('show');">Close Details</button>
+            </div>
+        </div>
+    </div>
+
     <script>
+        function showReportDetails(category, desc, recorded, noted, investigated, approved) {
+            document.getElementById('modal_report_title').innerText = category === 'investigation' ? 'Professional Investigation Report' : 'General Incident Report';
+            document.getElementById('modal_report_desc').innerText = desc;
+            document.getElementById('modal_recorded').innerText = recorded || '---';
+            document.getElementById('modal_noted').innerText = noted || '---';
+            document.getElementById('modal_investigated').innerText = investigated || '---';
+            document.getElementById('modal_approved').innerText = approved || '---';
+            document.getElementById('reportDetailModal').classList.add('show');
+        }
+
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
+            const logoutModal = document.getElementById('logoutModal');
+            const detailModal = document.getElementById('reportDetailModal');
+            if (event.target == logoutModal) {
+                logoutModal.classList.remove('show');
+            }
+            if (event.target == detailModal) {
+                detailModal.classList.remove('show');
             }
         }
     </script>

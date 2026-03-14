@@ -6,7 +6,27 @@ if ($_SESSION['user_level'] !== 'admin') {
     exit();
 }
 
-// Search / filter
+// Handle updating guard details
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
+    $guard_id = (int)$_POST['guard_id'];
+    $name = $conn->real_escape_string($_POST['guard_name']);
+    $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
+    $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
+
+    if ($conn->query("UPDATE guards SET name = '$name', lesp_no = '$lesp_no', lesp_expiry = '$lesp_expiry' WHERE id = $guard_id")) {
+        $message = "Guard details updated successfully!";
+        $message_type = "success";
+    } else {
+        $message = "Error updating guard: " . $conn->error;
+        $message_type = "error";
+    }
+    // Refresh data
+    header("Location: admin_security_guards.php?msg=" . urlencode($message) . "&type=" . $message_type);
+    exit();
+}
+
+$msg = $_GET['msg'] ?? '';
+$msg_type = $_GET['type'] ?? '';
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
 $filter_agency = isset($_GET['agency']) ? (int)$_GET['agency'] : 0;
 
@@ -21,12 +41,12 @@ if ($filter_agency > 0) {
 }
 
 // Fetch all guards with agency and client info
-$guards_sql = "SELECT g.id, g.name, u.username, g.lesp_no, g.lesp_expiry, g.created_at,
+$guards_sql = "SELECT g.id, g.user_id, g.name, u.username, g.lesp_no, g.lesp_expiry, g.created_at,
                       ag.username AS agency_name, g.agency_id,
                       GROUP_CONCAT(DISTINCT cu.username ORDER BY cu.username SEPARATOR ', ') AS client_names
                FROM guards g
                JOIN users u  ON g.user_id  = u.id
-               JOIN users ag ON g.agency_id = ag.id
+               LEFT JOIN users ag ON g.agency_id = ag.id
                LEFT JOIN guard_assignments ga ON g.id = ga.guard_id
                LEFT JOIN agency_clients   ac ON ga.agency_client_id = ac.id
                LEFT JOIN users cu ON ac.client_id = cu.id
@@ -61,7 +81,14 @@ include 'admin_layout/sidebar.php';
         <?php include 'admin_layout/topbar.php'; ?>
 
         <div class="contentArea">
+            <?php if ($msg): ?>
+                <div class="alert alert-<?php echo $msg_type === 'success' ? 'success' : 'error'; ?>">
+                    <?php echo htmlspecialchars($msg); ?>
+                </div>
+            <?php endif; ?>
             <style>
+                tbody tr { cursor: pointer; transition: background 0.2s; }
+                tbody tr:hover { background-color: #f8fafc !important; }
                 /* ── stat mini-cards ── */
                 .sg-stats { display: flex; gap: 20px; margin-bottom: 32px; flex-wrap: wrap; }
                 .sg-stat  { flex: 1; min-width: 160px; background: white; border-radius: 14px;
@@ -150,6 +177,7 @@ include 'admin_layout/sidebar.php';
                                 <th>Guard Name</th>
                                 <th>Agency</th>
                                 <th>Assigned Client(s)</th>
+                                <th>Status</th>
                                 <th>LESP No.</th>
                                 <th>LESP Expiry</th>
                                 <th>Date Registered</th>
@@ -160,23 +188,29 @@ include 'admin_layout/sidebar.php';
                                 <?php $i = 1; foreach ($rows as $row):
                                     $expiry = $row['lesp_expiry'] ? strtotime($row['lesp_expiry']) : null;
                                     $expiryCls = ($expiry && $expiry < strtotime('+30 days')) ? 'expiry-warn' : 'expiry-ok';
+                                    $has_clients = !empty($row['client_names']);
                                 ?>
-                                <tr>
+                                <tr onclick="openGuardEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>')">
                                     <td><span class="text-muted"><?php echo $i++; ?></span></td>
                                     <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                     <td>
                                         <span class="badge-agency">
-                                            <?php echo htmlspecialchars($row['agency_name']); ?>
+                                            <?php echo htmlspecialchars($row['agency_name'] ?? 'Unassigned'); ?>
                                         </span>
                                     </td>
                                     <td>
-                                        <?php if (!empty($row['client_names'])): ?>
+                                        <?php if ($has_clients): ?>
                                             <?php foreach (explode(', ', $row['client_names']) as $cn): ?>
                                                 <span class="badge-client"><?php echo htmlspecialchars($cn); ?></span>
                                             <?php endforeach; ?>
                                         <?php else: ?>
                                             <span class="badge-none">None</span>
                                         <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <span class="status-badge <?php echo $has_clients ? 'status-success' : 'status-warning'; ?>" style="font-size: 0.75rem; padding: 4px 10px;">
+                                            <?php echo $has_clients ? 'ACTIVE' : 'NOT ASSIGNED'; ?>
+                                        </span>
                                     </td>
                                     <td><?php echo htmlspecialchars($row['lesp_no'] ?: '—'); ?></td>
                                     <td class="<?php echo $expiryCls; ?>">
@@ -200,6 +234,47 @@ include 'admin_layout/sidebar.php';
                 </div>
             </div>
 
+            <!-- Edit Modal -->
+            <div id="editGuardModal" class="modal">
+                <div class="modal-content">
+                    <h3 style="margin-bottom: 20px;">Edit Guard Details</h3>
+                    <form action="admin_security_guards.php" method="POST">
+                        <input type="hidden" name="guard_id" id="edit_guard_id">
+                        <div class="form-group" style="text-align: left;">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" name="guard_name" id="edit_guard_name" class="form-control" required>
+                        </div>
+                        <div class="form-group" style="text-align: left;">
+                            <label class="form-label">LESP Number</label>
+                            <input type="text" name="lesp_no" id="edit_lesp_no" class="form-control">
+                        </div>
+                        <div class="form-group" style="text-align: left;">
+                            <label class="form-label">LESP Expiry</label>
+                            <input type="date" name="lesp_expiry" id="edit_lesp_expiry" class="form-control">
+                        </div>
+                        <div style="display: flex; gap: 12px; margin-top: 24px;">
+                            <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editGuardModal')">Cancel</button>
+                            <button type="submit" name="update_guard" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <script>
+                function openGuardEditModal(id, name, lesp_no, expiry) {
+                    document.getElementById('edit_guard_id').value = id;
+                    document.getElementById('edit_guard_name').value = name;
+                    document.getElementById('edit_lesp_no').value = lesp_no || '';
+                    document.getElementById('edit_lesp_expiry').value = expiry || '';
+                    document.getElementById('editGuardModal').classList.add('show');
+                }
+                function closeModal(id) {
+                    document.getElementById(id).classList.remove('show');
+                }
+                window.onclick = function(e) {
+                    if (e.target.classList.contains('modal')) e.target.classList.remove('show');
+                }
+            </script>
         </div>
     </main>
 

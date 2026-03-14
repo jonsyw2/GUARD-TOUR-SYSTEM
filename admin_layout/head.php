@@ -29,10 +29,10 @@
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: var(--background); color: var(--text-main); padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: var(--background); color: var(--text-main); padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 260px; background-color: var(--sidebar); color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; border-radius: var(--radius-lg); overflow: hidden; }
+        .sidebar { width: 260px; background-color: var(--sidebar); color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; overflow: hidden; }
         .sidebar-header { padding: 32px 24px; font-size: 1.5rem; font-weight: 800; text-align: center; border-bottom: 1px solid #1e293b; letter-spacing: -0.5px; }
         .nav-links { list-style: none; flex: 1; padding: 20px 0; }
         .nav-link { padding: 14px 24px; display: flex; align-items: center; color: #94a3b8; text-decoration: none; font-weight: 500; transition: all 0.2s; border-left: 4px solid transparent; gap: 12px; }
@@ -97,8 +97,8 @@
         @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
 
         /* Modal */
-        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
-        .modal-overlay.show { display: flex; }
+        .modal, .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 20px; }
+        .modal.show, .modal-overlay.show { display: flex; }
         .modal-content { background: white; padding: 40px; border-radius: 24px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
         .modal-icon { width: 64px; height: 64px; background: #fee2e2; color: var(--danger); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; font-size: 2rem; }
 

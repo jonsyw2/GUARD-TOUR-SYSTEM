@@ -38,6 +38,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     }
 }
 
+// Handle Update Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_client'])) {
+    $client_id = (int)$_POST['client_id'];
+    $username = $conn->real_escape_string($_POST['username']);
+    $password = $_POST['password'];
+    
+    $update_sql = "UPDATE users SET username = '$username'";
+    if (!empty($password)) {
+        $hashed = password_hash($password, PASSWORD_DEFAULT);
+        $update_sql .= ", password = '$hashed'";
+    }
+    $update_sql .= " WHERE id = $client_id AND user_level = 'client'";
+    
+    if ($conn->query($update_sql) === TRUE) {
+        $message = "Client details updated successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } else {
+        $message = "Error updating client: " . $conn->error;
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 // Handle Delete Client
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
     $delete_id = (int)$_POST['delete_id'];
@@ -112,7 +136,7 @@ include 'admin_layout/sidebar.php';
                             <tbody>
                                 <?php if ($users_result && $users_result->num_rows > 0): ?>
                                     <?php while($row = $users_result->fetch_assoc()): ?>
-                                        <tr>
+                                        <tr onclick="openClientEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>')">
                                             <td><span class="text-muted">#<?php echo $row['id']; ?></span></td>
                                             <td><strong><?php echo htmlspecialchars($row['username']); ?></strong></td>
                                             <td>
@@ -155,13 +179,42 @@ include 'admin_layout/sidebar.php';
         </div>
 
         <style>
-            .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-            .modal.show { display: flex; }
-            .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+            tbody tr { cursor: pointer; transition: background 0.2s; }
+            tbody tr:hover { background-color: #f8fafc !important; }
         </style>
 
+        <!-- Edit Client Modal -->
+        <div id="editClientModal" class="modal">
+            <div class="modal-content">
+                <h3 style="margin-bottom: 20px;">Edit Client details</h3>
+                <form action="client_maintenance.php" method="POST" autocomplete="off">
+                    <input type="hidden" name="client_id" id="edit_client_id">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Username</label>
+                        <input type="text" name="username" id="edit_username" class="form-control" required autocomplete="off">
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">New Password (Leave blank to keep current)</label>
+                        <input type="password" name="password" class="form-control" autocomplete="new-password">
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-top: 24px;">
+                        <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editClientModal')">Cancel</button>
+                        <button type="submit" name="update_client" class="btn btn-primary" style="flex: 1;">Update Account</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <script>
+            function openClientEditModal(id, username) {
+                document.getElementById('edit_client_id').value = id;
+                document.getElementById('edit_username').value = username;
+                document.getElementById('editClientModal').classList.add('show');
+            }
             function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+            window.onclick = function(e) {
+                if (e.target.classList.contains('modal')) e.target.classList.remove('show');
+            }
         </script>
     </main>
 

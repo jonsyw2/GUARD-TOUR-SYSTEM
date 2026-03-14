@@ -61,10 +61,10 @@ $recent_scans = $conn->query("
             --border: #e5e7eb;
             --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
-        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -110,11 +110,13 @@ $recent_scans = $conn->query("
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link active">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
@@ -155,7 +157,7 @@ $recent_scans = $conn->query("
                 <a href="agency_client_management.php" class="stat-card">
                     <div class="stat-icon" style="background: #dcfce7; color: #166534;">💼</div>
                     <div class="stat-info">
-                        <div class="label">Total sites</div>
+                        <div class="label">Total Client</div>
                         <div class="value"><?php echo $total_clients; ?></div>
                     </div>
                 </a>

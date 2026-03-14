@@ -37,6 +37,12 @@ $guards_sql = "
         u.username,
         a.username as agency_name,
         ga.assigned_at,
+        g.gender,
+        g.contact_no,
+        g.police_clearance_no,
+        g.nbi_no,
+        g.lesp_no,
+        g.lesp_expiry,
         (
             SELECT COUNT(*) FROM scans s
             JOIN checkpoints c ON s.checkpoint_id = c.id
@@ -78,10 +84,10 @@ if (!empty($mapping_ids)) {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -153,7 +159,9 @@ if (!empty($mapping_ids)) {
         th, td { padding: 14px 16px; text-align: left; border-bottom: 1px solid #f1f5f9; }
         th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
         td { color: #1f2937; font-size: 0.95rem; }
-        tbody tr:hover { background-color: #f9fafb; }
+        tbody tr { cursor: pointer; transition: background 0.2s; }
+        tbody tr:hover { background-color: #f8fafc; }
+        .guard-card { cursor: pointer; }
 
         .status-active { display: inline-flex; align-items: center; gap: 6px; color: #059669; font-size: 0.85rem; font-weight: 600; }
         .status-idle { display: inline-flex; align-items: center; gap: 6px; color: #9ca3af; font-size: 0.85rem; font-weight: 600; }
@@ -226,7 +234,7 @@ if (!empty($mapping_ids)) {
                             $initials = substr($initials, 0, 2);
                             $is_active = $g['scans_today'] > 0;
                         ?>
-                            <div class="guard-card">
+                            <div class="guard-card" onclick="openGuardModal('<?php echo addslashes($g['guard_name']); ?>', '<?php echo addslashes($g['gender'] ?? 'N/A'); ?>', '<?php echo addslashes($g['contact_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['police_clearance_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['nbi_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_expiry'] ?? 'N/A'); ?>', '<?php echo addslashes($g['agency_name']); ?>')">
                                 <div class="guard-avatar"><?php echo htmlspecialchars($initials); ?></div>
                                 <div class="guard-info">
                                     <div class="guard-name"><?php echo htmlspecialchars($g['guard_name']); ?></div>
@@ -269,7 +277,6 @@ if (!empty($mapping_ids)) {
                         <thead>
                             <tr>
                                 <th>Guard Name</th>
-                                <th>Username</th>
                                 <th>Assigned Agency</th>
                                 <th>Date Assigned</th>
                                 <th>Today's Activity</th>
@@ -280,9 +287,8 @@ if (!empty($mapping_ids)) {
                             $guards_res->data_seek(0);
                             while($g = $guards_res->fetch_assoc()):
                             ?>
-                                <tr>
+                                <tr onclick="openGuardModal('<?php echo addslashes($g['guard_name']); ?>', '<?php echo addslashes($g['gender'] ?? 'N/A'); ?>', '<?php echo addslashes($g['contact_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['police_clearance_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['nbi_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_expiry'] ?? 'N/A'); ?>', '<?php echo addslashes($g['agency_name']); ?>')">
                                     <td><strong><?php echo htmlspecialchars($g['guard_name']); ?></strong></td>
-                                    <td style="color: #6b7280;">@<?php echo htmlspecialchars($g['username']); ?></td>
                                     <td><?php echo htmlspecialchars($g['agency_name']); ?></td>
                                     <td><?php echo date('M d, Y', strtotime($g['assigned_at'])); ?></td>
                                     <td>
@@ -309,6 +315,58 @@ if (!empty($mapping_ids)) {
         </div>
     </main>
 
+    <!-- Guard Detail Modal -->
+    <div class="modal-overlay" id="guardDetailModal">
+        <div class="modal-content" style="text-align: left; max-width: 500px;">
+            <h3 id="modal_guard_name" style="margin-bottom: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; color: #111827;">Guard Information</h3>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div style="color: #64748b; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Gender</div>
+                    <div id="modal_gender" style="font-weight: 600; color: #1e293b;">-</div>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                    <div style="color: #64748b; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Contact Number</div>
+                    <div id="modal_contact" style="font-weight: 600; color: #1e293b;">-</div>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 24px;">
+                <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">📋</span> 
+                    <span style="font-weight: 700; color: #334155; font-size: 0.9rem;">Professional Clearances</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; padding: 10px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                        <span style="color: #64748b; font-size: 0.85rem;">Police Clearance No.</span>
+                        <span id="modal_police" style="font-weight: 600; color: #0f172a;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 10px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                        <span style="color: #64748b; font-size: 0.85rem;">NBI Clearance No.</span>
+                        <span id="modal_nbi" style="font-weight: 600; color: #0f172a;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 10px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                        <span style="color: #64748b; font-size: 0.85rem;">LESP No.</span>
+                        <span id="modal_lesp_no" style="font-weight: 600; color: #0f172a;">-</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 10px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                        <span style="color: #64748b; font-size: 0.85rem;">LESP Expiry</span>
+                        <span id="modal_lesp_expiry" style="font-weight: 600; color: #0f172a;">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style="padding: 12px 16px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; margin-bottom: 24px;">
+                <div style="color: #1e40af; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;">Assigned Agency</div>
+                <div id="modal_agency" style="font-weight: 600; color: #1e3a8a; margin-top: 4px;">-</div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" style="width: 100%;" onclick="closeModal('guardDetailModal')">Close Details</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
         <div class="modal-content">
@@ -325,11 +383,28 @@ if (!empty($mapping_ids)) {
     </div>
 
     <script>
+        function openGuardModal(name, gender, contact, police, nbi, lesp_no, lesp_expiry, agency) {
+            document.getElementById('modal_guard_name').innerText = name;
+            document.getElementById('modal_gender').innerText = gender;
+            document.getElementById('modal_contact').innerText = contact;
+            document.getElementById('modal_police').innerText = police;
+            document.getElementById('modal_nbi').innerText = nbi;
+            document.getElementById('modal_lesp_no').innerText = lesp_no;
+            document.getElementById('modal_lesp_expiry').innerText = lesp_expiry;
+            document.getElementById('modal_agency').innerText = agency;
+            document.getElementById('guardDetailModal').classList.add('show');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
         window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
-            }
+            const logoutModal = document.getElementById('logoutModal');
+            const detailModal = document.getElementById('guardDetailModal');
+            
+            if (event.target == logoutModal) logoutModal.classList.remove('show');
+            if (event.target == detailModal) detailModal.classList.remove('show');
         }
     </script>
 </body>

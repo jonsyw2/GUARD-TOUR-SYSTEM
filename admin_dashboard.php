@@ -53,13 +53,13 @@ include 'admin_layout/sidebar.php';
                     <div class="stat-value"><?php echo $total_users; ?></div>
                     <div class="stat-icon">👥</div>
                 </a>
-                <a href="manage_inspectors.php" class="stat-card">
+                <a href="agency_maintenance.php?tab=assignments" class="stat-card">
                     <span class="stat-label">Security Agencies</span>
                     <div class="stat-value"><?php echo $agencies_count; ?></div>
                     <div class="stat-icon">🛡️</div>
                 </a>
-                <a href="manage_limits.php" class="stat-card">
-                    <span class="stat-label">Active Clients</span>
+                <a href="admin_total_clients.php" class="stat-card">
+                    <span class="stat-label">Total Clients</span>
                     <div class="stat-value"><?php echo $clients_count; ?></div>
                     <div class="stat-icon">💼</div>
                 </a>

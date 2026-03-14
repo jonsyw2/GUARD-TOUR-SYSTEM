@@ -235,8 +235,10 @@ $qrs_sql = "
         c.agency_client_id,
         c.is_zero_checkpoint,
         c.scan_interval,
+        ac.company_name,
         MAX(s.scan_time) as last_scanned
     FROM checkpoints c
+    JOIN agency_clients ac ON c.agency_client_id = ac.id
     LEFT JOIN scans s ON c.id = s.checkpoint_id
     WHERE c.agency_client_id IN ($mapping_ids_str)
     GROUP BY c.id
@@ -284,10 +286,10 @@ while ($row = $assignments_res->fetch_assoc()) {
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -528,6 +530,7 @@ while ($row = $assignments_res->fetch_assoc()) {
                                         ?>
                                         <tr>
                                             <td><?php echo $row['is_zero_checkpoint'] ? '0' : $counter++; ?></td>
+                                            <?php $display_no = $row['is_zero_checkpoint'] ? '0' : ($counter - 1); ?>
                                             <td><strong><?php echo htmlspecialchars($row['checkpoint_name']); ?></strong></td>
                                             <td>
                                                 <div style="margin-bottom: 4px;"><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></div>
@@ -536,7 +539,7 @@ while ($row = $assignments_res->fetch_assoc()) {
                                             <td><?php echo $last_scan; ?></td>
                                             <td>
                                                 <div style="display: flex; gap: 8px;">
-                                                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Show</button>
+                                                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['company_name'] ?? 'Client')); ?>', '<?php echo $display_no; ?>')">Show</button>
                                                     <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>')">Download</button>
                                                     <?php if (!$row['is_zero_checkpoint']): ?>
                                                     <form action="manage_tour.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this checkpoint? This will also remove it from any tour sequence.');">
@@ -653,10 +656,10 @@ while ($row = $assignments_res->fetch_assoc()) {
     <div class="modal-overlay" id="printQRModal">
         <div class="modal-content print-card" style="max-width: 500px;">
             <h3 class="no-print" style="margin-bottom: 20px; font-weight: 700; color: #111827;">Checkpoint QR Code</h3>
-            <div class="qr-display" id="qrContainer">
-                <p id="checkpointLabel" style="font-size: 1.1rem; font-weight: 600; color: #374151; margin-bottom: 20px;"></p>
-                <div id="qrcode" class="qr-img"></div>
-                <div class="code-display" id="codeLabel"></div>
+            <div class="qr-display" id="qrContainer" style="padding: 40px; border: 2px dashed #e2e8f0; border-radius: 12px; background: white;">
+                <p id="companyLabel" style="font-size: 1.5rem; font-weight: 700; color: #1e293b; margin-bottom: 30px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px; width: 100%;"></p>
+                <div id="qrcode" class="qr-img" style="margin: 0 auto; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);"></div>
+                <div id="checkpointNoLabel" style="font-size: 3rem; font-weight: 800; color: #1e293b; margin-top: 30px; letter-spacing: -1px;"></div>
             </div>
             <div class="no-print" style="margin-top: 20px; display: flex; gap: 12px;">
                 <button class="btn" style="background:#f3f4f6; color:#374151;" onclick="closeModal('printQRModal')">Close</button>
@@ -767,14 +770,14 @@ while ($row = $assignments_res->fetch_assoc()) {
             }
         }
 
-        function showPrintModal(code, name) {
-            document.getElementById('checkpointLabel').textContent = name;
-            document.getElementById('codeLabel').textContent = code;
+        function showPrintModal(code, company, index) {
+            document.getElementById('companyLabel').textContent = company;
+            document.getElementById('checkpointNoLabel').textContent = "CP #" + index;
             document.getElementById('qrcode').innerHTML = '';
             new QRCode(document.getElementById("qrcode"), {
                 text: code,
-                width: 200,
-                height: 200,
+                width: 250,
+                height: 250,
                 colorDark : "#000000",
                 colorLight : "#ffffff",
                 correctLevel : QRCode.CorrectLevel.H

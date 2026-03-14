@@ -85,7 +85,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 // Fetch Assigned Clients
 $clients_sql = "
     SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, a.guard_limit,
-           (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
+           (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
+           (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count,
+           (
+               SELECT GROUP_CONCAT(g.name SEPARATOR ' | ')
+               FROM guard_assignments ga
+               JOIN guards g ON ga.guard_id = g.id
+               WHERE ga.agency_client_id = ac.id
+           ) as guard_names
     FROM agency_clients ac
     JOIN users u ON ac.client_id = u.id
     JOIN users a ON ac.agency_id = a.id
@@ -112,9 +119,9 @@ if ($guards_res) {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -138,6 +145,8 @@ if ($guards_res) {
 
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        tbody tr { cursor: pointer; transition: background 0.2s; }
+        tbody tr:hover { background-color: #f8fafc; }
         th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
         
         .btn-sm { padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; font-weight: 500; }
@@ -161,11 +170,13 @@ if ($guards_res) {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link active">Client Management</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
@@ -193,9 +204,9 @@ if ($guards_res) {
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if ($clients_res && $clients_res->num_rows > 0): ?>
+                         <?php if ($clients_res && $clients_res->num_rows > 0): ?>
                             <?php while($row = $clients_res->fetch_assoc()): ?>
-                                <tr>
+                                <tr onclick="openSummaryModal('<?php echo addslashes($row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>')">
                                     <td><strong><?php echo htmlspecialchars($row['client_username']); ?></strong></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -214,9 +225,11 @@ if ($guards_res) {
                                             <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
                                         </span>
                                     </td>
-                                    <td style="text-align: right;">
-                                        <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['company_name']); ?>', '<?php echo addslashes($row['company_logo']); ?>')">Edit Details</button>
-                                        <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Add Guard</button>
+                                     <td style="text-align: right;">
+                                        <div style="display: flex; gap: 8px; justify-content: flex-end;" onclick="event.stopPropagation()">
+                                            <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['company_name']); ?>')">Edit Details</button>
+                                            <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Add Guard</button>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endwhile; ?>
@@ -228,6 +241,37 @@ if ($guards_res) {
             </div>
         </div>
     </main>
+
+    <!-- Site Summary Modal -->
+    <div id="summaryModal" class="modal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 id="summary_title" style="margin-bottom: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Site Summary</h3>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+                <div style="background: #f0fdf4; padding: 16px; border-radius: 12px; border: 1px solid #bbf7d0;">
+                    <div style="color: #166534; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Total QR Checkpoints</div>
+                    <div id="summary_qr_count" style="font-size: 1.5rem; font-weight: 800; color: #14532d;">0</div>
+                </div>
+                <div style="background: #eff6ff; padding: 16px; border-radius: 12px; border: 1px solid #bfdbfe;">
+                    <div style="color: #1e40af; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Personnel Count</div>
+                    <div id="summary_guard_count" style="font-size: 1.5rem; font-weight: 800; color: #1e3a8a;">0</div>
+                </div>
+            </div>
+
+            <div style="background: #fafafa; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px; color: #374151;">
+                    <span style="font-size: 1.2rem;">👮</span> Assigned Personnel List
+                </label>
+                <div id="summary_guards_list" style="font-size: 0.95rem; color: #4b5563; font-weight: 500; line-height: 1.7; margin-top: 12px;">
+                    <!-- Guards list injected here -->
+                </div>
+            </div>
+
+            <div style="margin-top: 32px; display: flex; gap: 12px;">
+                <button type="button" class="btn-sm btn-outline" style="flex:1; padding: 12px;" onclick="closeModal('summaryModal')">Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Details Modal -->
     <div id="detailsModal" class="modal">
@@ -300,6 +344,22 @@ if ($guards_res) {
     </div>
 
     <script>
+        function openSummaryModal(clientName, qrCount, guardNames) {
+            document.getElementById('summary_title').innerText = "Site Summary: " + clientName;
+            document.getElementById('summary_qr_count').innerText = qrCount;
+            
+            const listDiv = document.getElementById('summary_guards_list');
+            if (guardNames && guardNames.trim() !== '') {
+                const names = guardNames.split(' | ');
+                document.getElementById('summary_guard_count').innerText = names.length;
+                listDiv.innerHTML = names.map(n => `<div style="padding: 4px 0; border-bottom: 1px solid #f3f4f6;">• ${n}</div>`).join('');
+            } else {
+                document.getElementById('summary_guard_count').innerText = "0";
+                listDiv.innerHTML = '<span style="color: #9ca3af; font-style: italic;">No guards assigned.</span>';
+            }
+            document.getElementById('summaryModal').classList.add('show');
+        }
+
         function openDetailsModal(id, name) {
             document.getElementById('details_mapping_id').value = id;
             document.getElementById('details_company_name').value = name;

@@ -7,6 +7,14 @@ if ($_SESSION['user_level'] !== 'agency') {
 }
 
 $agency_id = $_SESSION['user_id'] ?? null;
+$message = '';
+$message_type = '';
+
+// Auto-Migration: Add new columns if they don't exist
+$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS gender VARCHAR(20) AFTER name");
+$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS police_clearance_no VARCHAR(50) AFTER lesp_expiry");
+$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS nbi_no VARCHAR(50) AFTER police_clearance_no");
+$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS contact_no VARCHAR(20) AFTER nbi_no");
 
 $message = '';
 $message_type = '';
@@ -40,6 +48,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
     $address = $conn->real_escape_string($_POST['address']);
+    $gender = $conn->real_escape_string($_POST['gender']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no']);
+    $police_clearance_no = $conn->real_escape_string($_POST['police_clearance_no']);
+    $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
     $client_mapping_id = isset($_POST['assign_to_client']) ? (int)$_POST['assign_to_client'] : null;
@@ -72,7 +84,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
                 $user_id = $conn->insert_id;
                 
                 // 2. Create Guard entry
-                $conn->query("INSERT INTO guards (user_id, agency_id, name, address, lesp_no, lesp_expiry) VALUES ($user_id, $agency_id, '$fullname', '$address', '$lesp_no', '$lesp_expiry')");
+                $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry) 
+                             VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry')");
                 $guard_id = $conn->insert_id;
 
                 // 3. Optional Client Assignment
@@ -101,6 +114,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
     $address = $conn->real_escape_string($_POST['address']);
+    $gender = $conn->real_escape_string($_POST['gender']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no']);
+    $police_clearance_no = $conn->real_escape_string($_POST['police_clearance_no']);
+    $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
     $client_mapping_id = isset($_POST['client_mapping_id']) ? (int)$_POST['client_mapping_id'] : null;
@@ -110,7 +127,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
     $conn->begin_transaction();
     try {
         // Update Guard Details
-        $conn->query("UPDATE guards SET name = '$fullname', address = '$address', lesp_no = '$lesp_no', lesp_expiry = '$lesp_expiry' WHERE id = $guard_id");
+        $conn->query("UPDATE guards SET 
+                        name = '$fullname', 
+                        gender = '$gender',
+                        address = '$address', 
+                        contact_no = '$contact_no',
+                        police_clearance_no = '$police_clearance_no',
+                        nbi_no = '$nbi_no',
+                        lesp_no = '$lesp_no', 
+                        lesp_expiry = '$lesp_expiry' 
+                      WHERE id = $guard_id");
         
         // Handle Assignment Update
         if ($client_mapping_id) {
@@ -209,7 +235,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 }
 
 // Fetch Guards created by this agency with current assignment info
-$guards_sql = "SELECT g.id, g.name, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, 
+$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, 
                       GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
                       GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
                FROM guards g 
@@ -240,9 +266,9 @@ if ($clients_res) {
     <style>
         /* Reusing common styles from manage_qrs.php */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 16px; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); border-radius: 16px; overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -302,11 +328,13 @@ if ($clients_res) {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link active">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
@@ -345,8 +373,33 @@ if ($clients_res) {
                                 <label class="form-label">Permanent Address</label>
                                 <textarea name="address" class="form-control" rows="2" placeholder="Full residential address" required></textarea>
                             </div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                <div class="form-group">
+                                    <label class="form-label">Gender</label>
+                                    <select name="gender" class="form-control" required>
+                                        <option value="" disabled selected>Select Gender</option>
+                                        <option value="Male">Male</option>
+                                        <option value="Female">Female</option>
+                                        <option value="Other">Other</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Contact No.</label>
+                                    <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX" required>
+                                </div>
+                            </div>
                         </div>
                         <div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                <div class="form-group">
+                                    <label class="form-label">Police Clearance No.</label>
+                                    <input type="text" name="police_clearance_no" class="form-control" placeholder="P.C. Number" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">NBI No.</label>
+                                    <input type="text" name="nbi_no" class="form-control" placeholder="NBI Number" required>
+                                </div>
+                            </div>
                             <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                                 <div class="form-group">
                                     <label class="form-label">LESP No.</label>
@@ -417,7 +470,7 @@ if ($clients_res) {
                                         <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                         <td>
                                             <div style="display: flex; gap: 8px;">
-                                                <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #6366f1; width: auto;">Edit</button>
+                                                <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #6366f1; width: auto;">Edit</button>
                                                 <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
                                             </div>
                                         </td>
@@ -493,6 +546,30 @@ if ($clients_res) {
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Permanent Address</label>
                     <textarea name="address" id="edit_address" class="form-control" rows="2" required></textarea>
+                </div>
+                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Gender</label>
+                        <select name="gender" id="edit_gender" class="form-control" required>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Contact No.</label>
+                        <input type="text" name="contact_no" id="edit_contact_no" class="form-control" required>
+                    </div>
+                </div>
+                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Police Clearance No.</label>
+                        <input type="text" name="police_clearance_no" id="edit_police_clearance_no" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">NBI No.</label>
+                        <input type="text" name="nbi_no" id="edit_nbi_no" class="form-control" required>
+                    </div>
                 </div>
                 <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                     <div class="form-group" style="text-align: left;">
@@ -584,12 +661,16 @@ if ($clients_res) {
         }
         
         // Correction: Fixed modal ID naming consistency
-        function openEditModal(id, last, first, middle, address, lesp_no, lesp_expiry, client_id) {
+        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id) {
             document.getElementById('edit_guard_id').value = id;
             document.getElementById('edit_last_name').value = last;
             document.getElementById('edit_first_name').value = first;
             document.getElementById('edit_middle_name').value = middle;
+            document.getElementById('edit_gender').value = gender;
             document.getElementById('edit_address').value = address;
+            document.getElementById('edit_contact_no').value = contact;
+            document.getElementById('edit_police_clearance_no').value = p_clearance;
+            document.getElementById('edit_nbi_no').value = nbi;
             document.getElementById('edit_lesp_no').value = lesp_no;
             document.getElementById('edit_lesp_expiry').value = lesp_expiry;
             document.getElementById('edit_client_id').value = client_id;

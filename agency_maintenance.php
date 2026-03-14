@@ -15,6 +15,38 @@ $message = '';
 $message_type = '';
 $show_status_modal = false;
 
+// Handle updating agency limits
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_limits'])) {
+    $agency_id = (int)$_POST['agency_id'];
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_qr_limit = (int)$_POST['inspector_qr_limit'];
+
+    if ($conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_qr_limit = $inspector_qr_limit WHERE id = $agency_id")) {
+        $message = "Agency limits updated successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } else {
+        $message = "Error updating agency: " . $conn->error;
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
+// Handle Unassign Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['unassign_client_action'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+    if ($conn->query("DELETE FROM agency_clients WHERE id = $mapping_id")) {
+        $message = "Client unassigned successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } else {
+        $message = "Error unassigning client: " . $conn->error;
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 // Handle Add Agency
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $agency_name = $conn->real_escape_string($_POST['agency_name']);
@@ -219,10 +251,11 @@ include 'admin_layout/sidebar.php';
                 .unassign-link { color: var(--danger); font-weight: 600; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; transition: all 0.2s; }
                 .unassign-link:hover { background: #fee2e2; }
 
-                /* Modal Styles */
-                .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-                .modal.show { display: flex; }
-                .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+                tbody tr { cursor: pointer; transition: background 0.2s; }
+                tbody tr:hover { background-color: #f8fafc !important; }
+
+                tbody tr { cursor: pointer; transition: background 0.2s; }
+                tbody tr:hover { background-color: #f8fafc !important; }
             </style>
 
             <!-- TAB: AGENCIES -->
@@ -265,7 +298,7 @@ include 'admin_layout/sidebar.php';
                                 $agencies_result->data_seek(0);
                                 if ($agencies_result->num_rows > 0): 
                                     while($row = $agencies_result->fetch_assoc()): ?>
-                                    <tr>
+                                    <tr onclick="openAgencyEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>', <?php echo $row['qr_limit']; ?>, <?php echo $row['guard_limit']; ?>, <?php echo $row['inspector_qr_limit']; ?>)">
                                         <td>#<?php echo $row['id']; ?></td>
                                         <td>
                                             <strong><?php echo htmlspecialchars($row['username']); ?></strong>
@@ -369,13 +402,13 @@ include 'admin_layout/sidebar.php';
                             <tbody>
                                 <?php if ($mappings_result && $mappings_result->num_rows > 0): 
                                     while($row = $mappings_result->fetch_assoc()): ?>
-                                    <tr>
+                                    <tr onclick="openUnassignModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">
                                         <td><strong><?php echo htmlspecialchars($row['agency_name']); ?></strong></td>
                                         <td>
                                             <div style="font-weight: 700; color: var(--text-main);"><?php echo htmlspecialchars($row['client_name']); ?></div>
                                         </td>
                                         <td><span style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('M d, Y', strtotime($row['created_at'])); ?></span></td>
-                                        <td><a href="#" class="unassign-link">Unassign</a></td>
+                                        <td><button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;">Unassign</button></td>
                                     </tr>
                                 <?php endwhile; else: ?>
                                     <tr><td colspan="4" class="empty-state">No business mappings found.</td></tr>
@@ -424,7 +457,72 @@ include 'admin_layout/sidebar.php';
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
         }
+
+        // Handle tab selection via URL parameter
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const tab = urlParams.get('tab');
+            if (tab === 'assignments') {
+                const btn = document.querySelector('.tab-btn:nth-child(2)');
+                switchTab('tab-assignments', btn);
+            }
+        });
+
+        function openAgencyEditModal(id, name, qr, guard, insp) {
+            document.getElementById('edit_agency_id').value = id;
+            document.getElementById('edit_agency_name').value = name;
+            document.getElementById('edit_qr_limit').value = qr;
+            document.getElementById('edit_guard_limit').value = guard;
+            document.getElementById('edit_inspector_qr_limit').value = insp;
+            document.getElementById('editAgencyModal').classList.add('show');
+        }
+
+        function openUnassignModal(id, agency, client) {
+            document.getElementById('unassign_mapping_id').value = id;
+            document.getElementById('unassign_agency_name').textContent = agency;
+            document.getElementById('unassign_client_name').textContent = client;
+            document.getElementById('unassignModal').classList.add('show');
+        }
     </script>
+
+    <!-- Edit Agency Modal -->
+    <div id="editAgencyModal" class="modal">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 20px;">Edit Agency Limits</h3>
+            <form action="agency_maintenance.php" method="POST">
+                <input type="hidden" name="agency_id" id="edit_agency_id">
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Agency Name</label>
+                    <input type="text" id="edit_agency_name" class="form-control" disabled>
+                </div>
+                <div class="form-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
+                    <div class="form-group" style="text-align: left;"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" id="edit_qr_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" id="edit_guard_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Inspector</label><input type="number" name="inspector_qr_limit" id="edit_inspector_qr_limit" class="form-control" min="0"></div>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 24px;">
+                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editAgencyModal')">Cancel</button>
+                    <button type="submit" name="update_agency_limits" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Unassign Modal -->
+    <div id="unassignModal" class="modal">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <h3>Confirm Unassignment</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;">Unassign <strong id="unassign_client_name"></strong> from <strong id="unassign_agency_name"></strong>?</p>
+            <form action="agency_maintenance.php" method="POST">
+                <input type="hidden" name="mapping_id" id="unassign_mapping_id">
+                <div style="display: flex; gap: 12px;">
+                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('unassignModal')">Cancel</button>
+                    <button type="submit" name="unassign_client_action" class="btn" style="background: #ef4444; color: white; flex: 1;">Unassign</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
 <?php include 'admin_layout/footer.php'; ?>
 </html>

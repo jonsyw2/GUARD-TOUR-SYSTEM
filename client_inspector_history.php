@@ -8,6 +8,31 @@ if ($_SESSION['user_level'] !== 'client') {
 
 $client_id = $_SESSION['user_id'];
 
+// Auto-migration: Ensure inspector tables exist
+$conn->query("
+    CREATE TABLE IF NOT EXISTS inspectors (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        agency_id INT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX (agency_id)
+    ) ENGINE=InnoDB
+");
+
+$conn->query("
+    CREATE TABLE IF NOT EXISTS inspector_scans (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        inspector_id INT NOT NULL,
+        agency_client_id INT NOT NULL,
+        scan_time DATETIME NOT NULL,
+        status VARCHAR(50) DEFAULT 'Routine',
+        remarks TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX (inspector_id),
+        INDEX (agency_client_id)
+    ) ENGINE=InnoDB
+");
+
 // Get all agency_client mapping IDs for this client
 $maps_sql = "SELECT id, agency_id FROM agency_clients WHERE client_id = $client_id";
 $maps_res = $conn->query($maps_sql);
@@ -84,10 +109,10 @@ $history_res = $conn->query($history_sql);
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
