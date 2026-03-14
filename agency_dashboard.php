@@ -138,8 +138,8 @@ $recent_scans = $conn->query("
         <div class="content-area">
             <style>
                 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 32px; }
-                .stat-card { background: white; padding: 28px; border-radius: 16px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 20px; border: 1px solid var(--border); transition: transform 0.2s; }
-                .stat-card:hover { transform: translateY(-4px); }
+                .stat-card { background: white; padding: 28px; border-radius: 16px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 20px; border: 1px solid var(--border); transition: transform 0.2s, box-shadow 0.2s; text-decoration: none; color: inherit; }
+                .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.12); }
                 .stat-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; flex-shrink: 0; }
                 .stat-info .label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
                 .stat-info .value { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
@@ -152,34 +152,34 @@ $recent_scans = $conn->query("
             </style>
 
             <div class="stats-grid">
-                <div class="stat-card">
+                <a href="agency_client_management.php" class="stat-card">
                     <div class="stat-icon" style="background: #dcfce7; color: #166534;">💼</div>
                     <div class="stat-info">
                         <div class="label">Total sites</div>
                         <div class="value"><?php echo $total_clients; ?></div>
                     </div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="manage_guards.php" class="stat-card">
                     <div class="stat-icon" style="background: #dbeafe; color: #1e40af;">👮</div>
                     <div class="stat-info">
                         <div class="label">Total Guards</div>
                         <div class="value"><?php echo $total_guards; ?></div>
                     </div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="agency_patrol_management.php" class="stat-card">
                     <div class="stat-icon" style="background: #fef9c3; color: #854d0e;">📍</div>
                     <div class="stat-info">
                         <div class="label">Checkpoints</div>
                         <div class="value"><?php echo $total_checkpoints; ?></div>
                     </div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="agency_patrol_history.php" class="stat-card">
                     <div class="stat-icon" style="background: #f0fdf4; color: #166534; border: 2px solid #10b981;">✅</div>
                     <div class="stat-info">
                         <div class="label">Scans Today</div>
                         <div class="value"><?php echo $scans_today; ?></div>
                     </div>
-                </div>
+                </a>
             </div>
 
             <div class="list-layout">

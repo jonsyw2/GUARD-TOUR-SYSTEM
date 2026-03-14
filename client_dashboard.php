@@ -99,8 +99,8 @@ if ($mapping_ids_str !== '0') {
         
         /* Stats Styles */
         .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 32px; }
-        .stat-card { background: white; padding: 24px; border-radius: 12px; box-shadow: var(--shadow); border: 1px solid var(--border); display: flex; align-items: center; gap: 16px; transition: transform 0.2s; }
-        .stat-card:hover { transform: translateY(-4px); }
+        .stat-card { background: white; padding: 24px; border-radius: 12px; box-shadow: var(--shadow); border: 1px solid var(--border); display: flex; align-items: center; gap: 16px; transition: transform 0.2s, box-shadow 0.2s; text-decoration: none; color: inherit; }
+        .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.12); }
         .stat-icon { width: 52px; height: 52px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; }
         .stat-value { font-size: 1.75rem; font-weight: 700; color: var(--text-main); }
         .stat-label { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
@@ -142,29 +142,28 @@ if ($mapping_ids_str !== '0') {
         </header>
 
         <div class="content-area">
-            <!-- Summary Stats -->
             <div class="stats-row">
-                <div class="stat-card">
+                <a href="client_patrol_history.php" class="stat-card">
                     <div class="stat-icon" style="background: #eff6ff; color: #3b82f6;">📊</div>
                     <div>
                         <div class="stat-value"><?php echo $scans_today; ?></div>
                         <div class="stat-label">Scans Today</div>
                     </div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="client_guards.php" class="stat-card">
                     <div class="stat-icon" style="background: #f0fdf4; color: #10b981;">🛡️</div>
                     <div>
                         <div class="stat-value"><?php echo $guards_active; ?></div>
                         <div class="stat-label">Active Guards</div>
                     </div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="client_incidents.php" class="stat-card">
                     <div class="stat-icon" style="background: #fef2f2; color: #ef4444;">⚠️</div>
                     <div>
                         <div class="stat-value"><?php echo $open_incidents; ?></div>
                         <div class="stat-label">Open Alerts</div>
                     </div>
-                </div>
+                </a>
             </div>
 
             <!-- Site Activity -->

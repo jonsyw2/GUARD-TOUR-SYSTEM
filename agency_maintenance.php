@@ -123,8 +123,55 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_assign_client'])) 
     }
 }
 
+// Handle Add Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
+    $new_username = $conn->real_escape_string($_POST['new_username']);
+    $password = password_hash($_POST['new_password'], PASSWORD_DEFAULT);
+    $checkSql = "SELECT id FROM users WHERE username = '$new_username'";
+    $result = $conn->query($checkSql);
+    if ($result->num_rows > 0) {
+        $message = "Client username already exists!";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else {
+        $sql = "INSERT INTO users (username, password, user_level) VALUES ('$new_username', '$password', 'client')";
+        if ($conn->query($sql) === TRUE) {
+            $message = "Client created successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } else {
+            $message = "Error creating client: " . $conn->error;
+            $message_type = "error";
+            $show_status_modal = true;
+        }
+    }
+}
+
+// Handle Delete Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
+    $delete_id = (int)$_POST['delete_id'];
+    if ($delete_id == $_SESSION['user_id']) {
+        $message = "You cannot delete your own account.";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else {
+        if ($conn->query("DELETE FROM users WHERE id = $delete_id AND user_level = 'client'") === TRUE) {
+            $message = "Client deleted successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } else {
+            $message = "Error deleting client: " . $conn->error;
+            $message_type = "error";
+            $show_status_modal = true;
+        }
+    }
+}
+
 // Fetch all agencies for dropdowns
 $agencies_result = $conn->query("SELECT id, username, qr_limit, guard_limit, inspector_qr_limit FROM users WHERE user_level = 'agency' ORDER BY username ASC");
+
+// Fetch all clients
+$clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
 
 // Fetch all clients for dropdowns
 $clients_result = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
@@ -142,8 +189,8 @@ $mappings_result = $conn->query($mapping_sql);
 
 ?>
 <?php
-$page_title = 'Agency Maintenance';
-$header_title = 'Security Agency Management';
+$page_title = 'Users Maintenance';
+$header_title = 'Users Maintenance';
 include 'admin_layout/head.php';
 include 'admin_layout/sidebar.php';
 ?>
@@ -154,8 +201,8 @@ include 'admin_layout/sidebar.php';
         <div class="content-area">
 
             <div class="tab-nav">
-                <button class="tab-btn active" onclick="switchTab('tab-agencies')">Agencies</button>
-                <button class="tab-btn" onclick="switchTab('tab-assignments')">Client Assignments</button>
+                <button class="tab-btn active" onclick="switchTab('tab-agencies', this)">Agencies</button>
+                <button class="tab-btn" onclick="switchTab('tab-assignments', this)">Client Assignments</button>
             </div>
 
             <style>
@@ -354,11 +401,11 @@ include 'admin_layout/sidebar.php';
     </main>
 
     <script>
-        function switchTab(tabId) {
+        function switchTab(tabId, btn) {
             document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById(tabId).classList.add('active');
-            event.currentTarget.classList.add('active');
+            if (btn) btn.classList.add('active');
         }
 
         function toggleAssignForm(type, btn) {

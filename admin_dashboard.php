@@ -7,7 +7,7 @@ if ($_SESSION['user_level'] !== 'admin') {
 }
 
 // Fetch statistics
-$total_users_result = $conn->query("SELECT COUNT(*) as count FROM users");
+$total_users_result = $conn->query("SELECT COUNT(*) as count FROM guards");
 $total_users = $total_users_result ? $total_users_result->fetch_assoc()['count'] : 0;
 
 $agencies_count_result = $conn->query("SELECT COUNT(*) as count FROM users WHERE user_level = 'agency'");
@@ -36,7 +36,8 @@ include 'admin_layout/sidebar.php';
         <div class="contentArea">
             <style>
                 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 40px; }
-                .stat-card { background: white; padding: 32px; border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); position: relative; transition: all 0.3s ease; }
+                .stat-card { background: white; padding: 32px; border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); position: relative; transition: all 0.3s ease; cursor: pointer; text-decoration: none; display: block; color: inherit; }
+                a.stat-card { color: inherit; text-decoration: none; }
                 .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
                 .stat-label { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: block; }
                 .stat-value { font-size: 2.5rem; font-weight: 800; color: var(--text-main); letter-spacing: -1px; }
@@ -47,21 +48,21 @@ include 'admin_layout/sidebar.php';
             </style>
 
             <div class="stats-grid">
-                <div class="stat-card">
-                    <span class="stat-label">System Users</span>
+                <a href="admin_security_guards.php" class="stat-card">
+                    <span class="stat-label">Total Guards</span>
                     <div class="stat-value"><?php echo $total_users; ?></div>
                     <div class="stat-icon">👥</div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="manage_inspectors.php" class="stat-card">
                     <span class="stat-label">Security Agencies</span>
                     <div class="stat-value"><?php echo $agencies_count; ?></div>
                     <div class="stat-icon">🛡️</div>
-                </div>
-                <div class="stat-card">
+                </a>
+                <a href="manage_limits.php" class="stat-card">
                     <span class="stat-label">Active Clients</span>
                     <div class="stat-value"><?php echo $clients_count; ?></div>
                     <div class="stat-icon">💼</div>
-                </div>
+                </a>
             </div>
 
             <div class="lists-grid">
