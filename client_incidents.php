@@ -153,9 +153,6 @@ $incidents_result = $conn->query($incidents_sql);
             <li><a href="client_incidents.php" class="nav-link active">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
         </ul>
-        <div style="padding: 20px; font-size: 0.75rem; color: #6b7280; border-top: 1px solid #374151;">
-            <p>Professional Reporting System</p>
-        </div>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
         </div>

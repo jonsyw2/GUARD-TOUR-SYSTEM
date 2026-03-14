@@ -40,6 +40,7 @@ addColumnSafely($conn, 'agency_clients', 'shift_type', "VARCHAR(50) DEFAULT 'Day
 
 addColumnSafely($conn, 'checkpoints', 'is_zero_checkpoint', 'TINYINT(1) DEFAULT 0');
 addColumnSafely($conn, 'checkpoints', 'checkpoint_code', 'VARCHAR(50)', 'name');
+addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes');
 
 $conn->query("CREATE TABLE IF NOT EXISTS shifts (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -53,7 +54,8 @@ $conn->query("CREATE TABLE IF NOT EXISTS tour_assignments (
     checkpoint_id INT NOT NULL,
     sort_order INT NOT NULL,
     interval_minutes INT DEFAULT 0,
-    duration_minutes INT DEFAULT 0
+    duration_minutes INT DEFAULT 0,
+    shift_name VARCHAR(50)
 )");
 
 // Fetch checkpoints and shifts via AJAX
@@ -93,14 +95,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
     $intervals = $_POST['intervals'] ?? [];
     $durations = $_POST['durations'] ?? [];
+    $assignment_shifts = $_POST['assignment_shifts'] ?? [];
     $is_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
-    $shift_type = $conn->real_escape_string($_POST['shift_type'] ?? 'Day Shift');
     
     $conn->begin_transaction();
     try {
-        // Update Lock Status and Shift Type
-        $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ?, shift_type = ? WHERE id = ? AND agency_id = ?");
-        $stmt->bind_param("isii", $is_locked, $shift_type, $mapping_id, $agency_id);
+        // Update Lock Status
+        $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ? WHERE id = ? AND agency_id = ?");
+        $stmt->bind_param("iii", $is_locked, $mapping_id, $agency_id);
         $stmt->execute();
 
         // Clear existing and save new assignments
@@ -109,9 +111,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
             $cp_id = (int)$checkpoint_ids[$i];
             $interval = (int)($intervals[$i] ?? 0);
             $duration = (int)($durations[$i] ?? 0);
+            $as_shift = $conn->real_escape_string($assignment_shifts[$i] ?? '');
             $order = $i + 1;
-            $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes) VALUES (?, ?, ?, ?, ?)");
-            $stmt_ins->bind_param("iiiii", $mapping_id, $cp_id, $order, $interval, $duration);
+            $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes, shift_name) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt_ins->bind_param("iiiii s", $mapping_id, $cp_id, $order, $interval, $duration, $as_shift);
             $stmt_ins->execute();
         }
         $conn->commit();
@@ -194,6 +197,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                     $current_index++;
                 }
 
+                // Auto-create Starting Point if missing
+                $start_check = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1");
+                if ($start_check && $start_check->num_rows == 0) {
+                    $code = "START-" . strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
+                    $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, is_zero_checkpoint) VALUES ($mapping_id, 'Starting Point', '$code', 1)");
+                }
+
                 // Handle shifts update
                 $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
                 $site_shifts = $_POST['shifts'] ?? [];
@@ -230,6 +240,7 @@ $clients_sql = "
         ac.site_name, 
         ac.is_patrol_locked,
         ac.shift_type,
+        ac.company_name,
         ag_u.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
@@ -274,7 +285,7 @@ if ($selected_mapping_id) {
     }
 
     $assign_res = $conn->query("
-        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, cp.name 
+        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name 
         FROM tour_assignments ta 
         JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
         WHERE ta.agency_client_id = $selected_mapping_id 
@@ -298,7 +309,7 @@ if ($selected_mapping_id) {
 $checkpoints_result = null;
 if ($selected_mapping_id) {
     $checkpoints_sql = "
-        SELECT cp.id, cp.name, cp.checkpoint_code, cp.is_zero_checkpoint, cp.created_at, c.username as client_name, ac.site_name
+        SELECT cp.id, cp.name, cp.checkpoint_code, cp.is_zero_checkpoint, cp.created_at, c.username as client_name, ac.site_name, ac.company_name
         FROM checkpoints cp
         JOIN agency_clients ac ON cp.agency_client_id = ac.id
         JOIN users c ON ac.client_id = c.id
@@ -554,13 +565,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Shift Declare</label>
-                                                    <select name="shift_type" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
-                                                        <?php if (empty($client_shifts)): ?>
-                                                            <option value="Day Shift" <?php echo ($selected_client['shift_type'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                            <option value="Night Shift" <?php echo ($selected_client['shift_type'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                    <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                                                        <?php 
+                                                            $start_shift = $selected_client['shift_type'] ?? '';
+                                                            foreach($current_assignments as $as) {
+                                                                if($as['checkpoint_id'] == $starting_point['id']) {
+                                                                    $start_shift = $as['shift_name'];
+                                                                    break;
+                                                                }
+                                                            }
+                                                            if (empty($client_shifts)): 
+                                                        ?>
+                                                            <option value="Day Shift" <?php echo $start_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                            <option value="Night Shift" <?php echo $start_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
                                                         <?php else: ?>
                                                             <?php foreach ($client_shifts as $s_name): ?>
-                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($selected_client['shift_type'] ?? '') === $s_name ? 'selected' : ''; ?>>
+                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo $start_shift === $s_name ? 'selected' : ''; ?>>
                                                                     <?php echo htmlspecialchars($s_name); ?>
                                                                 </option>
                                                             <?php endforeach; ?>
@@ -586,6 +606,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <label>Interval</label>
                                                     <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0">
                                                     <label>min</label>
+                                                </div>
+                                                <div class="input-group">
+                                                    <label>Shift Declare</label>
+                                                    <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                                                        <?php if (empty($client_shifts)): ?>
+                                                            <option value="Day Shift" <?php echo ($item['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                            <option value="Night Shift" <?php echo ($item['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                        <?php else: ?>
+                                                            <?php foreach ($client_shifts as $s_name): ?>
+                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($item['shift_name'] ?? '') === $s_name ? 'selected' : ''; ?>>
+                                                                    <?php echo htmlspecialchars($s_name); ?>
+                                                                </option>
+                                                            <?php endforeach; ?>
+                                                        <?php endif; ?>
+                                                    </select>
                                                 </div>
                                                 <input type="hidden" name="durations[]" value="1">
                                             </div>
@@ -622,7 +657,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     </thead>
                                     <tbody>
                                         <?php if ($checkpoints_result && $checkpoints_result->num_rows > 0): ?>
-                                            <?php while($row = $checkpoints_result->fetch_assoc()): ?>
+                                            <?php $index = 0; while($row = $checkpoints_result->fetch_assoc()): ?>
                                                 <tr>
                                                     <td>
                                                         <strong><?php echo htmlspecialchars($row['name']); ?></strong>
@@ -633,10 +668,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></td>
                                                     <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                                     <td>
-                                                        <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('<?php echo $row['checkpoint_code']; ?>', '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['client_name']); ?>', '<?php echo addslashes($row['site_name']); ?>')">Show</button>
+                                                        <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('<?php echo $row['checkpoint_code']; ?>', '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['client_name']); ?>', '<?php echo addslashes($row['site_name']); ?>', '<?php echo addslashes($row['company_name'] ?? ''); ?>', '<?php echo $index; ?>')">Show</button>
                                                     </td>
                                                 </tr>
-                                            <?php endwhile; ?>
+                                            <?php $index++; endwhile; ?>
                                         <?php else: ?>
                                             <tr>
                                                 <td colspan="4" class="empty-state">No checkpoints created yet.</td>
@@ -805,6 +840,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     <script>
         const clientsData = <?php echo json_encode($clients_data); ?>;
+        const currentShifts = <?php echo json_encode($client_shifts ?? []); ?>;
         let elementToFocusAfterAlert = null;
         
         // Initialize Sortable for drag-and-drop reordering
@@ -950,6 +986,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             if (!id) return;
 
+            let shiftOptions = '';
+            if (currentShifts.length > 0) {
+                shiftOptions = currentShifts.map(s => `<option value="${s.replace(/"/g, '&quot;')}">${s}</option>`).join('');
+            } else {
+                shiftOptions = '<option value="Day Shift">Day Shift</option><option value="Night Shift">Night Shift</option>';
+            }
+
             const list = document.getElementById('tour-list');
             const item = document.createElement('div');
             item.className = 'tour-item';
@@ -963,6 +1006,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <input type="number" name="intervals[]" value="0" min="0">
                         <label>min</label>
                     </div>
+                    <div class="input-group">
+                        <label>Shift Declare</label>
+                        <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                            ${shiftOptions}
+                        </select>
+                    </div>
                     <input type="hidden" name="durations[]" value="1">
                 </div>
                 <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
@@ -972,11 +1021,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
 
         // Print Modal Logic
-        function showPrintModal(code, name, client, siteName) {
-            // Priority: Site Name, then Client Name if site name is empty
-            const displaySite = siteName || client;
-            document.getElementById('printSiteName').textContent = displaySite;
-            document.getElementById('codeLabel').textContent = code;
+        function showPrintModal(code, name, client, siteName, companyName, index) {
+            // Priority: Company Name, then Site Name, then Client Name
+            const displayTitle = companyName || siteName || client;
+            document.getElementById('printSiteName').textContent = displayTitle;
+            document.getElementById('codeLabel').textContent = "Checkpoint " + index;
             
             document.getElementById('qrcode').innerHTML = '';
             
@@ -989,26 +1038,57 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 correctLevel : QRCode.CorrectLevel.H
             });
             
-            document.getElementById('printQRModal').dataset.filename = (displaySite + "_" + code).replace(/[^a-z0-9]/gi, '_');
+            document.getElementById('printQRModal').dataset.filename = (displayTitle + "_" + code).replace(/[^a-z0-9]/gi, '_');
             document.getElementById('printQRModal').classList.add('show');
         }
 
         function downloadQR() {
-            const canvas = document.querySelector('#qrcode canvas');
-            if (!canvas) {
-                // If qrcodejs used img instead of canvas (browsers without canvas support)
-                const img = document.querySelector('#qrcode img');
-                if (img) {
-                    const link = document.createElement('a');
-                    link.download = (document.getElementById('printQRModal').dataset.filename || 'QR_Code') + '.png';
-                    link.href = img.src;
-                    link.click();
-                }
-                return;
+            const qrCanvas = document.querySelector('#qrcode canvas');
+            const qrImg = document.querySelector('#qrcode img');
+            const companyName = document.getElementById('printSiteName').textContent;
+            const checkpointLabel = document.getElementById('codeLabel').textContent;
+            
+            // Create a temporary canvas for the final image
+            const finalCanvas = document.createElement('canvas');
+            const ctx = finalCanvas.getContext('2d');
+            
+            // Set dimensions (padding + QR size)
+            const width = 350;
+            const height = 450;
+            finalCanvas.width = width;
+            finalCanvas.height = height;
+            
+            // Fill background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw Company Name
+            ctx.fillStyle = '#111827';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(companyName, width / 2, 60);
+            
+            // Draw QR Code
+            const qrSize = 256;
+            const qrX = (width - qrSize) / 2;
+            const qrY = 100;
+            
+            if (qrCanvas) {
+                ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
+            } else if (qrImg) {
+                ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
             }
+            
+            // Draw Checkpoint Label
+            ctx.fillStyle = '#111827';
+            ctx.font = 'bold 28px Monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(checkpointLabel, width / 2, 400);
+            
+            // Trigger download
             const link = document.createElement('a');
             link.download = (document.getElementById('printQRModal').dataset.filename || 'QR_Code') + '.png';
-            link.href = canvas.toDataURL("image/png");
+            link.href = finalCanvas.toDataURL("image/png");
             link.click();
         }
 
