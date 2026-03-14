@@ -1,0 +1,16 @@
+# php -- BEGIN cPanel-generated handler, do not edit
+# Set the "ea-php82" package as the default "PHP" programming language.
+<IfModule mime_module>
+  AddHandler application/x-httpd-ea-php82 .php .php8 .phtml
+</IfModule>
+# php -- END cPanel-generated handler, do not edit
+
+# Disable directory listing
+Options -Indexes
+
+# Set default index file
+DirectoryIndex index.php login.php
+
+# Redirect root to login
+RewriteEngine On
+RewriteRule ^$ /login.php [R=302,L]
