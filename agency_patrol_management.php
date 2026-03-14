@@ -1,4 +1,8 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 require_once 'auth_check.php';
 
 if ($_SESSION['user_level'] !== 'agency') {
@@ -17,6 +21,40 @@ if (!$agency_id && isset($_SESSION['username'])) {
         $_SESSION['user_id'] = $agency_id;
     }
 }
+
+// Helper function for safer migrations
+if (!function_exists('addColumnSafely')) {
+    function addColumnSafely($conn, $table, $column, $definition, $after = '') {
+        $res = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
+        if ($res && $res->num_rows == 0) {
+            $afterClause = $after ? " AFTER `$after`" : "";
+            $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition $afterClause");
+        }
+    }
+}
+
+// Auto-Migration: Ensure required tables and columns exist for Patrol Management
+addColumnSafely($conn, 'agency_clients', 'site_name', 'VARCHAR(255)', 'client_id');
+addColumnSafely($conn, 'agency_clients', 'is_patrol_locked', 'TINYINT(1) DEFAULT 0', 'site_name');
+addColumnSafely($conn, 'agency_clients', 'shift_type', "VARCHAR(50) DEFAULT 'Day Shift'", 'is_patrol_locked');
+
+addColumnSafely($conn, 'checkpoints', 'is_zero_checkpoint', 'TINYINT(1) DEFAULT 0');
+addColumnSafely($conn, 'checkpoints', 'checkpoint_code', 'VARCHAR(50)', 'name');
+
+$conn->query("CREATE TABLE IF NOT EXISTS shifts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    agency_client_id INT NOT NULL,
+    shift_name VARCHAR(50) NOT NULL
+)");
+
+$conn->query("CREATE TABLE IF NOT EXISTS tour_assignments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    agency_client_id INT NOT NULL,
+    checkpoint_id INT NOT NULL,
+    sort_order INT NOT NULL,
+    interval_minutes INT DEFAULT 0,
+    duration_minutes INT DEFAULT 0
+)");
 
 // Fetch checkpoints and shifts via AJAX
 if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
