@@ -65,7 +65,7 @@ $incidents_result = $conn->query($incidents_sql);
         .logout-btn:hover { background-color: #dc2626; }
 
         /* Main Content Styles */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; overflow: hidden; border: 1px solid #e5e7eb; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
         .user-info { display: flex; align-items: center; gap: 12px; }
