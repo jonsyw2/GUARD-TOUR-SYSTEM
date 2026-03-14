@@ -10,11 +10,22 @@ $agency_id = $_SESSION['user_id'] ?? null;
 $message = '';
 $message_type = '';
 
+// Helper function for safer migrations
+if (!function_exists('addColumnSafely')) {
+    function addColumnSafely($conn, $table, $column, $definition, $after = '') {
+        $res = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
+        if ($res && $res->num_rows == 0) {
+            $afterClause = $after ? " AFTER `$after`" : "";
+            $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition $afterClause");
+        }
+    }
+}
+
 // Auto-Migration: Add new columns if they don't exist
-$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS gender VARCHAR(20) AFTER name");
-$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS police_clearance_no VARCHAR(50) AFTER lesp_expiry");
-$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS nbi_no VARCHAR(50) AFTER police_clearance_no");
-$conn->query("ALTER TABLE guards ADD COLUMN IF NOT EXISTS contact_no VARCHAR(20) AFTER nbi_no");
+addColumnSafely($conn, 'guards', 'gender', 'VARCHAR(20)', 'name');
+addColumnSafely($conn, 'guards', 'police_clearance_no', 'VARCHAR(50)', 'lesp_expiry');
+addColumnSafely($conn, 'guards', 'nbi_no', 'VARCHAR(50)', 'police_clearance_no');
+addColumnSafely($conn, 'guards', 'contact_no', 'VARCHAR(20)', 'nbi_no');
 
 $message = '';
 $message_type = '';
