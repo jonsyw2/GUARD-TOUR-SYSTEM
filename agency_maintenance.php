@@ -373,11 +373,11 @@ include 'admin_layout/sidebar.php';
                                 </div>
                                 <div class="form-grid">
                                     <div class="form-group">
-                                        <label class="form-label">New Client Name</label>
+                                        <label class="form-label">Client Userame</label>
                                         <input type="text" name="client_username" class="form-control" required placeholder="Account username">
                                     </div>
                                     <div class="form-group">
-                                        <label class="form-label">Access Password</label>
+                                        <label class="form-label">Password</label>
                                         <input type="password" name="client_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                                     </div>
                                 </div>

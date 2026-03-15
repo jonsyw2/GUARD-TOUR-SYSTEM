@@ -8,6 +8,83 @@ if ($_SESSION['user_level'] !== 'agency') {
 
 $agency_id = $_SESSION['user_id'];
 
+// Migration: Ensure visual position columns exist
+$conn->query("ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS visual_pos_x INT DEFAULT 0, ADD COLUMN IF NOT EXISTS visual_pos_y INT DEFAULT 0");
+
+// AJAX Handler for fetching checkpoint sequence
+if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
+    $mapping_id = (int)$_GET['mapping_id'];
+    
+    // Security: Check if mapping_id belongs to this agency
+    $check_res = $conn->query("SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id");
+    if ($check_res && $check_res->num_rows > 0) {
+        $checkpoints = [];
+        
+        // 1. Fetch Starting Point with latest status
+        $start_res = $conn->query("
+            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y,
+            (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
+            FROM checkpoints cp 
+            WHERE cp.agency_client_id = $mapping_id AND cp.is_zero_checkpoint = 1 
+            LIMIT 1
+        ");
+        $starting_point = null;
+        if ($start_res && $start_res->num_rows > 0) {
+            $starting_point = $start_res->fetch_assoc();
+            $starting_point['isStart'] = true;
+        }
+        
+        // 2. Fetch Regular Checkpoints in configured sequence with latest status
+        $assign_res = $conn->query("
+            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y,
+            (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
+            FROM tour_assignments ta 
+            JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
+            WHERE ta.agency_client_id = $mapping_id 
+            ORDER BY ta.sort_order ASC
+        ");
+        
+        if ($starting_point) {
+            $checkpoints[] = $starting_point;
+        }
+        
+        while ($row = $assign_res->fetch_assoc()) {
+            // Avoid duplicate start point if it was somehow added to assignments
+            if ($starting_point && $row['id'] == $starting_point['id']) continue;
+            $row['isStart'] = false;
+            $checkpoints[] = $row;
+        }
+        
+        header('Content-Type: application/json');
+        echo json_encode($checkpoints);
+    } else {
+        header('HTTP/1.1 403 Forbidden');
+        echo json_encode(['error' => 'Unauthorized']);
+    }
+    exit();
+}
+
+// AJAX Handler for saving checkpoint position
+if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
+    $cp_id = (int)$_POST['cp_id'];
+    $x = (int)($_POST['x'] ?? 0);
+    $y = (int)($_POST['y'] ?? 0);
+    
+    // Security: Verify checkpoint belongs to an agency site
+    $stmt = $conn->prepare("
+        UPDATE checkpoints cp
+        JOIN agency_clients ac ON cp.agency_client_id = ac.id
+        SET cp.visual_pos_x = ?, cp.visual_pos_y = ?
+        WHERE cp.id = ? AND ac.agency_id = ?
+    ");
+    $stmt->bind_param("iiii", $x, $y, $cp_id, $agency_id);
+    $stmt->execute();
+    
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true]);
+    exit();
+}
+
 // Fetch all clients for this agency to populate filter
 $clients_sql = "
     SELECT ac.id as mapping_id, u.username as client_name 
@@ -35,7 +112,13 @@ $filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-7 days'));
 $filter_end = $_GET['end_date'] ?? date('Y-m-d');
 $filter_guard = $_GET['guard_id'] ?? '';
 $filter_client = $_GET['mapping_id'] ?? '';
+$filter_checkpoint = $_GET['checkpoint_id'] ?? '';
 $filter_shift = $_GET['shift'] ?? '';
+
+// Fetch checkpoints for filtering (Scope to site if selected)
+$cp_scope_sql = !empty($filter_client) ? "agency_client_id = " . (int)$filter_client : "agency_client_id IN ($mapping_ids_str)";
+$cp_filter_sql = "SELECT id, name FROM checkpoints WHERE $cp_scope_sql ORDER BY name ASC";
+$checkpoints_res = $conn->query($cp_filter_sql);
 
 // Build dynamic WHERE clause
 $where_clauses = ["c.agency_client_id IN ($mapping_ids_str)"];
@@ -56,6 +139,10 @@ if (!empty($filter_client)) {
     $m_id = (int)$filter_client;
     $where_clauses[] = "c.agency_client_id = $m_id";
 }
+if (!empty($filter_checkpoint)) {
+    $c_id = (int)$filter_checkpoint;
+    $where_clauses[] = "s.checkpoint_id = $c_id";
+}
 if (!empty($filter_shift)) {
     $shift = $conn->real_escape_string($filter_shift);
     $where_clauses[] = "s.shift = '$shift'";
@@ -71,7 +158,6 @@ $history_sql = "
         g.name as guard_name,
         u.username as client_name,
         s.status,
-        s.shift,
         s.justification
     FROM scans s
     JOIN checkpoints c ON s.checkpoint_id = c.id
@@ -157,6 +243,97 @@ $history_res = $conn->query($history_sql);
         .btn-cancel:hover { background: #e5e7eb; }
         .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
         .btn-confirm:hover { background: #be123c; }
+
+        /* Visual Designer Styles */
+        .btn-visual {
+            background-color: #6366f1;
+            color: white;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-visual:hover { background-color: #4f46e5; }
+        
+        .visual-container {
+            width: 100%;
+            height: 400px;
+            background: #f1f5f9;
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            margin-top: 15px;
+        }
+        .checkpoint-circle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9rem;
+            position: absolute;
+            cursor: move;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            user-select: none;
+            border: 2px solid transparent;
+        }
+        .checkpoint-circle.start {
+            background-color: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+            z-index: 10;
+        }
+        .checkpoint-circle.regular {
+            background-color: white;
+            color: #1e293b;
+            border-color: #cbd5e1;
+        }
+        .checkpoint-circle .label {
+            position: absolute;
+            bottom: -20px;
+            white-space: nowrap;
+            font-size: 0.75rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        /* Status Beep Animations (Internal Lighting) */
+        @keyframes beep-green {
+            0% { background-color: white; }
+            50% { background-color: #10b981; color: white; border-color: #065f46; }
+            100% { }
+        }
+        @keyframes beep-red {
+            0% { background-color: white; }
+            50% { background-color: #ef4444; color: white; border-color: #991b1b; }
+            100% { }
+        }
+        @keyframes beep-gray {
+            0% { background-color: white; }
+            50% { background-color: #9ca3af; color: white; border-color: #4b5563; }
+            100% { }
+        }
+
+        .beep-on-time { animation: beep-green 1s ease-in-out !important; }
+        .beep-late { animation: beep-red 1s ease-in-out !important; }
+        .beep-none { animation: beep-gray 1s ease-in-out !important; }
+
+        .modal-content.large { max-width: 800px; }
+        .card-header-flex { display: flex; justify-content: space-between; align-items: center; }
+        .remove-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; }
+        .remove-btn:hover { color: #1f2937; }
+        
+        .table-header-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 12px;
+        }
     </style>
 </head>
 <body>
@@ -210,9 +387,10 @@ $history_res = $conn->query($history_sql);
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="mapping_id">Client Site</label>
-                        <select id="mapping_id" name="mapping_id" class="form-control">
+                        <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Clients --</option>
                             <?php if ($clients_res && $clients_res->num_rows > 0): ?>
+                                <?php mysqli_data_seek($clients_res, 0); ?>
                                 <?php while($c = $clients_res->fetch_assoc()): ?>
                                     <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['client_name']); ?></option>
                                 <?php endwhile; ?>
@@ -221,9 +399,10 @@ $history_res = $conn->query($history_sql);
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="guard_id">Guard</label>
-                        <select id="guard_id" name="guard_id" class="form-control">
+                        <select id="guard_id" name="guard_id" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Guards --</option>
                             <?php if ($guards_res && $guards_res->num_rows > 0): ?>
+                                <?php mysqli_data_seek($guards_res, 0); ?>
                                 <?php while($g = $guards_res->fetch_assoc()): ?>
                                     <option value="<?php echo $g['id']; ?>" <?php if($filter_guard == $g['id']) echo 'selected'; ?>><?php echo htmlspecialchars($g['name']); ?></option>
                                 <?php endwhile; ?>
@@ -231,8 +410,20 @@ $history_res = $conn->query($history_sql);
                         </select>
                     </div>
                     <div class="form-group">
+                        <label class="form-label" for="checkpoint_id">Checkpoint</label>
+                        <select id="checkpoint_id" name="checkpoint_id" class="form-control" onchange="this.form.submit()">
+                            <option value="">-- All Checkpoints --</option>
+                            <?php if ($checkpoints_res && $checkpoints_res->num_rows > 0): ?>
+                                <?php mysqli_data_seek($checkpoints_res, 0); ?>
+                                <?php while($cp = $checkpoints_res->fetch_assoc()): ?>
+                                    <option value="<?php echo $cp['id']; ?>" <?php if($filter_checkpoint == $cp['id']) echo 'selected'; ?>><?php echo htmlspecialchars($cp['name']); ?></option>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label" for="shift">Shift</label>
-                        <select id="shift" name="shift" class="form-control">
+                        <select id="shift" name="shift" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Shifts --</option>
                             <option value="Morning" <?php if($filter_shift == 'Morning') echo 'selected'; ?>>Morning</option>
                             <option value="Afternoon" <?php if($filter_shift == 'Afternoon') echo 'selected'; ?>>Afternoon</option>
@@ -247,13 +438,15 @@ $history_res = $conn->query($history_sql);
             </div>
 
             <div class="card">
+                <div class="table-header-actions">
+                    <button type="button" class="btn-visual" style="padding: 8px 16px; font-size: 0.85rem;" onclick="openVisualDesigner()">Visual</button>
+                </div>
                 <div class="table-container">
                     <table>
                         <thead>
                             <tr>
                                 <th>Date & Time</th>
                                 <th>Client</th>
-                                <th>Shift</th>
                                 <th>Checkpoint</th>
                                 <th>Guard</th>
                                 <th>Status</th>
@@ -266,7 +459,6 @@ $history_res = $conn->query($history_sql);
                                     <tr>
                                         <td><strong><?php echo date('M d, Y h:i A', strtotime($row['scan_time'])); ?></strong></td>
                                         <td><?php echo htmlspecialchars($row['client_name']); ?></td>
-                                        <td><span style="font-size: 0.85rem; color: #6b7280;"><?php echo htmlspecialchars($row['shift'] ?? 'N/A'); ?></span></td>
                                         <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
                                         <td>
@@ -281,7 +473,7 @@ $history_res = $conn->query($history_sql);
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="7" class="empty-state">No patrol activity found for the selected criteria.</td>
+                                    <td colspan="6" class="empty-state">No patrol activity found for the selected criteria.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -307,12 +499,202 @@ $history_res = $conn->query($history_sql);
         </div>
     </div>
 
+    <!-- Visual Designer Modal -->
+    <div id="visualDesignerModal" class="modal-overlay">
+        <div class="modal-content large">
+            <div class="card-header card-header-flex" style="border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; padding-bottom: 12px;">
+                <h3 class="modal-title" style="margin-bottom: 0;">Visual Patrol Map</h3>
+                <button type="button" class="remove-btn" onclick="closeVisualDesigner()">&times;</button>
+            </div>
+            <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px; text-align: left;">
+                Draggable overview of checkpoints. <strong>Blue</strong> is the start, <strong>White</strong> are regular checkpoints.
+            </p>
+            <div id="visual-canvas" class="visual-container">
+                <div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">Loading checkpoints...</div>
+            </div>
+            <div class="modal-actions" style="margin-top: 20px;">
+                <button class="btn-modal btn-cancel" style="max-width: 200px; margin-left: auto;" onclick="closeVisualDesigner()">Close View</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Modal (Custom Alert Replacement) -->
+    <div id="alertModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            </div>
+            <h3 class="modal-title">Action Required</h3>
+            <p class="modal-text" id="alertModalText">Please select a Client Site first to view the visual map.</p>
+            <div class="modal-actions">
+                <button class="btn-modal btn-confirm" style="width: 100%;" onclick="document.getElementById('alertModal').classList.remove('show');">Got it</button>
+            </div>
+        </div>
+    </div>
+
     <script>
+        const selectedMappingId = '<?php echo $filter_client; ?>';
+        let beepInterval = null;
+        let beepIndex = 0;
+        let visualCheckpoints = [];
+
+        function closeVisualDesigner() {
+            document.getElementById('visualDesignerModal').classList.remove('show');
+            if (beepInterval) {
+                clearInterval(beepInterval);
+                beepInterval = null;
+            }
+            // Clear animations
+            document.querySelectorAll('.checkpoint-circle').forEach(c => {
+                c.classList.remove('beep-on-time', 'beep-late', 'beep-none');
+            });
+        }
+
+        function triggerNextBeep() {
+            if (visualCheckpoints.length === 0) return;
+            
+            // Remove previous flashes
+            document.querySelectorAll('.checkpoint-circle').forEach(c => {
+                c.classList.remove('beep-on-time', 'beep-late', 'beep-none');
+            });
+            
+            const cp = visualCheckpoints[beepIndex];
+            const circle = document.getElementById(`cp-circle-${cp.id}`);
+            
+            if (circle) {
+                let beepClass = 'beep-none';
+                const status = (cp.latest_status || '').toLowerCase();
+                
+                if (status === 'on-time' || status === 'on time') beepClass = 'beep-on-time';
+                else if (status === 'late') beepClass = 'beep-late';
+                
+                circle.classList.add(beepClass);
+            }
+            
+            beepIndex = (beepIndex + 1) % visualCheckpoints.length;
+        }
+
+        function openVisualDesigner() {
+            if (!selectedMappingId) {
+                document.getElementById('visualDesignerModal').classList.remove('show');
+                document.getElementById('alertModalText').innerText = "Please select a Client Site first to view the visual map.";
+                document.getElementById('alertModal').classList.add('show');
+                return;
+            }
+
+            const modal = document.getElementById('visualDesignerModal');
+            const canvas = document.getElementById('visual-canvas');
+            
+            modal.classList.add('show');
+            canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">Loading checkpoints...</div>';
+
+            fetch(`agency_patrol_history.php?ajax_checkpoints=1&mapping_id=${selectedMappingId}`)
+                .then(response => response.json())
+                .then(data => {
+                    canvas.innerHTML = '';
+                    visualCheckpoints = data;
+                    beepIndex = 0;
+
+                    if (data.length === 0) {
+                        canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">No checkpoints configured for this site.</div>';
+                        return;
+                    }
+
+                    data.forEach((cp, index) => {
+                        const circle = document.createElement('div');
+                        circle.id = `cp-circle-${cp.id}`;
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : 'regular'}`;
+                        circle.innerHTML = `
+                            ${cp.isStart ? 'S' : (index)}
+                            <div class="label">${cp.name}</div>
+                        `;
+                        
+                        // Initial positions (Saved or Default)
+                        let x = parseInt(cp.visual_pos_x) || 0;
+                        let y = parseInt(cp.visual_pos_y) || 0;
+                        
+                        if (x === 0 && y === 0) {
+                            // Align in rows if no position is saved
+                            const containerWidth = canvas.offsetWidth || 750;
+                            const spacingX = 90; 
+                            const spacingY = 90;
+                            const itemsPerRow = Math.floor((containerWidth - 60) / spacingX) || 7;
+                            
+                            x = 40 + (index % itemsPerRow) * spacingX;
+                            y = 40 + Math.floor(index / itemsPerRow) * spacingY;
+                        }
+                        
+                        circle.style.left = x + 'px';
+                        circle.style.top = y + 'px';
+                        
+                        // Drag logic
+                        circle.onmousedown = function(e) {
+                            let shiftX = e.clientX - circle.getBoundingClientRect().left;
+                            let shiftY = e.clientY - circle.getBoundingClientRect().top;
+                            circle.style.zIndex = 1000;
+                            
+                            function moveAt(pageX, pageY) {
+                                let newX = pageX - canvas.getBoundingClientRect().left - shiftX;
+                                let newY = pageY - canvas.getBoundingClientRect().top - shiftY;
+                                newX = Math.max(0, Math.min(newX, canvas.offsetWidth - circle.offsetWidth));
+                                newY = Math.max(0, Math.min(newY, canvas.offsetHeight - circle.offsetHeight));
+                                circle.style.left = newX + 'px';
+                                circle.style.top = newY + 'px';
+                            }
+                            
+                            function onMouseMove(e) { moveAt(e.pageX, e.pageY); }
+                            document.addEventListener('mousemove', onMouseMove);
+                            
+                            circle.onmouseup = function() {
+                                document.removeEventListener('mousemove', onMouseMove);
+                                circle.onmouseup = null;
+                                circle.style.zIndex = cp.isStart ? 10 : 5;
+                                
+                                // Save new position
+                                const finalX = parseInt(circle.style.left);
+                                const finalY = parseInt(circle.style.top);
+                                
+                                const formData = new FormData();
+                                formData.append('ajax_save_position', '1');
+                                formData.append('cp_id', cp.id);
+                                formData.append('x', finalX);
+                                formData.append('y', finalY);
+                                
+                                fetch('agency_patrol_history.php', {
+                                    method: 'POST',
+                                    body: formData
+                                })
+                                .catch(err => console.error('Error saving position:', err));
+                            };
+                        };
+                        
+                        circle.ondragstart = function() { return false; };
+                        canvas.appendChild(circle);
+                    });
+
+                    // Start sequential beeping (1s interval)
+                    triggerNextBeep(); 
+                    beepInterval = setInterval(triggerNextBeep, 1000);
+                })
+                .catch(err => {
+                    canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#ef4444;">Error loading checkpoints.</div>';
+                    console.error(err);
+                });
+        }
+
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
+            const logoutModal = document.getElementById('logoutModal');
+            const visualModal = document.getElementById('visualDesignerModal');
+            const alertModal = document.getElementById('alertModal');
+            if (event.target == logoutModal) {
+                logoutModal.classList.remove('show');
+            }
+            if (event.target == visualModal) {
+                closeVisualDesigner();
+            }
+            if (event.target == alertModal) {
+                alertModal.classList.remove('show');
             }
         }
     </script>
