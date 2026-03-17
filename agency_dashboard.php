@@ -204,7 +204,7 @@ $recent_scans = $conn->query("
                                             <td><strong><?php echo htmlspecialchars($scan['guard_name']); ?></strong></td>
                                             <td><?php echo htmlspecialchars($scan['checkpoint_name']); ?></td>
                                             <td><span class="badge" style="background: #f1f5f9; color: #475569;"><?php echo htmlspecialchars($scan['site_name']); ?></span></td>
-                                            <td style="color: var(--text-muted);"><?php echo date('h:i A', strtotime($scan['scan_time'])); ?></td>
+                                            <td style="color: var(--text-muted);"><?php echo date('h:i:s A', strtotime($scan['scan_time'])); ?></td>
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>

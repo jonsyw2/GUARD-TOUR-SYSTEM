@@ -9,46 +9,38 @@ if ($_SESSION['user_level'] !== 'client') {
 $client_id = $_SESSION['user_id'];
 
 // Get all agency_client mapping IDs for this client
-$maps_sql = "SELECT id, agency_id FROM agency_clients WHERE client_id = $client_id";
+$maps_sql = "SELECT id, site_name, agency_id FROM agency_clients WHERE client_id = $client_id";
 $maps_res = $conn->query($maps_sql);
 $mapping_ids = [];
 $agency_ids = [];
 if ($maps_res && $maps_res->num_rows > 0) {
     while($r = $maps_res->fetch_assoc()) {
         $mapping_ids[] = (int)$r['id'];
-        $agency_ids[] = (int)$r['agency_id'];
+        if ($r['agency_id']) $agency_ids[] = (int)$r['agency_id'];
     }
 }
-$agency_ids = array_unique($agency_ids);
-
-// If no assigned mapping, they have no data to view
-if (empty($mapping_ids)) {
-    $mapping_ids_str = "0";
-    $agency_ids_str = "0";
-} else {
-    $mapping_ids_str = implode(',', $mapping_ids);
-    $agency_ids_str = implode(',', $agency_ids);
-}
-
-
-// Fetch filter options: Sites
-mysqli_data_seek($maps_res, 0); // Reset for dropdown
-
-// Fetch filter options: Guards
-$guards_sql = "SELECT id, name FROM guards WHERE agency_id IN ($agency_ids_str) ORDER BY name ASC";
-$guards_res = $conn->query($guards_sql);
-
-// Fetch filter options: Checkpoints
-$checkpoints_sql = "SELECT id, name FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) ORDER BY name ASC";
-$checkpoints_res = $conn->query($checkpoints_sql);
+$mapping_ids_str = !empty($mapping_ids) ? implode(',', $mapping_ids) : '0';
+$agency_ids_str = !empty($agency_ids) ? implode(',', array_unique($agency_ids)) : '0';
 
 // Handle Filter Submissions
-$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-7 days'));
+$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-30 days'));
 $filter_end = $_GET['end_date'] ?? date('Y-m-d');
 $filter_guard = $_GET['guard_id'] ?? '';
 $filter_client = $_GET['mapping_id'] ?? '';
 $filter_checkpoint = $_GET['checkpoint_id'] ?? '';
 $filter_shift = $_GET['shift'] ?? '';
+
+// Fetch guards for filtering (Scope to site if selected, otherwise all assigned agency guards)
+$g_scope_sql = !empty($filter_client) ? 
+    "agency_id = (SELECT agency_id FROM agency_clients WHERE id = " . (int)$filter_client . ")" : 
+    "agency_id IN ($agency_ids_str)";
+$guards_sql = "SELECT id, name FROM guards WHERE $g_scope_sql ORDER BY name ASC";
+$guards_res = $conn->query($guards_sql);
+
+// Fetch checkpoints for filtering (Scope to site if selected)
+$cp_scope_sql = !empty($filter_client) ? "agency_client_id = " . (int)$filter_client : "agency_client_id IN ($mapping_ids_str)";
+$cp_filter_sql = "SELECT id, name FROM checkpoints WHERE $cp_scope_sql ORDER BY name ASC";
+$checkpoints_res = $conn->query($cp_filter_sql);
 
 // Build dynamic WHERE clause
 $where_clauses = ["c.agency_client_id IN ($mapping_ids_str)"];
@@ -65,6 +57,10 @@ if (!empty($filter_guard)) {
     $g_id = (int)$filter_guard;
     $where_clauses[] = "s.guard_id = $g_id";
 }
+if (!empty($filter_client)) {
+    $m_id = (int)$filter_client;
+    $where_clauses[] = "c.agency_client_id = $m_id";
+}
 if (!empty($filter_checkpoint)) {
     $c_id = (int)$filter_checkpoint;
     $where_clauses[] = "s.checkpoint_id = $c_id";
@@ -72,10 +68,6 @@ if (!empty($filter_checkpoint)) {
 if (!empty($filter_shift)) {
     $shift = $conn->real_escape_string($filter_shift);
     $where_clauses[] = "s.shift = '$shift'";
-}
-if (!empty($filter_client)) {
-    $m_id = (int)$filter_client;
-    $where_clauses[] = "c.agency_client_id = $m_id";
 }
 
 $where_sql = implode(" AND ", $where_clauses);
@@ -98,6 +90,59 @@ $history_sql = "
 ";
 
 $history_res = $conn->query($history_sql);
+
+// Handle Download
+if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
+    // Re-run query WITHOUT the limit for full export
+    $csv_sql = str_replace("LIMIT 200", "", $history_sql);
+    $csv_res = $conn->query($csv_sql);
+
+    header('Content-Type: application/vnd.ms-excel');
+    header('Content-Disposition: attachment; filename=client_patrol_history_' . date('Ymd_His') . '.xls');
+    
+    echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+    echo '<head>
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <style>
+            table { border-collapse: collapse; }
+            th { background-color: #3b82f6; color: white; border: 1px solid #cbd5e1; padding: 12px; text-align: center; font-weight: bold; }
+            td { border: 1px solid #cbd5e1; padding: 10px; vertical-align: middle; white-space: nowrap; }
+            .status-on-time { color: #059669; font-weight: bold; }
+            .status-late { color: #b45309; font-weight: bold; }
+            .status-missed { color: #dc2626; font-weight: bold; }
+            .text-center { text-align: center; }
+        </style>
+    </head>
+    <body>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date & Time</th>
+                    <th>Shift</th>
+                    <th>Checkpoint</th>
+                    <th>Guard</th>
+                    <th>Status</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody>';
+    
+    if ($csv_res && $csv_res->num_rows > 0) {
+        while ($row = $csv_res->fetch_assoc()) {
+            $status_class = 'status-' . strtolower($row['status']);
+            echo '<tr>';
+            echo '<td class="text-center">' . date('M d, Y h:i:s A', strtotime($row['scan_time'])) . '</td>';
+            echo '<td class="text-center">' . htmlspecialchars($row['shift'] ?? '---') . '</td>';
+            echo '<td>' . htmlspecialchars($row['checkpoint_name']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['guard_name']) . '</td>';
+            echo '<td class="text-center ' . $status_class . '">' . htmlspecialchars($row['status']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['justification'] ?? '---') . '</td>';
+            echo '</tr>';
+        }
+    }
+    echo '</tbody></table></body></html>';
+    exit();
+}
 
 ?>
 <!DOCTYPE html>
@@ -128,14 +173,14 @@ $history_res = $conn->query($history_sql);
         .user-info { display: flex; align-items: center; gap: 12px; }
         .badge { background: #dbeafe; color: #3b82f6; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
 
-        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .content-area { padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; }
 
         .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); margin-bottom: 24px;}
         .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
 
         /* Filter Form */
         .filter-form { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
-        .form-group { flex: 1; min-width: 200px; }
+        .form-group { flex: 1; min-width: 180px; }
         .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: #4b5563; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;}
         .form-control { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; background-color: #f9fafb; transition: all 0.2s; }
         .form-control:focus { outline: none; border-color: #3b82f6; background-color: #fff; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
@@ -156,12 +201,6 @@ $history_res = $conn->query($history_sql);
         .status-missed { background-color: #fee2e2; color: #dc2626; }
         
         .empty-state { text-align: center; padding: 40px; color: #6b7280; font-style: italic; }
-
-        .table-header-actions {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 12px;
-        }
 
         /* Modal Styles */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
@@ -205,7 +244,7 @@ $history_res = $conn->query($history_sql);
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>Activity Logs & Patrol History</h2>
+            <h2>Detailed Activity Logs</h2>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
                 <span class="badge">CLIENT</span>
@@ -225,19 +264,18 @@ $history_res = $conn->query($history_sql);
                         <label class="form-label" for="end_date">Date To</label>
                         <input type="date" id="end_date" name="end_date" class="form-control" value="<?php echo htmlspecialchars($filter_end); ?>">
                     </div>
-                    <?php if (count($mapping_ids) > 1): ?>
                     <div class="form-group">
-                        <label class="form-label" for="mapping_id">Client Site</label>
+                        <label class="form-label" for="mapping_id">Site</label>
                         <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Sites --</option>
-                            <?php foreach($mapping_ids as $m_id): ?>
-                                <option value="<?php echo $m_id; ?>" <?php if($filter_client == $m_id) echo 'selected'; ?>>
-                                    Site #<?php echo $m_id; ?>
-                                </option>
-                            <?php endforeach; ?>
+                            <?php if ($maps_res && $maps_res->num_rows > 0): ?>
+                                <?php mysqli_data_seek($maps_res, 0); ?>
+                                <?php while($m = $maps_res->fetch_assoc()): ?>
+                                    <option value="<?php echo $m['id']; ?>" <?php if($filter_client == $m['id']) echo 'selected'; ?>><?php echo htmlspecialchars($m['site_name']); ?></option>
+                                <?php endwhile; ?>
+                            <?php endif; ?>
                         </select>
                     </div>
-                    <?php endif; ?>
                     <div class="form-group">
                         <label class="form-label" for="guard_id">Guard</label>
                         <select id="guard_id" name="guard_id" class="form-control" onchange="this.form.submit()">
@@ -251,13 +289,13 @@ $history_res = $conn->query($history_sql);
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="checkpoint_id">Location</label>
+                        <label class="form-label" for="checkpoint_id">Checkpoint</label>
                         <select id="checkpoint_id" name="checkpoint_id" class="form-control" onchange="this.form.submit()">
-                            <option value="">-- All Locations --</option>
+                            <option value="">-- All Checkpoints --</option>
                             <?php if ($checkpoints_res && $checkpoints_res->num_rows > 0): ?>
                                 <?php mysqli_data_seek($checkpoints_res, 0); ?>
-                                <?php while($c = $checkpoints_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $c['id']; ?>" <?php if($filter_checkpoint == $c['id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['name']); ?></option>
+                                <?php while($cp = $checkpoints_res->fetch_assoc()): ?>
+                                    <option value="<?php echo $cp['id']; ?>" <?php if($filter_checkpoint == $cp['id']) echo 'selected'; ?>><?php echo htmlspecialchars($cp['name']); ?></option>
                                 <?php endwhile; ?>
                             <?php endif; ?>
                         </select>
@@ -279,6 +317,9 @@ $history_res = $conn->query($history_sql);
             </div>
 
             <div class="card">
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+                    <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if ($history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if ($history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download</button>
+                </div>
                 <div class="table-container">
                     <table>
                         <thead>
@@ -288,15 +329,15 @@ $history_res = $conn->query($history_sql);
                                 <th>Checkpoint Name</th>
                                 <th>Guard Name</th>
                                 <th>Status</th>
-                                <th>Justification/Remarks</th>
+                                <th>Remarks</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if ($history_res && $history_res->num_rows > 0): ?>
                                 <?php while($row = $history_res->fetch_assoc()): ?>
                                     <tr>
-                                        <td><strong><?php echo date('M d, Y h:i A', strtotime($row['scan_time'])); ?></strong></td>
-                                        <td><span style="font-size: 0.85rem; color: #6b7280;"><?php echo htmlspecialchars($row['shift'] ?? 'N/A'); ?></span></td>
+                                        <td><strong><?php echo date('M d, Y h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($row['shift'] ?? '---'); ?></td>
                                         <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
                                         <td>
@@ -338,6 +379,13 @@ $history_res = $conn->query($history_sql);
     </div>
 
     <script>
+        function downloadHistoryCSV() {
+            const url = new URL(window.location.href);
+            url.searchParams.set('download_csv', '1');
+            window.location.href = url.toString();
+        }
+
+        // Close modal when clicking outside
         window.onclick = function(event) {
             const logoutModal = document.getElementById('logoutModal');
             if (event.target == logoutModal) {

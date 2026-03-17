@@ -384,7 +384,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <title>Patrol Management - Agency Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
@@ -586,35 +587,85 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
         .checkpoint-circle .label {
             position: absolute;
-            bottom: -20px;
+            bottom: -22px;
             white-space: nowrap;
             font-size: 0.75rem;
-            color: #64748b;
-            font-weight: 500;
+            color: #1e293b;
+            font-weight: 700;
         }
 
-        /* Status Beep Animations (Internal Lighting) */
-        @keyframes beep-green {
-            0% { background-color: white; }
-            50% { background-color: #10b981; color: white; border-color: #065f46; }
-            100% { }
+        /* Static Status Colors & Animations */
+        .cp-status-on-time { 
+            background-color: #10b981 !important; 
+            color: white !important; 
+            border-color: #059669 !important;
+            animation: pulse-on-time 2s infinite;
         }
-        @keyframes beep-red {
-            0% { background-color: white; }
-            50% { background-color: #ef4444; color: white; border-color: #991b1b; }
-            100% { }
+        .cp-status-late { 
+            background-color: #ef4444 !important; 
+            color: white !important; 
+            border-color: #991b1b !important;
+            animation: pulse-late 2s infinite;
         }
-        @keyframes beep-gray {
-            0% { background-color: white; }
-            50% { background-color: #9ca3af; color: white; border-color: #4b5563; }
-            100% { }
+        .cp-status-none { 
+            background-color: #9ca3af !important; 
+            color: white !important; 
+            border-color: #4b5563 !important; 
         }
 
-        .beep-on-time { animation: beep-green 1s ease-in-out !important; }
-        .beep-late { animation: beep-red 1s ease-in-out !important; }
-        .beep-none { animation: beep-gray 1s ease-in-out !important; }
+        @keyframes pulse-on-time {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        @keyframes pulse-late {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        .visual-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .visual-path {
+            stroke: #cbd5e1;
+            stroke-width: 2;
+            fill: none;
+            transition: d 0.05s ease;
+        }
+
+        .flowing-arrow {
+            fill: #6366f1;
+            offset-rotate: auto;
+            animation: flow-arrow 3s infinite linear;
+            pointer-events: none;
+        }
+
+        /* Snapshot Mode: Static arrows, no animations */
+        .download-mode .flowing-arrow { display: none !important; }
+        .download-mode .static-arrow { display: block !important; }
+        .download-mode .visual-path { transition: none !important; }
+        .download-mode .checkpoint-circle { animation: none !important; box-shadow: none !important; }
+
+        .static-arrow {
+            display: none;
+            fill: #6366f1;
+        }
+
+        @keyframes flow-arrow {
+            from { offset-distance: 0%; }
+            to { offset-distance: 100%; }
+        }
         
-        .modal-content.large { max-width: 800px; }
+        .modal-content.large { max-width: 900px; }
         .card-header-flex { display: flex; justify-content: space-between; align-items: center; }
         .close-modal-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; }
         .close-modal-btn:hover { color: #1f2937; }
@@ -992,10 +1043,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     Draggable overview of checkpoints. <strong>Blue</strong> is the start, <strong>White</strong> are regular checkpoints.
                 </p>
                 <div id="visual-canvas" class="visual-container">
-                    <div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">Loading checkpoints...</div>
+                    <svg id="visual-svg" class="visual-svg">
+                        <defs>
+                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                <polygon points="0 0, 10 3.5, 0 7" fill="#6366f1" />
+                            </marker>
+                        </defs>
+                    </svg>
                 </div>
-                <div class="modal-actions" style="margin-top: 20px;">
-                    <button class="btn-modal btn-cancel" style="max-width: 200px; margin-left: auto;" onclick="closeVisualDesigner()">Close View</button>
+                <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+                    <button class="btn-modal" style="background: #0ea5e9; color: white; max-width: 200px;" onclick="downloadVisualMap()">Download Map (PNG)</button>
+                    <button class="btn-modal btn-cancel" style="max-width: 200px;" onclick="closeVisualDesigner()">Close View</button>
                 </div>
             </div>
         </div>
@@ -1329,44 +1387,102 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         // Visual Designer Logic
         const selectedMappingId = '<?php echo $selected_mapping_id; ?>';
-        let beepInterval = null;
-        let beepIndex = 0;
         let visualCheckpoints = [];
-
         function closeVisualDesigner() {
             document.getElementById('visualDesignerModal').classList.remove('show');
-            if (beepInterval) {
-                clearInterval(beepInterval);
-                beepInterval = null;
-            }
-            // Clear animations
-            document.querySelectorAll('.checkpoint-circle').forEach(c => {
-                c.classList.remove('beep-on-time', 'beep-late', 'beep-none');
+        }
+
+        function downloadVisualMap() {
+            const canvas = document.getElementById('visual-canvas');
+            const btn = event.target;
+            const originalText = btn.textContent;
+            
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            // Snapshot mode: static arrows, no animations
+            canvas.classList.add('download-mode');
+
+            html2canvas(canvas, {
+                backgroundColor: '#ffffff',
+                scale: 2, // Higher quality
+                logging: false,
+                useCORS: true
+            }).then(imageCanvas => {
+                const link = document.createElement('a');
+                link.download = `patrol_map_${new Date().getTime()}.png`;
+                link.href = imageCanvas.toDataURL('image/png');
+                link.click();
+                
+                canvas.classList.remove('download-mode');
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }).catch(err => {
+                console.error('Snapshot failed:', err);
+                canvas.classList.remove('download-mode');
+                btn.textContent = originalText;
+                btn.disabled = false;
+                alert('Failed to generate image. Please try again.');
             });
         }
 
-        function triggerNextBeep() {
-            if (visualCheckpoints.length === 0) return;
+        function drawArrows() {
+            const svg = document.getElementById('visual-svg');
+            const canvas = document.getElementById('visual-canvas');
             
-            // Remove previous flashes
-            document.querySelectorAll('.checkpoint-circle').forEach(c => {
-                c.classList.remove('beep-on-time', 'beep-late', 'beep-none');
-            });
-            
-            const cp = visualCheckpoints[beepIndex];
-            const circle = document.getElementById(`cp-circle-${cp.id}`);
-            
-            if (circle) {
-                let beepClass = 'beep-none';
-                const status = (cp.latest_status || '').toLowerCase();
+            // Clear existing elements
+            svg.querySelectorAll('.visual-path, .flowing-arrow, .static-arrow').forEach(el => el.remove());
+
+            if (visualCheckpoints.length < 2) return;
+
+            for (let i = 0; i < visualCheckpoints.length - 1; i++) {
+                const startCp = visualCheckpoints[i];
+                const endCp = visualCheckpoints[i+1];
                 
-                if (status === 'on-time' || status === 'on time') beepClass = 'beep-on-time';
-                else if (status === 'late') beepClass = 'beep-late';
+                const startEl = document.getElementById(`cp-circle-${startCp.id}`);
+                const endEl = document.getElementById(`cp-circle-${endCp.id}`);
                 
-                circle.classList.add(beepClass);
+                if (!startEl || !endEl) continue;
+
+                const r = 25; // circle radius
+                const x1 = parseInt(startEl.style.left) + r;
+                const y1 = parseInt(startEl.style.top) + r;
+                const x2 = parseInt(endEl.style.left) + r;
+                const y2 = parseInt(endEl.style.top) + r;
+
+                // Calculate edge points
+                const angle = Math.atan2(y2 - y1, x2 - x1);
+                const edgeX1 = x1 + r * Math.cos(angle);
+                const edgeY1 = y1 + r * Math.sin(angle);
+                const edgeX2 = x2 - (r + 5) * Math.cos(angle);
+                const edgeY2 = y2 - (r + 5) * Math.sin(angle);
+
+                const d = `M ${edgeX1} ${edgeY1} L ${edgeX2} ${edgeY2}`;
+
+                // Create static path
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", d);
+                path.setAttribute("class", "visual-path");
+                svg.appendChild(path);
+
+                // Create midpoint static arrow (for PNG download)
+                const midX = (edgeX1 + edgeX2) / 2;
+                const midY = (edgeY1 + edgeY2) / 2;
+                const deg = angle * (180 / Math.PI);
+                
+                const sArrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                sArrow.setAttribute("points", "-6,-6 6,0 -6,6");
+                sArrow.setAttribute("class", "static-arrow");
+                sArrow.setAttribute("transform", `translate(${midX}, ${midY}) rotate(${deg})`);
+                svg.appendChild(sArrow);
+
+                // Create flowing arrow
+                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                arrow.setAttribute("points", "0,0 12,6 0,12");
+                arrow.setAttribute("class", "flowing-arrow");
+                arrow.style.offsetPath = `path('${d}')`;
+                svg.appendChild(arrow);
             }
-            
-            beepIndex = (beepIndex + 1) % visualCheckpoints.length;
         }
 
         function openVisualDesigner() {
@@ -1377,42 +1493,58 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             const modal = document.getElementById('visualDesignerModal');
             const canvas = document.getElementById('visual-canvas');
+            const svg = document.getElementById('visual-svg');
             
             modal.classList.add('show');
-            canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">Loading checkpoints...</div>';
+            canvas.querySelectorAll('.checkpoint-circle').forEach(c => c.remove());
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'visual-loading';
+            loadingDiv.style.cssText = 'display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;';
+            loadingDiv.textContent = 'Loading checkpoints...';
+            canvas.appendChild(loadingDiv);
 
             fetch(`agency_patrol_management.php?ajax_checkpoints=1&mapping_id=${selectedMappingId}`)
                 .then(response => response.json())
                 .then(data => {
-                    canvas.innerHTML = '';
+                    const loader = document.getElementById('visual-loading');
+                    if (loader) loader.remove();
+                    
                     visualCheckpoints = data.checkpoints || [];
-                    beepIndex = 0;
 
                     if (visualCheckpoints.length === 0) {
-                        canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">No checkpoints configured for this site.</div>';
+                        const emptyDiv = document.createElement('div');
+                        emptyDiv.id = 'visual-empty';
+                        emptyDiv.style.cssText = 'display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;';
+                        emptyDiv.textContent = 'No checkpoints configured for this site.';
+                        canvas.appendChild(emptyDiv);
                         return;
                     }
 
                     visualCheckpoints.forEach((cp, index) => {
                         const circle = document.createElement('div');
                         circle.id = `cp-circle-${cp.id}`;
-                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : 'regular'}`;
+                        
+                        // Static Status Coloring
+                        let statusClass = 'cp-status-none';
+                        const status = (cp.latest_status || '').toLowerCase();
+                        if (status === 'on-time' || status === 'on time') statusClass = 'cp-status-on-time';
+                        else if (status === 'late') statusClass = 'cp-status-late';
+
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : 'regular'} ${statusClass}`;
+                        circle.style.zIndex = cp.isStart ? 10 : 5;
                         circle.innerHTML = `
                             ${cp.isStart ? 'S' : (index)}
                             <div class="label">${cp.name}</div>
                         `;
                         
-                        // Initial positions (Saved or Default)
                         let x = parseInt(cp.visual_pos_x) || 0;
                         let y = parseInt(cp.visual_pos_y) || 0;
                         
                         if (x === 0 && y === 0) {
-                            // Align in rows if no position is saved
                             const containerWidth = canvas.offsetWidth || 750;
-                            const spacingX = 90; 
-                            const spacingY = 90;
-                            const itemsPerRow = Math.floor((containerWidth - 60) / spacingX) || 7;
-                            
+                            const spacingX = 120; // Increased spacing for arrows
+                            const spacingY = 120;
+                            const itemsPerRow = Math.floor((containerWidth - 60) / spacingX) || 5;
                             x = 40 + (index % itemsPerRow) * spacingX;
                             y = 40 + Math.floor(index / itemsPerRow) * spacingY;
                         }
@@ -1420,7 +1552,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         circle.style.left = x + 'px';
                         circle.style.top = y + 'px';
                         
-                        // Drag logic
                         circle.onmousedown = function(e) {
                             let shiftX = e.clientX - circle.getBoundingClientRect().left;
                             let shiftY = e.clientY - circle.getBoundingClientRect().top;
@@ -1433,6 +1564,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 newY = Math.max(0, Math.min(newY, canvas.offsetHeight - circle.offsetHeight));
                                 circle.style.left = newX + 'px';
                                 circle.style.top = newY + 'px';
+                                drawArrows(); // Refresh arrows in real-time
                             }
                             
                             function onMouseMove(e) { moveAt(e.pageX, e.pageY); }
@@ -1442,8 +1574,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 document.removeEventListener('mousemove', onMouseMove);
                                 circle.onmouseup = null;
                                 circle.style.zIndex = cp.isStart ? 10 : 5;
+                                drawArrows();
                                 
-                                // Save new position
                                 const finalX = parseInt(circle.style.left);
                                 const finalY = parseInt(circle.style.top);
                                 
@@ -1456,8 +1588,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 fetch('agency_patrol_management.php', {
                                     method: 'POST',
                                     body: formData
-                                })
-                                .catch(err => console.error('Error saving position:', err));
+                                }).catch(err => console.error(err));
                             };
                         };
                         
@@ -1465,12 +1596,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         canvas.appendChild(circle);
                     });
 
-                    // Start sequential beeping (1s interval)
-                    triggerNextBeep(); 
-                    beepInterval = setInterval(triggerNextBeep, 1000);
+                    drawArrows();
                 })
                 .catch(err => {
-                    canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#ef4444;">Error loading checkpoints.</div>';
+                    const loader = document.getElementById('visual-loading');
+                    if (loader) loader.remove();
+                    const errDiv = document.createElement('div');
+                    errDiv.style.cssText = 'display:flex; align-items:center; justify-content:center; height:100%; color:#ef4444;';
+                    errDiv.textContent = 'Error loading checkpoints.';
+                    canvas.appendChild(errDiv);
                     console.error(err);
                 });
         }

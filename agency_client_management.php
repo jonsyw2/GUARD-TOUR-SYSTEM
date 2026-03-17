@@ -15,22 +15,27 @@ $show_status_modal = false;
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $mapping_id = (int)$_POST['mapping_id'];
     $company_name = $conn->real_escape_string($_POST['company_name']);
+    $company_address = $conn->real_escape_string($_POST['company_address']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no']);
+    $email_address = $conn->real_escape_string($_POST['email_address']);
+    $website_link = $conn->real_escape_string($_POST['website_link']);
+    $contact_person = $conn->real_escape_string($_POST['contact_person']);
+    $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
+    $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
     
     // Handle File Upload
     $logo_path = null;
     if (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] == 0) {
         $target_dir = "uploads/logos/";
+        if (!file_exists($target_dir)) mkdir($target_dir, 0777, true);
         $file_ext = strtolower(pathinfo($_FILES["company_logo"]["name"], PATHINFO_EXTENSION));
         $new_filename = "logo_" . $mapping_id . "_" . time() . "." . $file_ext;
         $target_file = $target_dir . $new_filename;
         
-        // Basic validation
         $valid_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
         if (in_array($file_ext, $valid_extensions) && $_FILES["company_logo"]["size"] < 2000000) {
             if (move_uploaded_file($_FILES["company_logo"]["tmp_name"], $target_file)) {
                 $logo_path = $target_file;
-                
-                // Optional: Delete old logo if exists
                 $old_logo_res = $conn->query("SELECT company_logo FROM agency_clients WHERE id = $mapping_id");
                 if ($old_logo_res && $old_res = $old_logo_res->fetch_assoc()) {
                     if ($old_res['company_logo'] && file_exists($old_res['company_logo'])) {
@@ -42,7 +47,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     }
     
     $update_logo_sql = $logo_path ? ", company_logo = '$logo_path'" : "";
-    $sql = "UPDATE agency_clients SET company_name = '$company_name' $update_logo_sql WHERE id = $mapping_id AND agency_id = $agency_id";
+    $sql = "UPDATE agency_clients SET 
+            company_name = '$company_name',
+            company_address = '$company_address',
+            contact_no = '$contact_no',
+            email_address = '$email_address',
+            website_link = '$website_link',
+            contact_person = '$contact_person',
+            contact_person_position = '$contact_person_position',
+            contact_person_no = '$contact_person_no'
+            $update_logo_sql 
+            WHERE id = $mapping_id AND agency_id = $agency_id";
     
     if ($conn->query($sql)) {
         $message = "Client details updated successfully!";
@@ -85,6 +100,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 // Fetch Assigned Clients
 $clients_sql = "
     SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, a.guard_limit,
+           ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
+           ac.contact_person, ac.contact_person_position, ac.contact_person_no,
            (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
            (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count,
            (
@@ -227,7 +244,7 @@ if ($guards_res) {
                                     </td>
                                      <td style="text-align: right;">
                                         <div style="display: flex; gap: 8px; justify-content: flex-end;" onclick="event.stopPropagation()">
-                                            <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['company_name']); ?>')">Edit Details</button>
+                                             <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">Edit Details</button>
                                             <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Add Guard</button>
                                         </div>
                                     </td>
@@ -275,22 +292,66 @@ if ($guards_res) {
 
     <!-- Details Modal -->
     <div id="detailsModal" class="modal">
-        <div class="modal-content">
-            <h3 style="margin-bottom: 20px;">Edit Client Details</h3>
+        <div class="modal-content" style="max-width: 600px; text-align: left;">
+            <h3 style="margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Edit Client Details</h3>
             <form action="agency_client_management.php" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="mapping_id" id="details_mapping_id">
-                <div class="form-group">
-                    <label class="form-label">Company Name</label>
-                    <input type="text" name="company_name" id="details_company_name" class="form-control" placeholder="e.g. Acme Corp" required>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label class="form-label">Company Name</label>
+                        <input type="text" name="company_name" id="details_company_name" class="form-control" placeholder="e.g. Acme Corp" required>
+                    </div>
+                    
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label class="form-label">Company Address</label>
+                        <textarea name="company_address" id="details_company_address" class="form-control" placeholder="Full Business Address" rows="2"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Contact No</label>
+                        <input type="text" name="contact_no" id="details_contact_no" class="form-control" placeholder="Company Phone">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Email Address</label>
+                        <input type="email" name="email_address" id="details_email_address" class="form-control" placeholder="contact@company.com">
+                    </div>
+
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label class="form-label">Website/Social Link (Optional)</label>
+                        <input type="text" name="website_link" id="details_website_link" class="form-control" placeholder="FB, Viber, or Website URL">
+                    </div>
+
+                    <div style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px; margin-bottom: 16px;">
+                        <h4 style="font-size: 0.9rem; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px;">Contact Person Details</h4>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Contact Person</label>
+                        <input type="text" name="contact_person" id="details_contact_person" class="form-control" placeholder="Full Name">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Position</label>
+                        <input type="text" name="contact_person_position" id="details_contact_person_position" class="form-control" placeholder="Job Title">
+                    </div>
+
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label class="form-label">Contact No (Contact Person)</label>
+                        <input type="text" name="contact_person_no" id="details_contact_person_no" class="form-control" placeholder="Personal or Office Phone">
+                    </div>
+
+                    <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
+                        <label class="form-label">Company Logo (Photo)</label>
+                        <input type="file" name="company_logo" id="details_company_logo" class="form-control" accept="image/*">
+                        <small style="color: #6b7280; font-size: 0.75rem;">Upload a photo of the client logo.</small>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Company Logo (Photo)</label>
-                    <input type="file" name="company_logo" id="details_company_logo" class="form-control" accept="image/*">
-                    <small style="color: #6b7280; font-size: 0.75rem;">Upload a photo of the client logo.</small>
-                </div>
-                <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn-sm btn-outline" style="flex:1;" onclick="closeModal('detailsModal')">Cancel</button>
-                    <button type="submit" name="update_details" class="btn-sm btn-primary" style="flex:1;">Save Changes</button>
+
+                <div style="display: flex; gap: 12px; margin-top: 32px;">
+                    <button type="button" class="btn-sm btn-outline" style="flex:1; padding: 12px;" onclick="closeModal('detailsModal')">Cancel</button>
+                    <button type="submit" name="update_details" class="btn-sm btn-primary" style="flex:1; padding: 12px;">Save Changes</button>
                 </div>
             </form>
         </div>
@@ -360,9 +421,17 @@ if ($guards_res) {
             document.getElementById('summaryModal').classList.add('show');
         }
 
-        function openDetailsModal(id, name) {
-            document.getElementById('details_mapping_id').value = id;
-            document.getElementById('details_company_name').value = name;
+        function openDetailsModal(data) {
+            document.getElementById('details_mapping_id').value = data.mapping_id;
+            document.getElementById('details_company_name').value = data.company_name || '';
+            document.getElementById('details_company_address').value = data.company_address || '';
+            document.getElementById('details_contact_no').value = data.contact_no || '';
+            document.getElementById('details_email_address').value = data.email_address || '';
+            document.getElementById('details_website_link').value = data.website_link || '';
+            document.getElementById('details_contact_person').value = data.contact_person || '';
+            document.getElementById('details_contact_person_position').value = data.contact_person_position || '';
+            document.getElementById('details_contact_person_no').value = data.contact_person_no || '';
+            
             document.getElementById('detailsModal').classList.add('show');
         }
 

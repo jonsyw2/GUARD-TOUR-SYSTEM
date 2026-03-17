@@ -35,7 +35,7 @@ $guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY
 $guards_res = $conn->query($guards_sql);
 
 // Handle Filter Submissions
-$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-7 days'));
+$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-30 days'));
 $filter_end = $_GET['end_date'] ?? date('Y-m-d');
 $filter_guard = $_GET['guard_id'] ?? '';
 $filter_client = $_GET['mapping_id'] ?? '';
@@ -97,6 +97,59 @@ $history_sql = "
 ";
 
 $history_res = $conn->query($history_sql);
+
+// Handle Download
+if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
+    // Re-run query WITHOUT the limit for full export
+    $csv_sql = str_replace("LIMIT 200", "", $history_sql);
+    $csv_res = $conn->query($csv_sql);
+
+    header('Content-Type: application/vnd.ms-excel');
+    header('Content-Disposition: attachment; filename=patrol_history_' . date('Ymd_His') . '.xls');
+    
+    echo '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">';
+    echo '<head>
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <style>
+            table { border-collapse: collapse; }
+            th { background-color: #10b981; color: white; border: 1px solid #cbd5e1; padding: 12px; text-align: center; font-weight: bold; }
+            td { border: 1px solid #cbd5e1; padding: 10px; vertical-align: middle; white-space: nowrap; }
+            .status-on-time { color: #059669; font-weight: bold; }
+            .status-late { color: #b45309; font-weight: bold; }
+            .status-missed { color: #dc2626; font-weight: bold; }
+            .text-center { text-align: center; }
+        </style>
+    </head>
+    <body>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date & Time</th>
+                    <th>Client</th>
+                    <th>Checkpoint</th>
+                    <th>Guard</th>
+                    <th>Status</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody>';
+    
+    if ($csv_res && $csv_res->num_rows > 0) {
+        while ($row = $csv_res->fetch_assoc()) {
+            $status_class = 'status-' . strtolower($row['status']);
+            echo '<tr>';
+            echo '<td class="text-center">' . date('M d, Y h:i:s A', strtotime($row['scan_time'])) . '</td>';
+            echo '<td>' . htmlspecialchars($row['client_name']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['checkpoint_name']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['guard_name']) . '</td>';
+            echo '<td class="text-center ' . $status_class . '">' . htmlspecialchars($row['status']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['justification'] ?? '---') . '</td>';
+            echo '</tr>';
+        }
+    }
+    echo '</tbody></table></body></html>';
+    exit();
+}
 
 ?>
 <!DOCTYPE html>
@@ -284,6 +337,9 @@ $history_res = $conn->query($history_sql);
             </div>
 
             <div class="card">
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+                    <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if ($history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if ($history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download</button>
+                </div>
 
                 <div class="table-container">
                     <table>
@@ -301,7 +357,7 @@ $history_res = $conn->query($history_sql);
                             <?php if ($history_res && $history_res->num_rows > 0): ?>
                                 <?php while($row = $history_res->fetch_assoc()): ?>
                                     <tr>
-                                        <td><strong><?php echo date('M d, Y h:i A', strtotime($row['scan_time'])); ?></strong></td>
+                                        <td><strong><?php echo date('M d, Y h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
                                         <td><?php echo htmlspecialchars($row['client_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
@@ -344,6 +400,12 @@ $history_res = $conn->query($history_sql);
     </div>
 
     <script>
+        function downloadHistoryCSV() {
+            const url = new URL(window.location.href);
+            url.searchParams.set('download_csv', '1');
+            window.location.href = url.toString();
+        }
+
         // Close modal when clicking outside
         window.onclick = function(event) {
             const logoutModal = document.getElementById('logoutModal');

@@ -205,7 +205,7 @@ if ($mapping_ids_str !== '0') {
                                         <td><strong><?php echo htmlspecialchars($act['guard_name']); ?></strong></td>
                                         <td><?php echo htmlspecialchars($act['checkpoint_name']); ?></td>
                                         <td><span style="background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;"><?php echo htmlspecialchars($act['site_name']); ?></span></td>
-                                        <td style="color: var(--text-muted);"><?php echo date('M d, h:i A', strtotime($act['scan_time'])); ?></td>
+                                        <td style="color: var(--text-muted);"><?php echo date('M d, h:i:s A', strtotime($act['scan_time'])); ?></td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
