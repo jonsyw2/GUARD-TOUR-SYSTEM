@@ -274,18 +274,18 @@ $current_assignments = [];
 $starting_point = null;
 
 if ($selected_mapping_id) {
-    $start_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
+    $start_res = $conn->query("SELECT id, name, checkpoint_code FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
     if ($start_res && $start_res->num_rows > 0) {
         $starting_point = $start_res->fetch_assoc();
     }
 
-    $cp_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 0 ORDER BY name ASC");
+    $cp_res = $conn->query("SELECT id, name, checkpoint_code FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 0 ORDER BY name ASC");
     while ($row = $cp_res->fetch_assoc()) {
         $available_checkpoints[] = $row;
     }
 
     $assign_res = $conn->query("
-        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name 
+        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name, cp.checkpoint_code
         FROM tour_assignments ta 
         JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
         WHERE ta.agency_client_id = $selected_mapping_id 
@@ -589,13 +589,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                 </div>
                                                 <input type="hidden" name="durations[]" value="0">
                                             </div>
-                                            <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
+                                            <div style="display: flex; gap: 8px; align-items: center;">
+                                                <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('<?php echo $starting_point['checkpoint_code']; ?>', '<?php echo addslashes($starting_point['name']); ?>', '<?php echo addslashes($selected_client['client_name']); ?>', '<?php echo addslashes($selected_client['site_name']); ?>', '<?php echo addslashes($selected_client['company_name'] ?? ''); ?>', '0')">Show</button>
+                                                <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
+                                            </div>
                                         </div>
                                     </div>
                                 <?php endif; ?>
 
                                 <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?>">
-                                    <?php foreach ($current_assignments as $item): ?>
+                                    <?php $pos = 1; foreach ($current_assignments as $item): ?>
                                         <?php if ($starting_point && $item['checkpoint_id'] == $starting_point['id']) continue; ?>
                                         <div class="tour-item">
                                             <span class="handle">☰</span>
@@ -624,9 +627,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                 </div>
                                                 <input type="hidden" name="durations[]" value="1">
                                             </div>
-                                            <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+                                            <div style="display: flex; gap: 8px; align-items: center;">
+                                                <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('<?php echo $item['checkpoint_code']; ?>', '<?php echo addslashes($item['name']); ?>', '<?php echo addslashes($selected_client['client_name']); ?>', '<?php echo addslashes($selected_client['site_name']); ?>', '<?php echo addslashes($selected_client['company_name'] ?? ''); ?>', '<?php echo $pos; ?>')">Show</button>
+                                                <button type="button" class="remove-btn" onclick="this.parentElement.parentElement.remove()">
+                                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                                </button>
+                                            </div>
                                         </div>
-                                    <?php endforeach; ?>
+                                    <?php $pos++; endforeach; ?>
                                 </div>
                             </div>
 
@@ -634,7 +642,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <select id="checkpoint-select" class="form-control" style="flex: 1;">
                                     <option value="">-- Add Checkpoint to Pattern --</option>
                                     <?php foreach ($available_checkpoints as $cp): ?>
-                                        <option value="<?php echo $cp['id']; ?>"><?php echo htmlspecialchars($cp['name']); ?></option>
+                                        <option value="<?php echo $cp['id']; ?>" data-code="<?php echo htmlspecialchars($cp['checkpoint_code']); ?>"><?php echo htmlspecialchars($cp['name']); ?></option>
                                     <?php endforeach; ?>
                                 </select>
                                 <button type="button" class="btn btn-primary" onclick="addCheckpoint()">Add</button>
@@ -668,7 +676,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></td>
                                                     <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                                     <td>
-                                                        <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('<?php echo $row['checkpoint_code']; ?>', '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['client_name']); ?>', '<?php echo addslashes($row['site_name']); ?>', '<?php echo addslashes($row['company_name'] ?? ''); ?>', '<?php echo $index; ?>')">Show</button>
+                                                        <!-- Show button moved to pattern list above -->
                                                     </td>
                                                 </tr>
                                             <?php $index++; endwhile; ?>
@@ -983,6 +991,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             const select = document.getElementById('checkpoint-select');
             const id = select.value;
             const name = select.options[select.selectedIndex].text;
+            const code = select.options[select.selectedIndex].dataset.code;
 
             if (!id) return;
 
@@ -1014,7 +1023,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     </div>
                     <input type="hidden" name="durations[]" value="1">
                 </div>
-                <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('${code}', '${name.replace(/'/g, "\\'")}', '${'<?php echo addslashes($selected_client['client_name'] ?? ''); ?>'}', '${'<?php echo addslashes($selected_client['site_name'] ?? ''); ?>'}', '${'<?php echo addslashes($selected_client['company_name'] ?? ''); ?>'}', '${list.children.length}')">Show</button>
+                    <button type="button" class="remove-btn" onclick="this.parentElement.parentElement.remove()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                </div>
             `;
             list.appendChild(item);
             select.value = '';
