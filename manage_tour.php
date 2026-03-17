@@ -66,6 +66,81 @@ $message_type = '';
 $show_status_modal = false;
 $show_limit_modal = false;
 
+// AJAX Handler for fetching checkpoint sequence (Client version)
+if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
+    $m_id = (int)$_GET['mapping_id'];
+    
+    // Security: Check if mapping_id belongs to this client
+    $verify_sql = "SELECT id FROM agency_clients WHERE id = $m_id AND client_id = $client_id";
+    $verify_res = $conn->query($verify_sql);
+    
+    if ($verify_res && $verify_res->num_rows > 0) {
+        $checkpoints = [];
+        
+        // 1. Fetch Starting Point with latest status
+        $start_res = $conn->query("
+            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y,
+            (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
+            FROM checkpoints cp 
+            WHERE cp.agency_client_id = $m_id AND cp.is_zero_checkpoint = 1 
+            LIMIT 1
+        ");
+        $starting_point_visual = null;
+        if ($start_res && $start_res->num_rows > 0) {
+            $starting_point_visual = $start_res->fetch_assoc();
+            $starting_point_visual['isStart'] = true;
+        }
+        
+        // 2. Fetch Regular Checkpoints in configured sequence with latest status
+        $assign_res = $conn->query("
+            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y,
+            (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
+            FROM tour_assignments ta 
+            JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
+            WHERE ta.agency_client_id = $m_id 
+            ORDER BY ta.sort_order ASC
+        ");
+        
+        if ($starting_point_visual) {
+            $checkpoints[] = $starting_point_visual;
+        }
+        
+        while ($row = $assign_res->fetch_assoc()) {
+            if ($starting_point_visual && $row['id'] == $starting_point_visual['id']) continue;
+            $row['isStart'] = false;
+            $checkpoints[] = $row;
+        }
+        
+        header('Content-Type: application/json');
+        echo json_encode($checkpoints);
+    } else {
+        header('HTTP/1.1 403 Forbidden');
+        echo json_encode(['error' => 'Unauthorized']);
+    }
+    exit();
+}
+
+// AJAX Handler for saving checkpoint position (Client version)
+if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
+    $cp_id = (int)$_POST['cp_id'];
+    $x = (int)($_POST['x'] ?? 0);
+    $y = (int)($_POST['y'] ?? 0);
+    
+    // Security: Verify checkpoint belongs to this client
+    $stmt = $conn->prepare("
+        UPDATE checkpoints cp
+        JOIN agency_clients ac ON cp.agency_client_id = ac.id
+        SET cp.visual_pos_x = ?, cp.visual_pos_y = ?
+        WHERE cp.id = ? AND ac.client_id = ?
+    ");
+    $stmt->bind_param("iiii", $x, $y, $cp_id, $client_id);
+    $stmt->execute();
+    
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true]);
+    exit();
+}
+
 // Handle Save
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
     if ($is_patrol_locked) {
@@ -403,6 +478,87 @@ if ($mapping_id) {
             .content-area { padding: 0; }
             .print-card { box-shadow: none !important; border: none !important; padding: 0 !important; max-width: 100% !important;}
         }
+
+        /* Visual Designer Styles */
+        .btn-visual { 
+            padding: 6px 14px; 
+            background: #4f46e5; 
+            color: white; 
+            border: none; 
+            border-radius: 6px; 
+            font-size: 0.75rem; 
+            font-weight: 600; 
+            cursor: pointer; 
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+        }
+        .btn-visual:hover { background: #4338ca; transform: translateY(-1px); }
+        
+        .visual-container {
+            width: 100%;
+            height: 450px;
+            background: #f8fafc;
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            margin-top: 10px;
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .checkpoint-circle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            cursor: move;
+            user-select: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.1s, box-shadow 0.2s, background-color 0.3s, border-color 0.3s, color 0.3s;
+            z-index: 5;
+            border: 3px solid white;
+        }
+        .checkpoint-circle.start { background-color: #3b82f6; color: white; z-index: 10; border-color: #1e40af; }
+        .checkpoint-circle.regular { background-color: white; color: #1e293b; border-color: #64748b; }
+        .checkpoint-circle:hover { transform: scale(1.05); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+
+        .checkpoint-circle .label {
+            position: absolute;
+            bottom: -20px;
+            white-space: nowrap;
+            font-size: 0.75rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        /* Status Beep Animations (Internal Lighting) */
+        @keyframes beep-green {
+            0% { background-color: white; }
+            50% { background-color: #10b981; color: white; border-color: #065f46; }
+            100% { }
+        }
+        @keyframes beep-red {
+            0% { background-color: white; }
+            50% { background-color: #ef4444; color: white; border-color: #991b1b; }
+            100% { }
+        }
+        @keyframes beep-gray {
+            0% { background-color: white; }
+            50% { background-color: #9ca3af; color: white; border-color: #4b5563; }
+            100% { }
+        }
+
+        .beep-on-time { animation: beep-green 1s ease-in-out !important; }
+        .beep-late { animation: beep-red 1s ease-in-out !important; }
+        .beep-none { animation: beep-gray 1s ease-in-out !important; }
+
+        .modal-content.large { max-width: 800px; }
+        #visual-canvas { cursor: crosshair; }
     </style>
 </head>
 <body>
@@ -449,7 +605,17 @@ if ($mapping_id) {
 
                     <form id="tour-form" method="POST" action="manage_tour.php">
                         <div class="tour-list-container">
-                            <?php if ($starting_point): ?>
+                            <?php if ($starting_point): 
+                                $start_shift = '';
+                                $start_interval = 0;
+                                foreach($current_assignments as $as) {
+                                    if($as['checkpoint_id'] == $starting_point['id']) {
+                                        $start_shift = $as['shift_name'];
+                                        $start_interval = $as['interval_minutes'];
+                                        break;
+                                    }
+                                }
+                            ?>
                                 <div class="tour-list" style="margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;">
                                     <div class="tour-item" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
                                         <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
@@ -458,22 +624,13 @@ if ($mapping_id) {
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="0" min="0" disabled>
+                                                <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Shift Declare</label>
                                                 <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
-                                                    <?php 
-                                                        $start_shift = '';
-                                                        foreach($current_assignments as $as) {
-                                                            if($as['checkpoint_id'] == $starting_point['id']) {
-                                                                $start_shift = $as['shift_name'];
-                                                                break;
-                                                            }
-                                                        }
-                                                        if (empty($client_shifts)): 
-                                                    ?>
+                                                    <?php if (empty($client_shifts)): ?>
                                                         <option value="Day Shift" <?php echo $start_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
                                                         <option value="Night Shift" <?php echo $start_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
                                                     <?php else: ?>
@@ -549,7 +706,10 @@ if ($mapping_id) {
                 <div class="card">
                     <div class="card-header">
                         <span>Directory of Checkpoints</span>
-                        <button class="btn" style="width: auto; padding: 8px 16px; font-size: 0.85rem;" onclick="document.getElementById('createQRModal').classList.add('show'); updateFormState();">Create New Checkpoint</button>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button type="button" class="btn-visual" style="padding: 8px 16px; font-size: 0.85rem;" onclick="openVisualDesigner()">Visual</button>
+                            <button type="button" class="btn" style="width: auto; padding: 8px 16px; font-size: 0.85rem;" onclick="document.getElementById('createQRModal').classList.add('show'); updateFormState();">Create New Checkpoint</button>
+                        </div>
                     </div>
                     <div class="table-container">
                         <table>
@@ -708,6 +868,25 @@ if ($mapping_id) {
             <div class="no-print" style="margin-top: 20px; display: flex; gap: 12px;">
                 <button class="btn" style="background:#f3f4f6; color:#374151;" onclick="closeModal('printQRModal')">Close</button>
                 <button class="btn" style="background: #111827; color: white;" onclick="window.print()">Print Document</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Visual Designer Modal -->
+    <div id="visualDesignerModal" class="modal-overlay">
+        <div class="modal-content large">
+            <div class="card-header" style="border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.25rem;">Visual Patrol Map</h3>
+                <button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280;" onclick="closeVisualDesigner()">&times;</button>
+            </div>
+            <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px; text-align: left;">
+                Draggable overview of checkpoints. <strong>Blue</strong> is the start, <strong>White</strong> are regular checkpoints.
+            </p>
+            <div id="visual-canvas" class="visual-container">
+                <div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">Loading checkpoints...</div>
+            </div>
+            <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+                <button class="btn" style="max-width: 150px; background: #374151;" onclick="closeVisualDesigner()">Close View</button>
             </div>
         </div>
     </div>
@@ -887,9 +1066,123 @@ if ($mapping_id) {
             document.getElementById(id).classList.remove('show');
         }
 
+        // --- Visual Patrol Map Logic ---
+        let beepInterval = null;
+        let beepIndex = 0;
+        let visualCheckpoints = [];
+        const mappingId = <?php echo $mapping_id; ?>;
+
+        function closeVisualDesigner() {
+            document.getElementById('visualDesignerModal').classList.remove('show');
+            if (beepInterval) {
+                clearInterval(beepInterval);
+                beepInterval = null;
+            }
+            document.querySelectorAll('.checkpoint-circle').forEach(c => {
+                c.classList.remove('beep-on-time', 'beep-late', 'beep-none');
+            });
+        }
+
+        function triggerNextBeep() {
+            if (visualCheckpoints.length === 0) return;
+            document.querySelectorAll('.checkpoint-circle').forEach(c => {
+                c.classList.remove('beep-on-time', 'beep-late', 'beep-none');
+            });
+            const cp = visualCheckpoints[beepIndex];
+            const circle = document.getElementById(`cp-circle-${cp.id}`);
+            if (circle) {
+                let beepClass = 'beep-none';
+                const status = (cp.latest_status || '').toLowerCase();
+                if (status === 'on-time' || status === 'on time') beepClass = 'beep-on-time';
+                else if (status === 'late') beepClass = 'beep-late';
+                circle.classList.add(beepClass);
+            }
+            beepIndex = (beepIndex + 1) % visualCheckpoints.length;
+        }
+
+        function openVisualDesigner() {
+            const modal = document.getElementById('visualDesignerModal');
+            const canvas = document.getElementById('visual-canvas');
+            modal.classList.add('show');
+            canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">Loading checkpoints...</div>';
+
+            fetch(`manage_tour.php?ajax_checkpoints=1&mapping_id=${mappingId}`)
+                .then(response => response.json())
+                .then(data => {
+                    canvas.innerHTML = '';
+                    visualCheckpoints = data;
+                    beepIndex = 0;
+                    if (data.length === 0) {
+                        canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;">No checkpoints configured for this site.</div>';
+                        return;
+                    }
+
+                    data.forEach((cp, index) => {
+                        const circle = document.createElement('div');
+                        circle.id = `cp-circle-${cp.id}`;
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : 'regular'}`;
+                        circle.innerHTML = `${cp.isStart ? 'S' : (index)}<div class="label">${cp.name}</div>`;
+                        
+                        let x = parseInt(cp.visual_pos_x) || 0;
+                        let y = parseInt(cp.visual_pos_y) || 0;
+                        if (x === 0 && y === 0) {
+                            const containerWidth = canvas.offsetWidth || 750;
+                            const spacingX = 90; 
+                            const spacingY = 90;
+                            const itemsPerRow = Math.floor((containerWidth - 60) / spacingX) || 7;
+                            x = 40 + (index % itemsPerRow) * spacingX;
+                            y = 40 + Math.floor(index / itemsPerRow) * spacingY;
+                        }
+                        circle.style.left = x + 'px';
+                        circle.style.top = y + 'px';
+                        
+                        circle.onmousedown = function(e) {
+                            let shiftX = e.clientX - circle.getBoundingClientRect().left;
+                            let shiftY = e.clientY - circle.getBoundingClientRect().top;
+                            circle.style.zIndex = 1000;
+                            function moveAt(pageX, pageY) {
+                                let newX = pageX - canvas.getBoundingClientRect().left - shiftX;
+                                let newY = pageY - canvas.getBoundingClientRect().top - shiftY;
+                                newX = Math.max(0, Math.min(newX, canvas.offsetWidth - circle.offsetWidth));
+                                newY = Math.max(0, Math.min(newY, canvas.offsetHeight - circle.offsetHeight));
+                                circle.style.left = newX + 'px';
+                                circle.style.top = newY + 'px';
+                            }
+                            function onMouseMove(e) { moveAt(e.pageX, e.pageY); }
+                            document.addEventListener('mousemove', onMouseMove);
+                            circle.onmouseup = function() {
+                                document.removeEventListener('mousemove', onMouseMove);
+                                circle.onmouseup = null;
+                                circle.style.zIndex = cp.isStart ? 10 : 5;
+                                const finalX = parseInt(circle.style.left);
+                                const finalY = parseInt(circle.style.top);
+                                const formData = new FormData();
+                                formData.append('ajax_save_position', '1');
+                                formData.append('cp_id', cp.id);
+                                formData.append('x', finalX);
+                                formData.append('y', finalY);
+                                fetch('manage_tour.php', { method: 'POST', body: formData }).catch(err => console.error(err));
+                            };
+                        };
+                        circle.ondragstart = function() { return false; };
+                        canvas.appendChild(circle);
+                    });
+                    triggerNextBeep(); 
+                    beepInterval = setInterval(triggerNextBeep, 1000);
+                })
+                .catch(err => {
+                    canvas.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:#ef4444;">Error loading checkpoints.</div>';
+                    console.error(err);
+                });
+        }
+
         window.onclick = function(event) {
             if (event.target.classList.contains('modal-overlay')) {
-                event.target.classList.remove('show');
+                if (event.target.id === 'visualDesignerModal') {
+                    closeVisualDesigner();
+                } else {
+                    event.target.classList.remove('show');
+                }
             }
         }
     </script>

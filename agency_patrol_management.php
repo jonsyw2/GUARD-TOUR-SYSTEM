@@ -116,6 +116,27 @@ if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
     exit();
 }
 
+// AJAX Handler for deleting a checkpoint
+if (isset($_POST['ajax_delete_checkpoint']) && isset($_POST['cp_id'])) {
+    $cp_id = (int)$_POST['cp_id'];
+    
+    // Security: Verify checkpoint belongs to an agency site for this specific agency
+    $stmt = $conn->prepare("
+        DELETE cp FROM checkpoints cp
+        JOIN agency_clients ac ON cp.agency_client_id = ac.id
+        WHERE cp.id = ? AND ac.agency_id = ? AND cp.is_zero_checkpoint = 0
+    ");
+    $stmt->bind_param("ii", $cp_id, $agency_id);
+    $stmt->execute();
+    
+    // Also delete any assignments referencing this checkpoint
+    $conn->query("DELETE FROM tour_assignments WHERE checkpoint_id = $cp_id");
+    
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true]);
+    exit();
+}
+
 $message = '';
 $message_type = '';
 $show_status_modal = false;
@@ -191,42 +212,38 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                 $update_sql = "UPDATE agency_clients SET site_name = '$site_name' WHERE id = $mapping_id";
                 $conn->query($update_sql);
 
-                // Handle checkpoints update
-                $existing_cp_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 ORDER BY id ASC");
-                $existing_ids = [];
-                while ($row = $existing_cp_res->fetch_assoc()) {
-                    $existing_ids[] = (int)$row['id'];
-                }
-
-                $current_index = 0;
-                foreach ($checkpoints as $cp_name) {
-                    $cp_name = trim($cp_name);
+                // Handle checkpoints update (ID-based)
+                $submitted_checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
+                $submitted_checkpoint_names = $_POST['checkpoints'] ?? [];
+                
+                $remaining_ids = [];
+                for ($i = 0; $i < count($submitted_checkpoint_names); $i++) {
+                    $cp_name = trim($submitted_checkpoint_names[$i]);
+                    $cp_id = isset($submitted_checkpoint_ids[$i]) ? (int)$submitted_checkpoint_ids[$i] : 0;
+                    
                     if (empty($cp_name)) continue;
 
-                    if ($current_index < count($existing_ids)) {
-                        // Update existing
-                        $cp_id = $existing_ids[$current_index];
-                        $stmt = $conn->prepare("UPDATE checkpoints SET name = ? WHERE id = ?");
-                        $stmt->bind_param("si", $cp_name, $cp_id);
+                    if ($cp_id > 0) {
+                        // Update existing by ID
+                        $stmt = $conn->prepare("UPDATE checkpoints SET name = ? WHERE id = ? AND agency_client_id = ?");
+                        $stmt->bind_param("sii", $cp_name, $cp_id, $mapping_id);
                         $stmt->execute();
+                        $remaining_ids[] = $cp_id;
                     } else {
-                        // Insert new (generate random checkpoint code)
+                        // Insert new
                         $code = strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
                         $stmt = $conn->prepare("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code) VALUES (?, ?, ?)");
                         $stmt->bind_param("iss", $mapping_id, $cp_name, $code);
                         $stmt->execute();
+                        $remaining_ids[] = $conn->insert_id;
                     }
-                    $current_index++;
                 }
 
-                // Delete any remaining existing checkpoints that were removed
-                while ($current_index < count($existing_ids)) {
-                    $cp_id = $existing_ids[$current_index];
-                    // Delete from tour_assignments first to avoid foreign key issues
-                    $conn->query("DELETE FROM tour_assignments WHERE checkpoint_id = $cp_id");
-                    $conn->query("DELETE FROM checkpoints WHERE id = $cp_id");
-                    $current_index++;
-                }
+                // Delete checkpoints that are no longer in the list (if not using immediate AJAX)
+                // We exclude Starting Point (is_zero_checkpoint = 1) from auto-deletion here
+                $remaining_ids_str = empty($remaining_ids) ? "0" : implode(',', $remaining_ids);
+                $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id AND checkpoint_id NOT IN ($remaining_ids_str) AND checkpoint_id IN (SELECT id FROM checkpoints WHERE is_zero_checkpoint = 0)");
+                $conn->query("DELETE FROM checkpoints WHERE agency_client_id = $mapping_id AND id NOT IN ($remaining_ids_str) AND is_zero_checkpoint = 0");
 
                 // Auto-create Starting Point if missing
                 $start_check = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1");
@@ -670,7 +687,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             </div>
 
                             <div class="tour-list-container">
-                                <?php if ($starting_point): ?>
+                                <?php if ($starting_point): 
+                                    $start_shift = $selected_client['shift_type'] ?? '';
+                                    $start_interval = 0;
+                                    foreach($current_assignments as $as) {
+                                        if($as['checkpoint_id'] == $starting_point['id']) {
+                                            $start_shift = $as['shift_name'];
+                                            $start_interval = $as['interval_minutes'];
+                                            break;
+                                        }
+                                    }
+                                ?>
                                     <div class="tour-list" style="margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;">
                                         <div class="tour-item" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
                                             <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
@@ -679,22 +706,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                             <div class="setting-inputs">
                                                 <div class="input-group">
                                                     <label>Interval</label>
-                                                    <input type="number" name="intervals[]" value="0" min="0">
+                                                    <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Shift Declare</label>
                                                     <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
-                                                        <?php 
-                                                            $start_shift = $selected_client['shift_type'] ?? '';
-                                                            foreach($current_assignments as $as) {
-                                                                if($as['checkpoint_id'] == $starting_point['id']) {
-                                                                    $start_shift = $as['shift_name'];
-                                                                    break;
-                                                                }
-                                                            }
-                                                            if (empty($client_shifts)): 
-                                                        ?>
+                                                        <?php if (empty($client_shifts)): ?>
                                                             <option value="Day Shift" <?php echo $start_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
                                                             <option value="Night Shift" <?php echo $start_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
                                                         <?php else: ?>
@@ -783,11 +801,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     <tbody>
                                         <?php if ($checkpoints_result && $checkpoints_result->num_rows > 0): ?>
                                             <?php $index = 0; while($row = $checkpoints_result->fetch_assoc()): ?>
-                                                <tr>
+                                                <tr data-cp-id="<?php echo $row['id']; ?>">
                                                     <td>
                                                         <strong><?php echo htmlspecialchars($row['name']); ?></strong>
                                                         <?php if ($row['is_zero_checkpoint']): ?>
-                                                            <div style="margin-top: 4px;"><span style="font-size: 0.75rem; background: #d1fae5; color: #065f46; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Starting Point</span></div>
+                                                            <div style="margin-top: 4px;"><span style="font-size: 0.75rem; background: #d1fae5; color: #065f46; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Site Starting Point</span></div>
+                                                        <?php elseif (strtolower($row['name']) === 'starting point'): ?>
+                                                            <div style="margin-top: 4px;"><span style="font-size: 0.75rem; background: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Duplicate Name Issue</span></div>
                                                         <?php endif; ?>
                                                     </td>
                                                     <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></td>
@@ -1050,6 +1070,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     
                     if (data.checkpoints && data.checkpoints.length > 0) {
                         data.checkpoints.forEach(cp => {
+                            if (cp.is_zero_checkpoint) return; // Skip Starting Point for regular checkpoint list
                             addCheckpointInput(cp.name, cp.id);
                         });
                     } else {
@@ -1116,10 +1137,46 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             row.style.display = 'flex';
             row.style.gap = '10px';
             row.innerHTML = `
+                <input type="hidden" name="checkpoint_ids[]" value="${id}">
                 <input type="text" name="checkpoints[]" class="form-control" placeholder="Checkpoint Name (e.g. Front Gate)" value="${value.replace(/"/g, '&quot;')}" required>
-                <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; padding: 0 16px;" onclick="this.parentElement.remove()">✕</button>
+                <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; padding: 0 16px;" onclick="removeCheckpoint(this, '${id}')">✕</button>
             `;
             container.appendChild(row);
+        }
+
+        async function removeCheckpoint(btn, id, isDirectTableDelete = false) {
+            if (id && id !== '') {
+                if (!confirm("Are you sure you want to delete this checkpoint and all its data? This cannot be undone.")) {
+                    return;
+                }
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('ajax_delete_checkpoint', '1');
+                    formData.append('cp_id', id);
+                    
+                    const response = await fetch('agency_patrol_management.php', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (response.ok) {
+                        // Remove from Active Checkpoints table if it exists there
+                        const tableRow = document.querySelector(`tr[data-cp-id="${id}"]`);
+                        if (tableRow) tableRow.remove();
+
+                        // Remove from QR Management tab if it exists there
+                        const qrRow = document.querySelector(`input[name="checkpoint_ids[]"][value="${id}"]`)?.closest('.cp-input-row');
+                        if (qrRow) qrRow.remove();
+                    }
+                } catch (e) {
+                    console.error('Error deleting checkpoint:', e);
+                    showAlert('Error deleting checkpoint. Please try again.');
+                    return;
+                }
+            }
+            
+            if (btn) btn.parentElement.remove();
         }
 
         // Patrol Add Checkpoint Logic
