@@ -114,7 +114,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
             $as_shift = $conn->real_escape_string($assignment_shifts[$i] ?? '');
             $order = $i + 1;
             $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes, shift_name) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt_ins->bind_param("iiiii s", $mapping_id, $cp_id, $order, $interval, $duration, $as_shift);
+            $stmt_ins->bind_param("iiiiis", $mapping_id, $cp_id, $order, $interval, $duration, $as_shift);
             $stmt_ins->execute();
         }
         $conn->commit();
