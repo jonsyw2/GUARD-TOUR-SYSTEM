@@ -9,6 +9,8 @@ if ($_SESSION['user_level'] !== 'agency') {
 $agency_id = $_SESSION['user_id'] ?? null;
 $message = '';
 $message_type = '';
+$show_limit_modal = false;
+$show_status_modal = false;
 
 // Auto-Migration: Create supervisors table
 $conn->query("
@@ -50,24 +52,43 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
     $unique_key = generateUniqueSupervisorKey($conn);
     $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
     
-    $conn->begin_transaction();
-    try {
-        // 1. Create User
-        $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'supervisor')");
-        $user_id = $conn->insert_id;
+        // Check Agency Supervisor Limit
+        $limit_check = $conn->query("SELECT supervisor_limit FROM users WHERE id = $agency_id");
+        $current_count_check = $conn->query("SELECT COUNT(*) as count FROM supervisors WHERE agency_id = $agency_id");
         
-        // 2. Create Supervisor entry
-        $conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')");
+        $max_supervisors = 0;
+        $current_supervisors = 0;
         
-        $conn->commit();
-        $_SESSION['supervisor_created_key'] = $unique_key;
-        header("Location: manage_supervisors.php?success=1");
-        exit();
-    } catch (Exception $e) {
-        $conn->rollback();
-        $message = "Error creating supervisor: " . $e->getMessage();
-        $message_type = "error";
-    }
+        if ($limit_check && $current_count_check) {
+            $max_supervisors = (int)$limit_check->fetch_assoc()['supervisor_limit'];
+            $current_supervisors = (int)$current_count_check->fetch_assoc()['count'];
+        }
+
+        if ($max_supervisors > 0 && $current_supervisors >= $max_supervisors) {
+            $message = "Creation failed: Your agency has reached its maximum limit of $max_supervisors supervisors.";
+            $message_type = "error";
+            $show_limit_modal = true;
+        } else {
+            $conn->begin_transaction();
+            try {
+                // 1. Create User
+                $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'supervisor')");
+                $user_id = $conn->insert_id;
+                
+                // 2. Create Supervisor entry
+                $conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')");
+                
+                $conn->commit();
+                $_SESSION['supervisor_created_key'] = $unique_key;
+                header("Location: manage_supervisors.php?success=1");
+                exit();
+            } catch (Exception $e) {
+                $conn->rollback();
+                $message = "Error creating supervisor: " . $e->getMessage();
+                $message_type = "error";
+                $show_status_modal = true;
+            }
+        }
 }
 
 // Handle Editing Supervisor
@@ -79,9 +100,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_supervisor'])) 
     if ($conn->query("UPDATE supervisors SET name = '$name', contact_no = '$contact' WHERE id = $sup_id AND agency_id = $agency_id")) {
         $message = "Supervisor updated successfully!";
         $message_type = "success";
+        $show_status_modal = true;
     } else {
         $message = "Error updating supervisor: " . $conn->error;
         $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -280,7 +303,29 @@ if (isset($_SESSION['supervisor_created_key'])) {
             <div style="background: #f9fafb; padding: 20px; border-radius: 12px; border: 2px dashed #d1d5db; font-size: 2.5rem; font-weight: 800; font-family: monospace; letter-spacing: 2px;">
                 <?php echo $generated_key; ?>
             </div>
-            <button class="btn" style="margin-top: 24px;" onclick="document.getElementById('keyModal').classList.remove('show')">Done</button>
+            <button class="btn" style="margin-top: 24px;" onclick="closeModal('keyModal')">Done</button>
+        </div>
+    </div>
+
+    <!-- Status Process Modal -->
+    <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+            </div>
+            <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
+        </div>
+    </div>
+
+    <!-- Limit Reached Modal -->
+    <div id="limitModal" class="modal <?php echo $show_limit_modal ? 'show' : ''; ?>">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <h3 style="margin-bottom: 10px;">Limit Reached</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn btn-primary" style="background: #111827;" onclick="closeModal('limitModal')">Understand</button>
         </div>
     </div>
 
@@ -351,6 +396,10 @@ if (isset($_SESSION['supervisor_created_key'])) {
             if (event.target.classList.contains('modal')) {
                 event.target.classList.remove('show');
             }
+        }
+        
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
         }
     </script>
 </body>

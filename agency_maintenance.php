@@ -9,7 +9,10 @@ if ($_SESSION['user_level'] !== 'admin') {
 // Ensure limits columns exist in users table
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guard_limit INT DEFAULT 0");
-$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS inspector_qr_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS inspector_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS supervisor_limit INT DEFAULT 0");
+
+// Limits columns handled by ALTER TABLE ... IF NOT EXISTS
 
 $message = '';
 $message_type = '';
@@ -20,9 +23,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_limits']
     $agency_id = (int)$_POST['agency_id'];
     $qr_limit = (int)$_POST['qr_limit'];
     $guard_limit = (int)$_POST['guard_limit'];
-    $inspector_qr_limit = (int)$_POST['inspector_qr_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
 
-    if ($conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_qr_limit = $inspector_qr_limit WHERE id = $agency_id")) {
+    if ($conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_limit = $inspector_limit, supervisor_limit = $supervisor_limit WHERE id = $agency_id")) {
         $message = "Agency limits updated successfully!";
         $message_type = "success";
         $show_status_modal = true;
@@ -53,7 +57,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $password = password_hash($_POST['agency_password'], PASSWORD_DEFAULT);
     $qr_limit = (int)$_POST['qr_limit'];
     $guard_limit = (int)$_POST['guard_limit'];
-    $inspector_qr_limit = (int)$_POST['inspector_qr_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
     
     // Check if username exists
     $checkSql = "SELECT id FROM users WHERE username = '$agency_name'";
@@ -64,8 +69,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_qr_limit) 
-                VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_qr_limit)";
+        $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_limit, supervisor_limit) 
+                VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit)";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
@@ -200,7 +205,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
 }
 
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username, qr_limit, guard_limit, inspector_qr_limit FROM users WHERE user_level = 'agency' ORDER BY username ASC");
+$agencies_result = $conn->query("SELECT id, username, qr_limit, guard_limit, inspector_limit, supervisor_limit FROM users WHERE user_level = 'agency' ORDER BY username ASC");
 
 // Fetch all clients
 $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
@@ -211,7 +216,7 @@ $clients_result = $conn->query("SELECT id, username FROM users WHERE user_level 
 // Fetch agency-client mappings
 $mapping_sql = "
     SELECT ac.id, a.username AS agency_name, c.username AS client_name, ac.created_at, 
-           a.qr_limit, a.guard_limit, a.inspector_qr_limit
+           a.qr_limit, a.guard_limit, a.inspector_limit, a.supervisor_limit
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id
@@ -272,10 +277,11 @@ include 'admin_layout/sidebar.php';
                                 <label class="form-label">Security Password</label>
                                 <input type="password" name="agency_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                             </div>
-                            <div class="form-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
+                            <div class="form-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
                                 <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
                                 <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
-                                <div class="form-group"><label class="form-label">Inspector QR</label><input type="number" name="inspector_qr_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Inspector</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Supervisor</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
                             </div>
                             <button type="submit" name="add_agency" class="btn btn-primary">Create Agency Profile</button>
                         </form>
@@ -298,14 +304,15 @@ include 'admin_layout/sidebar.php';
                                 $agencies_result->data_seek(0);
                                 if ($agencies_result->num_rows > 0): 
                                     while($row = $agencies_result->fetch_assoc()): ?>
-                                    <tr onclick="openAgencyEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>', <?php echo $row['qr_limit']; ?>, <?php echo $row['guard_limit']; ?>, <?php echo $row['inspector_qr_limit']; ?>)">
+                                    <tr onclick="openAgencyEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>', <?php echo $row['qr_limit']; ?>, <?php echo $row['guard_limit']; ?>, <?php echo $row['inspector_limit']; ?>, <?php echo $row['supervisor_limit']; ?>)">
                                         <td>#<?php echo $row['id']; ?></td>
                                         <td>
                                             <strong><?php echo htmlspecialchars($row['username']); ?></strong>
                                             <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
                                                 QR: <?php echo $row['qr_limit']; ?> | 
                                                 Guards: <?php echo $row['guard_limit']; ?> | 
-                                                Insp: <?php echo $row['inspector_qr_limit']; ?>
+                                                Insp: <?php echo $row['inspector_limit']; ?> | 
+                                                Supr: <?php echo $row['supervisor_limit']; ?>
                                             </div>
                                         </td>
                                         <td><span style="color: var(--success); font-weight: 600;">● Active</span></td>
@@ -468,12 +475,13 @@ include 'admin_layout/sidebar.php';
             }
         });
 
-        function openAgencyEditModal(id, name, qr, guard, insp) {
+        function openAgencyEditModal(id, name, qr, guard, insp, supervisor) {
             document.getElementById('edit_agency_id').value = id;
             document.getElementById('edit_agency_name').value = name;
             document.getElementById('edit_qr_limit').value = qr;
             document.getElementById('edit_guard_limit').value = guard;
-            document.getElementById('edit_inspector_qr_limit').value = insp;
+            document.getElementById('edit_inspector_limit').value = insp;
+            document.getElementById('edit_supervisor_limit').value = supervisor;
             document.getElementById('editAgencyModal').classList.add('show');
         }
 
@@ -495,10 +503,11 @@ include 'admin_layout/sidebar.php';
                     <label class="form-label">Agency Name</label>
                     <input type="text" id="edit_agency_name" class="form-control" disabled>
                 </div>
-                <div class="form-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px;">
+                <div class="form-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px;">
                     <div class="form-group" style="text-align: left;"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" id="edit_qr_limit" class="form-control" min="0"></div>
                     <div class="form-group" style="text-align: left;"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" id="edit_guard_limit" class="form-control" min="0"></div>
-                    <div class="form-group" style="text-align: left;"><label class="form-label">Inspector</label><input type="number" name="inspector_qr_limit" id="edit_inspector_qr_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Inspector</label><input type="number" name="inspector_limit" id="edit_inspector_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Supervisor</label><input type="number" name="supervisor_limit" id="edit_supervisor_limit" class="form-control" min="0"></div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editAgencyModal')">Cancel</button>

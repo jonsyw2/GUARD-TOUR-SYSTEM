@@ -11,6 +11,7 @@ $agency_id = $_SESSION['user_id'];
 // Fetch Stats
 $total_clients = $conn->query("SELECT COUNT(*) as count FROM agency_clients WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 $total_guards = $conn->query("SELECT COUNT(*) as count FROM guards WHERE agency_id = $agency_id")->fetch_assoc()['count'];
+$total_supervisors = $conn->query("SELECT COUNT(*) as count FROM supervisors WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 
 // Get mapping IDs for this agency to filter checkpoints/scans
 $mapping_ids_res = $conn->query("SELECT id FROM agency_clients WHERE agency_id = $agency_id");
@@ -18,7 +19,7 @@ $mapping_ids = [];
 while($r = $mapping_ids_res->fetch_assoc()) $mapping_ids[] = (int)$r['id'];
 $mapping_ids_str = !empty($mapping_ids) ? implode(',', $mapping_ids) : '0';
 
-$total_checkpoints = $conn->query("SELECT COUNT(*) as count FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) AND is_zero_checkpoint = 0")->fetch_assoc()['count'];
+$total_checkpoints = $conn->query("SELECT COUNT(*) as count FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0")->fetch_assoc()['count'];
 
 $scans_today = 0;
 if ($mapping_ids_str !== '0') {
@@ -166,6 +167,13 @@ $recent_scans = $conn->query("
                     <div class="stat-info">
                         <div class="label">Total Guards</div>
                         <div class="value"><?php echo $total_guards; ?></div>
+                    </div>
+                </a>
+                <a href="manage_supervisors.php" class="stat-card">
+                    <div class="stat-icon" style="background: #f0f9ff; color: #0369a1;">👥</div>
+                    <div class="stat-info">
+                        <div class="label">Supervisors</div>
+                        <div class="value"><?php echo $total_supervisors; ?></div>
                     </div>
                 </a>
                 <a href="agency_patrol_management.php" class="stat-card">

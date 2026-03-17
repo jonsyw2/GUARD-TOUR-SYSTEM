@@ -103,7 +103,7 @@ $clients_sql = "
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
            (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
-           (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count,
+           (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0) as qr_count,
            (
                SELECT GROUP_CONCAT(g.name SEPARATOR ' | ')
                FROM guard_assignments ga

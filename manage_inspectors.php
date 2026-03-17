@@ -53,11 +53,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
     // Check Agency Inspector Limit
-    $limit_check = $conn->query("SELECT inspector_qr_limit FROM users WHERE id = $agency_id");
+    $limit_check = $conn->query("SELECT inspector_limit FROM users WHERE id = $agency_id");
     $current_count_check = $conn->query("SELECT COUNT(*) as count FROM inspectors WHERE agency_id = $agency_id");
     
     if ($limit_check && $current_count_check) {
-        $max_inspectors = $limit_check->fetch_assoc()['inspector_qr_limit'];
+        $max_inspectors = $limit_check->fetch_assoc()['inspector_limit'];
         $current_inspectors = $current_count_check->fetch_assoc()['count'];
         
         if ($max_inspectors > 0 && $current_inspectors >= $max_inspectors) {
