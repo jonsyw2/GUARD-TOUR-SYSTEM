@@ -70,6 +70,82 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     }
 }
 
+// Handle Add Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
+    $client_username = $conn->real_escape_string($_POST['client_username']);
+    $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
+    $company_name = $conn->real_escape_string($_POST['company_name']);
+    $company_address = $conn->real_escape_string($_POST['company_address']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no']);
+    $email_address = $conn->real_escape_string($_POST['email_address']);
+    $website_link = $conn->real_escape_string($_POST['website_link']);
+    $contact_person = $conn->real_escape_string($_POST['contact_person']);
+    $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
+    $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
+
+    $conn->begin_transaction();
+    try {
+        // 1. Check if username exists
+        $user_check = $conn->query("SELECT id FROM users WHERE username = '$client_username'");
+        if ($user_check && $user_check->num_rows > 0) {
+            throw new Exception("Username '$client_username' is already taken.");
+        }
+
+        // 2. Check Agency Limit
+        $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
+        $client_limit = 0;
+        if ($limit_res && $limit_res->num_rows > 0) {
+            $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
+        }
+
+        $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+        $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
+
+        if ($client_limit > 0 && $current_clients >= $client_limit) {
+            throw new Exception("You have reached your maximum client limit ($client_limit). Contact Admin to increase it.");
+        }
+
+        // 3. Create User Account
+        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
+            throw new Exception("Error creating user: " . $conn->error);
+        }
+        $new_client_id = $conn->insert_id;
+
+        // 4. Create Agency-Client Assignment and Profile
+        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no) 
+                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no')")) {
+            throw new Exception("Error creating client profile: " . $conn->error);
+        }
+        $mapping_id = $conn->insert_id;
+
+        // 5. Handle Logo Upload
+        if (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] == 0) {
+            $target_dir = "uploads/logos/";
+            if (!file_exists($target_dir)) mkdir($target_dir, 0777, true);
+            $file_ext = strtolower(pathinfo($_FILES["company_logo"]["name"], PATHINFO_EXTENSION));
+            $new_filename = "logo_" . $mapping_id . "_" . time() . "." . $file_ext;
+            $target_file = $target_dir . $new_filename;
+            
+            $valid_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            if (in_array($file_ext, $valid_extensions) && $_FILES["company_logo"]["size"] < 2000000) {
+                if (move_uploaded_file($_FILES["company_logo"]["tmp_name"], $target_file)) {
+                    $conn->query("UPDATE agency_clients SET company_logo = '$target_file' WHERE id = $mapping_id");
+                }
+            }
+        }
+
+        $conn->commit();
+        $message = "Client account and profile created successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = $e->getMessage();
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 // Handle Guard Assignment
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
     $mapping_id = (int)$_POST['mapping_id'];
@@ -153,6 +229,13 @@ if ($guards_res) {
 
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
+        .tabs-header { display: flex; gap: 2px; margin-bottom: 24px; background: #e5e7eb; padding: 4px; border-radius: 12px; width: fit-content; }
+        .tab-btn { padding: 10px 24px; border: none; background: transparent; color: #6b7280; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all 0.2s; font-size: 0.95rem; }
+        .tab-btn.active { background: white; color: #10b981; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .tab-content { display: none; margin-top: 20px; }
+        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
         .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: 500; }
         .alert-success { background-color: #d1fae5; color: #065f46; border: 1px solid #34d399; }
         .alert-error { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
@@ -209,17 +292,26 @@ if ($guards_res) {
 
         <div class="content-area">
 
-            <div class="card">
-                <h3 class="card-header">Assigned Clients</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Account Name</th>
-                            <th>Company Details</th>
-                            <th>Guards Assigned</th>
-                            <th style="text-align: right;">Actions</th>
-                        </tr>
-                    </thead>
+            <div class="tabs-header">
+                <button class="tab-btn active" onclick="switchTab('tab-clients-list', this)">Assigned Clients</button>
+                <button class="tab-btn" onclick="switchTab('tab-add-client', this)">Add New Client</button>
+            </div>
+
+            <!-- Tab: Clients List -->
+            <div id="tab-clients-list" class="tab-content active">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 style="margin: 0; border: none;">Assigned Clients</h3>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Account Name</th>
+                                <th>Company Details</th>
+                                <th>Guards Assigned</th>
+                                <th style="text-align: right;">Actions</th>
+                            </tr>
+                        </thead>
                     <tbody>
                          <?php if ($clients_res && $clients_res->num_rows > 0): ?>
                             <?php while($row = $clients_res->fetch_assoc()): ?>
@@ -245,7 +337,7 @@ if ($guards_res) {
                                      <td style="text-align: right;">
                                         <div style="display: flex; gap: 8px; justify-content: flex-end;" onclick="event.stopPropagation()">
                                              <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">Edit Details</button>
-                                            <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Add Guard</button>
+                                            <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
                                         </div>
                                     </td>
                                 </tr>
@@ -255,6 +347,86 @@ if ($guards_res) {
                         <?php endif; ?>
                     </tbody>
                 </table>
+                </div>
+            </div>
+
+            <!-- Tab: Add New Client -->
+            <div id="tab-add-client" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 style="margin: 0; border: none;">Create New Client Account</h3>
+                    </div>
+                    <form action="agency_client_management.php" method="POST" enctype="multipart/form-data" autocomplete="off">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Client Username</label>
+                                <input type="text" name="client_username" class="form-control" placeholder="Account login username" required autocomplete="none">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Account Password</label>
+                                <input type="password" name="client_password" class="form-control" placeholder="••••••••" required autocomplete="new-password">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                                <label class="form-label" style="font-weight: 700; color: #111827;">COMPANY PROFILE DETAILS</label>
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Company Name</label>
+                                <input type="text" name="company_name" class="form-control" placeholder="e.g. Acme Corp" required>
+                            </div>
+                            
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Company Address</label>
+                                <textarea name="company_address" class="form-control" placeholder="Full Business Address" rows="3"></textarea>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Contact No</label>
+                                <input type="text" name="contact_no" class="form-control" placeholder="Company Phone">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Email Address</label>
+                                <input type="email" name="email_address" class="form-control" placeholder="contact@company.com">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Website/Social Link (Optional)</label>
+                                <input type="text" name="website_link" class="form-control" placeholder="FB, Viber, or Website URL">
+                            </div>
+
+                            <div style="grid-column: span 2; margin-top: 16px; border-top: 1px solid #f3f4f6; padding-top: 24px; margin-bottom: 8px;">
+                                <h4 style="font-size: 0.95rem; font-weight: 700; color: #111827; text-transform: uppercase;">Contact Person Details</h4>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Contact Person</label>
+                                <input type="text" name="contact_person" class="form-control" placeholder="Full Name">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Position</label>
+                                <input type="text" name="contact_person_position" class="form-control" placeholder="Job Title">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2;">
+                                <label class="form-label">Contact No (Contact Person)</label>
+                                <input type="text" name="contact_person_no" class="form-control" placeholder="Personal or Office Phone">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2; margin-top: 16px; border-top: 1px solid #f3f4f6; padding-top: 24px;">
+                                <label class="form-label">Company Logo (Photo)</label>
+                                <input type="file" name="company_logo" class="form-control" accept="image/*">
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 24px;">
+                            <button type="submit" name="add_client" class="btn-sm btn-primary" style="padding: 14px 40px; font-size: 1rem; border-radius: 8px;">Create & Register Client</button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     </main>
@@ -405,6 +577,13 @@ if ($guards_res) {
     </div>
 
     <script>
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+        }
+
         function openSummaryModal(clientName, qrCount, guardNames) {
             document.getElementById('summary_title').innerText = "Site Summary: " + clientName;
             document.getElementById('summary_qr_count').innerText = qrCount;

@@ -11,8 +11,36 @@ $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_limit INT DEFAULT 0"
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guard_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS inspector_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS supervisor_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS client_limit INT DEFAULT 0");
+
+// Auto-Migration: Create supervisors table
+$conn->query("
+    CREATE TABLE IF NOT EXISTS supervisors (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        agency_id INT NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        contact_no VARCHAR(20) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX (user_id),
+        INDEX (agency_id)
+    ) ENGINE=InnoDB
+");
 
 // Limits columns handled by ALTER TABLE ... IF NOT EXISTS
+
+// Function to generate unique 6-character alphanumeric key (access key)
+function generateUniqueSupervisorKeyAdmin($conn) {
+    $chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    do {
+        $key = "";
+        for ($i = 0; $i < 6; $i++) {
+            $key .= $chars[rand(0, strlen($chars) - 1)];
+        }
+        $check = $conn->query("SELECT id FROM users WHERE username = '$key'");
+    } while ($check && $check->num_rows > 0);
+    return $key;
+}
 
 $message = '';
 $message_type = '';
@@ -25,8 +53,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_limits']
     $guard_limit = (int)$_POST['guard_limit'];
     $inspector_limit = (int)$_POST['inspector_limit'];
     $supervisor_limit = (int)$_POST['supervisor_limit'];
+    $client_limit = (int)$_POST['client_limit'];
 
-    if ($conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_limit = $inspector_limit, supervisor_limit = $supervisor_limit WHERE id = $agency_id")) {
+    if ($conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_limit = $inspector_limit, supervisor_limit = $supervisor_limit, client_limit = $client_limit WHERE id = $agency_id")) {
         $message = "Agency limits updated successfully!";
         $message_type = "success";
         $show_status_modal = true;
@@ -59,6 +88,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $guard_limit = (int)$_POST['guard_limit'];
     $inspector_limit = (int)$_POST['inspector_limit'];
     $supervisor_limit = (int)$_POST['supervisor_limit'];
+    $client_limit = (int)$_POST['client_limit'];
     
     // Check if username exists
     $checkSql = "SELECT id FROM users WHERE username = '$agency_name'";
@@ -69,8 +99,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_limit, supervisor_limit) 
-                VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit)";
+        $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit) 
+                VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit, $client_limit)";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
@@ -98,15 +128,31 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_client'])) {
             $message_type = "error";
             $show_status_modal = true;
         } else {
-            $sql = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
-            if ($conn->query($sql) === TRUE) {
-                $message = "Client assigned to agency successfully!";
-                $message_type = "success";
-                $show_status_modal = true;
-            } else {
-                $message = "Error assigning client: " . $conn->error;
+            // Check Client Limit
+            $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
+            $client_limit = 0;
+            if ($limit_res && $limit_res->num_rows > 0) {
+                $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
+            }
+
+            $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+            $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
+
+            if ($client_limit > 0 && $current_clients >= $client_limit) {
+                $message = "This agency has reached its maximum client limit ($client_limit).";
                 $message_type = "error";
                 $show_status_modal = true;
+            } else {
+                $sql = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
+                if ($conn->query($sql) === TRUE) {
+                    $message = "Client assigned to agency successfully!";
+                    $message_type = "success";
+                    $show_status_modal = true;
+                } else {
+                    $message = "Error assigning client: " . $conn->error;
+                    $message_type = "error";
+                    $show_status_modal = true;
+                }
             }
         }
     } else {
@@ -116,9 +162,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_client'])) {
     }
 }
 
-// Handle Add and Assign Client
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_assign_client'])) {
-    $agency_id = (int)$_POST['agency_id'];
+// Handle Add Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $client_username = $conn->real_escape_string($_POST['client_username']);
     $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
 
@@ -131,48 +176,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_assign_client'])) 
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        // Start transaction
-        $conn->begin_transaction();
-        try {
-            // Insert new client
-            $sql_user = "INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')";
-            if (!$conn->query($sql_user)) {
-                throw new Exception("Error creating client user: " . $conn->error);
-            }
-            $client_id = $conn->insert_id;
-
-            // Assign to agency
-            $sql_assign = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
-            if (!$conn->query($sql_assign)) {
-                throw new Exception("Error assigning client to agency: " . $conn->error);
-            }
-
-            $conn->commit();
-            $message = "Client created and assigned successfully!";
-            $message_type = "success";
-            $show_status_modal = true;
-        } catch (Exception $e) {
-            $conn->rollback();
-            $message = $e->getMessage();
-            $message_type = "error";
-            $show_status_modal = true;
-        }
-    }
-}
-
-// Handle Add Client
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
-    $new_username = $conn->real_escape_string($_POST['new_username']);
-    $password = password_hash($_POST['new_password'], PASSWORD_DEFAULT);
-    $checkSql = "SELECT id FROM users WHERE username = '$new_username'";
-    $result = $conn->query($checkSql);
-    if ($result->num_rows > 0) {
-        $message = "Client username already exists!";
-        $message_type = "error";
-        $show_status_modal = true;
-    } else {
-        $sql = "INSERT INTO users (username, password, user_level) VALUES ('$new_username', '$password', 'client')";
-        if ($conn->query($sql) === TRUE) {
+        if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
             $message = "Client created successfully!";
             $message_type = "success";
             $show_status_modal = true;
@@ -183,6 +187,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         }
     }
 }
+
 
 // Handle Delete Client
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
@@ -204,8 +209,116 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
     }
 }
 
+// Handle Add Supervisor
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_supervisor'])) {
+    $agency_id = (int)$_POST['agency_id'];
+    $fullname = $conn->real_escape_string($_POST['fullname']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no']);
+    $assigned_clients = $_POST['assigned_clients'] ?? [];
+
+    $conn->begin_transaction();
+    try {
+        // Generate Unique Access Key
+        $unique_key = generateUniqueSupervisorKeyAdmin($conn);
+        $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
+
+        // 1. Create User
+        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'supervisor')")) {
+            throw new Exception("Error creating supervisor user: " . $conn->error);
+        }
+        $user_id = $conn->insert_id;
+
+        // 2. Create Supervisor entry
+        if (!$conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')")) {
+            throw new Exception("Error creating supervisor entry: " . $conn->error);
+        }
+        $supervisor_id = $conn->insert_id;
+
+        // 3. Assign Clients
+        if (!empty($assigned_clients)) {
+            foreach ($assigned_clients as $client_id) {
+                $client_id = (int)$client_id;
+                $conn->query("UPDATE agency_clients SET supervisor_id = $supervisor_id WHERE agency_id = $agency_id AND client_id = $client_id");
+            }
+        }
+
+        $conn->commit();
+        $message = "Supervisor created successfully! Access Key: <strong>$unique_key</strong>";
+        $message_type = "success";
+        $show_status_modal = true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = $e->getMessage();
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
+// Handle Update Supervisor
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_supervisor'])) {
+    $supervisor_id = (int)$_POST['edit_supervisor_id'];
+    $agency_id = (int)$_POST['agency_id'];
+    $fullname = $conn->real_escape_string($_POST['fullname']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no']);
+    $assigned_clients = $_POST['assigned_clients'] ?? [];
+
+    $conn->begin_transaction();
+    try {
+        // 1. Update Supervisor entry
+        $conn->query("UPDATE supervisors SET name = '$fullname', contact_no = '$contact_no', agency_id = $agency_id WHERE id = $supervisor_id");
+
+        // 2. Clear old assignments for this supervisor
+        $conn->query("UPDATE agency_clients SET supervisor_id = NULL WHERE supervisor_id = $supervisor_id");
+
+        // 3. Re-assign Clients
+        if (!empty($assigned_clients)) {
+            foreach ($assigned_clients as $client_id) {
+                $client_id = (int)$client_id;
+                $conn->query("UPDATE agency_clients SET supervisor_id = $supervisor_id WHERE agency_id = $agency_id AND client_id = $client_id");
+            }
+        }
+
+        $conn->commit();
+        $message = "Supervisor updated successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = $e->getMessage();
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
+// Handle Delete Supervisor
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor_action'])) {
+    $supervisor_id = (int)$_POST['delete_supervisor_id'];
+    
+    $res = $conn->query("SELECT user_id FROM supervisors WHERE id = $supervisor_id");
+    if ($res && $res->num_rows > 0) {
+        $user_id = $res->fetch_assoc()['user_id'];
+        $conn->begin_transaction();
+        try {
+            // Clear assignments
+            $conn->query("UPDATE agency_clients SET supervisor_id = NULL WHERE supervisor_id = $supervisor_id");
+            // Delete supervisor and user
+            $conn->query("DELETE FROM supervisors WHERE id = $supervisor_id");
+            $conn->query("DELETE FROM users WHERE id = $user_id");
+            $conn->commit();
+            $message = "Supervisor account deleted successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = "Error deleting supervisor: " . $e->getMessage();
+            $message_type = "error";
+            $show_status_modal = true;
+        }
+    }
+}
+
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username, qr_limit, guard_limit, inspector_limit, supervisor_limit FROM users WHERE user_level = 'agency' ORDER BY username ASC");
+$agencies_result = $conn->query("SELECT id, username, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit FROM users WHERE user_level = 'agency' ORDER BY username ASC");
 
 // Fetch all clients
 $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
@@ -216,13 +329,43 @@ $clients_result = $conn->query("SELECT id, username FROM users WHERE user_level 
 // Fetch agency-client mappings
 $mapping_sql = "
     SELECT ac.id, a.username AS agency_name, c.username AS client_name, ac.created_at, 
-           a.qr_limit, a.guard_limit, a.inspector_limit, a.supervisor_limit
+           a.qr_limit, a.guard_limit, a.inspector_limit, a.supervisor_limit, a.client_limit
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id
     ORDER BY a.username ASC, c.username ASC
 ";
 $mappings_result = $conn->query($mapping_sql);
+
+// Fetch all supervisors for User Accounts tab
+$supervisors_sql = "
+    SELECT s.*, u.username as access_key, a.username as agency_name,
+           GROUP_CONCAT(c.username SEPARATOR ', ') as assigned_clients,
+           GROUP_CONCAT(ac.client_id SEPARATOR ',') as assigned_client_ids
+    FROM supervisors s
+    JOIN users u ON s.user_id = u.id
+    JOIN users a ON s.agency_id = a.id
+    LEFT JOIN agency_clients ac ON s.id = ac.supervisor_id
+    LEFT JOIN users c ON ac.client_id = c.id
+    GROUP BY s.id
+    ORDER BY s.name ASC
+";
+$supervisors_result = $conn->query($supervisors_sql);
+
+// Fetch all agency clients for JS mapping (for dynamic client selection)
+$agency_clients_raw = $conn->query("
+    SELECT ac.agency_id, ac.client_id, c.username as client_name 
+    FROM agency_clients ac 
+    JOIN users c ON ac.client_id = c.id
+");
+$agency_clients_map = [];
+while ($ac_row = $agency_clients_raw->fetch_assoc()) {
+    $agency_clients_map[$ac_row['agency_id']][] = [
+        'id' => $ac_row['client_id'],
+        'name' => $ac_row['client_name']
+    ];
+}
+$agency_clients_json = json_encode($agency_clients_map);
 
 ?>
 <?php
@@ -240,6 +383,7 @@ include 'admin_layout/sidebar.php';
             <div class="tab-nav">
                 <button class="tab-btn active" onclick="switchTab('tab-agencies', this)">Agencies</button>
                 <button class="tab-btn" onclick="switchTab('tab-assignments', this)">Client Assignments</button>
+                <button class="tab-btn" onclick="switchTab('tab-user-accounts', this)">User Accounts</button>
             </div>
 
             <style>
@@ -261,6 +405,16 @@ include 'admin_layout/sidebar.php';
 
                 tbody tr { cursor: pointer; transition: background 0.2s; }
                 tbody tr:hover { background-color: #f8fafc !important; }
+
+                /* ── agency badge ── */
+                .badge-agency { display: inline-block; background: #ede9fe; color: #6d28d9;
+                                padding: 3px 10px; border-radius: 20px; font-size: 0.78rem;
+                                font-weight: 600; }
+                /* ── client badges ── */
+                .badge-client { display: inline-block; background: #d1fae5; color: #065f46;
+                                padding: 3px 10px; border-radius: 20px; font-size: 0.78rem;
+                                font-weight: 600; margin: 2px 2px 2px 0; }
+                .badge-none   { color: #9ca3af; font-size: 0.82rem; font-style: italic; }
             </style>
 
             <!-- TAB: AGENCIES -->
@@ -277,11 +431,12 @@ include 'admin_layout/sidebar.php';
                                 <label class="form-label">Security Password</label>
                                 <input type="password" name="agency_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                             </div>
-                            <div class="form-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+                            <div class="form-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px;">
                                 <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
                                 <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
                                 <div class="form-group"><label class="form-label">Inspector</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
                                 <div class="form-group"><label class="form-label">Supervisor</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Client Limit</label><input type="number" name="client_limit" class="form-control" value="0" min="0"></div>
                             </div>
                             <button type="submit" name="add_agency" class="btn btn-primary">Create Agency Profile</button>
                         </form>
@@ -304,7 +459,7 @@ include 'admin_layout/sidebar.php';
                                 $agencies_result->data_seek(0);
                                 if ($agencies_result->num_rows > 0): 
                                     while($row = $agencies_result->fetch_assoc()): ?>
-                                    <tr onclick="openAgencyEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>', <?php echo $row['qr_limit']; ?>, <?php echo $row['guard_limit']; ?>, <?php echo $row['inspector_limit']; ?>, <?php echo $row['supervisor_limit']; ?>)">
+                                    <tr onclick="openAgencyEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>', <?php echo $row['qr_limit']; ?>, <?php echo $row['guard_limit']; ?>, <?php echo $row['inspector_limit']; ?>, <?php echo $row['supervisor_limit']; ?>, <?php echo $row['client_limit']; ?>)">
                                         <td>#<?php echo $row['id']; ?></td>
                                         <td>
                                             <strong><?php echo htmlspecialchars($row['username']); ?></strong>
@@ -312,7 +467,8 @@ include 'admin_layout/sidebar.php';
                                                 QR: <?php echo $row['qr_limit']; ?> | 
                                                 Guards: <?php echo $row['guard_limit']; ?> | 
                                                 Insp: <?php echo $row['inspector_limit']; ?> | 
-                                                Supr: <?php echo $row['supervisor_limit']; ?>
+                                                Supr: <?php echo $row['supervisor_limit']; ?> |
+                                                Clnt: <?php echo $row['client_limit']; ?>
                                             </div>
                                         </td>
                                         <td><span style="color: var(--success); font-weight: 600;">● Active</span></td>
@@ -333,7 +489,7 @@ include 'admin_layout/sidebar.php';
                     <div class="card-body">
                         <div class="form-toggle">
                             <button type="button" class="toggle-btn active" onclick="toggleAssignForm('existing', this)">Assign Existing Client</button>
-                            <button type="button" class="toggle-btn" onclick="toggleAssignForm('new', this)">Add & Assign New</button>
+                            <button type="button" class="toggle-btn" onclick="toggleAssignForm('new', this)">Add New Client</button>
                         </div>
 
                         <!-- Form: Assign Existing -->
@@ -365,22 +521,12 @@ include 'admin_layout/sidebar.php';
                             </form>
                         </div>
 
-                        <!-- Form: Add & Assign New -->
+                        <!-- Form: Add New Client -->
                         <div id="form-assign-new" style="display: none;">
                             <form action="agency_maintenance.php" method="POST" autocomplete="off">
-                                <div class="form-group">
-                                    <label class="form-label">Target Agency</label>
-                                    <select name="agency_id" class="form-control" required>
-                                        <option value="" disabled selected>Select Agency</option>
-                                        <?php 
-                                        $agencies_result->data_seek(0);
-                                        while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
-                                        ?>
-                                    </select>
-                                </div>
-                                <div class="form-grid">
+                                <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 15px;">
                                     <div class="form-group">
-                                        <label class="form-label">Client Userame</label>
+                                        <label class="form-label">Client Username</label>
                                         <input type="text" name="client_username" class="form-control" required placeholder="Account username">
                                     </div>
                                     <div class="form-group">
@@ -388,7 +534,7 @@ include 'admin_layout/sidebar.php';
                                         <input type="password" name="client_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                                     </div>
                                 </div>
-                                <button type="submit" name="add_assign_client" class="btn btn-primary" style="margin-top: 20px;">Create Account & Assign</button>
+                                <button type="submit" name="add_client" class="btn btn-primary" style="margin-top: 20px;">Create Client Account</button>
                             </form>
                         </div>
                     </div>
@@ -419,6 +565,84 @@ include 'admin_layout/sidebar.php';
                                     </tr>
                                 <?php endwhile; else: ?>
                                     <tr><td colspan="4" class="empty-state">No business mappings found.</td></tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB: USER ACCOUNTS -->
+            <div id="tab-user-accounts" class="tab-pane">
+                <div class="card" style="max-width: 600px;">
+                    <div class="card-header"><h3>Add New User (Supervisor)</h3></div>
+                    <div class="card-body">
+                        <form action="agency_maintenance.php" method="POST">
+                            <div class="form-group">
+                                <label class="form-label">Full Name</label>
+                                <input type="text" name="fullname" class="form-control" required placeholder="Ex: Juan Dela Cruz">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Contact Number</label>
+                                <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Agency</label>
+                                <select name="agency_id" id="account_agency_id" class="form-control" required onchange="filterClientsByAgency(this.value, 'account_clients_container')">
+                                    <option value="" disabled selected>Select Agency</option>
+                                    <?php 
+                                    $agencies_result->data_seek(0);
+                                    while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                                    ?>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Assign to Clients</label>
+                                <div id="account_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
+                                    <span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">Select an agency first...</span>
+                                </div>
+                            </div>
+                            <button type="submit" name="add_supervisor" class="btn btn-primary" style="margin-top: 10px;">Create Supervisor Account</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3>Supervisor Accounts</h3></div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Access Key</th>
+                                    <th>Agency</th>
+                                    <th>Assigned Clients</th>
+                                    <th>Control</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if ($supervisors_result && $supervisors_result->num_rows > 0): 
+                                    while($sup = $supervisors_result->fetch_assoc()): ?>
+                                    <tr>
+                                        <td><strong><?php echo htmlspecialchars($sup['name']); ?></strong></td>
+                                        <td><code><?php echo htmlspecialchars($sup['access_key']); ?></code></td>
+                                        <td><span class="badge-agency"><?php echo htmlspecialchars($sup['agency_name']); ?></span></td>
+                                        <td>
+                                            <?php if ($sup['assigned_clients']): ?>
+                                                <?php foreach (explode(', ', $sup['assigned_clients']) as $cn): ?>
+                                                    <span class="badge-client"><?php echo htmlspecialchars($cn); ?></span>
+                                                <?php endforeach; ?>
+                                            <?php else: ?>
+                                                <span class="badge-none">None</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td style="display: flex; gap: 8px;">
+                                            <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;" onclick='openSupervisorEditModal(<?php echo json_encode($sup); ?>)'>Edit</button>
+                                            <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="openSupervisorDeleteModal(<?php echo $sup['id']; ?>, '<?php echo addslashes($sup['name']); ?>')">Delete</button>
+                                        </td>
+                                    </tr>
+                                <?php endwhile; else: ?>
+                                    <tr><td colspan="5" class="empty-state">No supervisor accounts found.</td></tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
@@ -475,14 +699,65 @@ include 'admin_layout/sidebar.php';
             }
         });
 
-        function openAgencyEditModal(id, name, qr, guard, insp, supervisor) {
+        function openAgencyEditModal(id, name, qr, guard, insp, supervisor, client) {
             document.getElementById('edit_agency_id').value = id;
             document.getElementById('edit_agency_name').value = name;
             document.getElementById('edit_qr_limit').value = qr;
             document.getElementById('edit_guard_limit').value = guard;
             document.getElementById('edit_inspector_limit').value = insp;
             document.getElementById('edit_supervisor_limit').value = supervisor;
+            document.getElementById('edit_client_limit').value = client;
             document.getElementById('editAgencyModal').classList.add('show');
+        }
+
+        const agencyClientsMap = <?php echo $agency_clients_json; ?>;
+
+        function filterClientsByAgency(agencyId, containerId, selectedIds = []) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            if (!agencyId || !agencyClientsMap[agencyId]) {
+                container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No clients found for this agency...</span>';
+                return;
+            }
+
+            agencyClientsMap[agencyId].forEach(client => {
+                const isChecked = selectedIds.includes(client.id.toString()) || selectedIds.includes(parseInt(client.id));
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.alignItems = 'center';
+                div.style.gap = '8px';
+                div.innerHTML = `
+                    <input type="checkbox" name="assigned_clients[]" value="${client.id}" id="client_${containerId}_${client.id}" ${isChecked ? 'checked' : ''}>
+                    <label for="client_${containerId}_${client.id}" style="font-size: 0.85rem; cursor: pointer;">${client.name}</label>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function openSupervisorEditModal(sup) {
+            document.getElementById('edit_supervisor_id').value = sup.id;
+            document.getElementById('edit_sup_fullname').value = sup.name;
+            document.getElementById('edit_sup_contact').value = sup.contact_no;
+            document.getElementById('edit_sup_agency_id').value = sup.agency_id;
+            
+            // Handle client mapping - need to fetch currently assigned IDs
+            // We can infer this from the sup object if we passed them, but easier to just use the modal's internal logic
+            // Since grouped concat only gives names, we should have probably grouped IDs too.
+            // Let's assume we'll just fix the query to include IDs.
+            
+            // Re-filtering clients based on agency
+            // For now, let's just trigger the filter. We'll improve the sup data fetch in a moment.
+            const selectedIds = sup.assigned_client_ids ? sup.assigned_client_ids.split(',') : [];
+            filterClientsByAgency(sup.agency_id, 'edit_sup_clients_container', selectedIds);
+            
+            document.getElementById('editSupervisorModal').classList.add('show');
+        }
+
+        function openSupervisorDeleteModal(id, name) {
+            document.getElementById('delete_supervisor_id').value = id;
+            document.getElementById('delete_supervisor_name').textContent = name;
+            document.getElementById('deleteSupervisorModal').classList.add('show');
         }
 
         function openUnassignModal(id, agency, client) {
@@ -508,6 +783,7 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group" style="text-align: left;"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" id="edit_guard_limit" class="form-control" min="0"></div>
                     <div class="form-group" style="text-align: left;"><label class="form-label">Inspector</label><input type="number" name="inspector_limit" id="edit_inspector_limit" class="form-control" min="0"></div>
                     <div class="form-group" style="text-align: left;"><label class="form-label">Supervisor</label><input type="number" name="supervisor_limit" id="edit_supervisor_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Client Limit</label><input type="number" name="client_limit" id="edit_client_limit" class="form-control" min="0"></div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editAgencyModal')">Cancel</button>
@@ -520,7 +796,7 @@ include 'admin_layout/sidebar.php';
     <!-- Unassign Modal -->
     <div id="unassignModal" class="modal">
         <div class="modal-content">
-            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <div class="modal-icon">!</div>
             <h3>Confirm Unassignment</h3>
             <p style="color: #6b7280; margin-bottom: 24px;">Unassign <strong id="unassign_client_name"></strong> from <strong id="unassign_agency_name"></strong>?</p>
             <form action="agency_maintenance.php" method="POST">
@@ -528,6 +804,58 @@ include 'admin_layout/sidebar.php';
                 <div style="display: flex; gap: 12px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('unassignModal')">Cancel</button>
                     <button type="submit" name="unassign_client_action" class="btn" style="background: #ef4444; color: white; flex: 1;">Unassign</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Supervisor Modal -->
+    <div id="editSupervisorModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 style="margin-bottom: 20px;">Edit Supervisor Account</h3>
+            <form action="agency_maintenance.php" method="POST">
+                <input type="hidden" name="edit_supervisor_id" id="edit_supervisor_id">
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" name="fullname" id="edit_sup_fullname" class="form-control" required>
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Contact Number</label>
+                    <input type="text" name="contact_no" id="edit_sup_contact" class="form-control">
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Agency</label>
+                    <select name="agency_id" id="edit_sup_agency_id" class="form-control" required onchange="filterClientsByAgency(this.value, 'edit_sup_clients_container')">
+                        <?php 
+                        $agencies_result->data_seek(0);
+                        while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                        ?>
+                    </select>
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Assigned Clients</label>
+                    <div id="edit_sup_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 24px;">
+                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editSupervisorModal')">Cancel</button>
+                    <button type="submit" name="update_supervisor" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Delete Supervisor Modal -->
+    <div id="deleteSupervisorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-icon">!</div>
+            <h3>Delete Supervisor Account?</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to delete <strong id="delete_supervisor_name"></strong>? This will remove their access permanently.</p>
+            <form action="agency_maintenance.php" method="POST">
+                <input type="hidden" name="delete_supervisor_id" id="delete_supervisor_id">
+                <div style="display: flex; gap: 12px;">
+                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('deleteSupervisorModal')">Cancel</button>
+                    <button type="submit" name="delete_supervisor_action" class="btn" style="background: #ef4444; color: white; flex: 1;">Delete Account</button>
                 </div>
             </form>
         </div>
