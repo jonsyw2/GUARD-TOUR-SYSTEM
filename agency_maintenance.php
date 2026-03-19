@@ -29,18 +29,7 @@ $conn->query("
 
 // Limits columns handled by ALTER TABLE ... IF NOT EXISTS
 
-// Function to generate unique 6-character alphanumeric key (access key)
-function generateUniqueSupervisorKeyAdmin($conn) {
-    $chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    do {
-        $key = "";
-        for ($i = 0; $i < 6; $i++) {
-            $key .= $chars[rand(0, strlen($chars) - 1)];
-        }
-        $check = $conn->query("SELECT id FROM users WHERE username = '$key'");
-    } while ($check && $check->num_rows > 0);
-    return $key;
-}
+// Removed generateUniqueSupervisorKeyAdmin function as it is no longer used.
 
 $message = '';
 $message_type = '';
@@ -211,6 +200,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
 
 // Handle Add Supervisor
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_supervisor'])) {
+    $username = $conn->real_escape_string($_POST['username']);
+    $password = $_POST['password'];
     $agency_id = $_POST['agency_id'];
     if ($agency_id === 'all') {
         $agency_id = 0;
@@ -221,47 +212,55 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_supervisor'])) {
     $contact_no = $conn->real_escape_string($_POST['contact_no']);
     $assigned_clients = $_POST['assigned_clients'] ?? [];
 
-    $conn->begin_transaction();
-    try {
-        // Generate Unique Access Key
-        $unique_key = generateUniqueSupervisorKeyAdmin($conn);
-        $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
-
-        // 1. Create User
-        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'supervisor')")) {
-            throw new Exception("Error creating supervisor user: " . $conn->error);
-        }
-        $user_id = $conn->insert_id;
-
-        // 2. Create Supervisor entry
-        if (!$conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')")) {
-            throw new Exception("Error creating supervisor entry: " . $conn->error);
-        }
-        $supervisor_id = $conn->insert_id;
-
-        // 3. Assign Clients
-        if (!empty($assigned_clients)) {
-            foreach ($assigned_clients as $client_id) {
-                $client_id = (int)$client_id;
-                $conn->query("UPDATE agency_clients SET supervisor_id = $supervisor_id WHERE agency_id = $agency_id AND client_id = $client_id");
-            }
-        }
-
-        $conn->commit();
-        $message = "Supervisor created successfully! Access Key: <strong>$unique_key</strong>";
-        $message_type = "success";
-        $show_status_modal = true;
-    } catch (Exception $e) {
-        $conn->rollback();
-        $message = $e->getMessage();
+    // Check if username already exists
+    $user_check = $conn->query("SELECT id FROM users WHERE username = '$username'");
+    if ($user_check && $user_check->num_rows > 0) {
+        $message = "Creation failed: Username already exists.";
         $message_type = "error";
         $show_status_modal = true;
+    } else {
+        $conn->begin_transaction();
+        try {
+            $hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+            // 1. Create User
+            if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$username', '$hashed_password', 'supervisor')")) {
+                throw new Exception("Error creating supervisor user: " . $conn->error);
+            }
+            $user_id = $conn->insert_id;
+
+            // 2. Create Supervisor entry
+            if (!$conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')")) {
+                throw new Exception("Error creating supervisor entry: " . $conn->error);
+            }
+            $supervisor_id = $conn->insert_id;
+
+            // 3. Assign Clients
+            if (!empty($assigned_clients)) {
+                foreach ($assigned_clients as $client_id) {
+                    $client_id = (int)$client_id;
+                    $conn->query("UPDATE agency_clients SET supervisor_id = $supervisor_id WHERE (agency_id = $agency_id OR $agency_id = 0) AND client_id = $client_id");
+                }
+            }
+
+            $conn->commit();
+            $message = "Supervisor account created successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = "Error creating supervisor: " . $e->getMessage();
+            $message_type = "error";
+            $show_status_modal = true;
+        }
     }
 }
 
 // Handle Update Supervisor
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_supervisor'])) {
     $supervisor_id = (int)$_POST['edit_supervisor_id'];
+    $username = $conn->real_escape_string($_POST['username']);
+    $password = $_POST['password'];
     $agency_id = $_POST['agency_id'];
     if ($agency_id === 'all') {
         $agency_id = 0;
@@ -275,24 +274,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_supervisor'])) 
 
     $conn->begin_transaction();
     try {
-        // 1. Update Supervisor entry
-        $conn->query("UPDATE supervisors SET name = '$fullname', contact_no = '$contact_no', agency_id = $agency_id WHERE id = $supervisor_id");
-
-        // 2. Clear old assignments for this supervisor
-        $conn->query("UPDATE agency_clients SET supervisor_id = NULL WHERE supervisor_id = $supervisor_id");
-
-        // 3. Re-assign Clients
-        if (!empty($assigned_clients)) {
-            foreach ($assigned_clients as $client_id) {
-                $client_id = (int)$client_id;
-                $conn->query("UPDATE agency_clients SET supervisor_id = $supervisor_id WHERE agency_id = $agency_id AND client_id = $client_id");
+        $fetch_user = $conn->query("SELECT user_id FROM supervisors WHERE id = $supervisor_id");
+        if ($fetch_user && $fetch_user->num_rows > 0) {
+            $user_id = $fetch_user->fetch_assoc()['user_id'];
+            
+            // Update user account
+            $pw_sql = "";
+            if (!empty($password)) {
+                $hashed = password_hash($password, PASSWORD_DEFAULT);
+                $pw_sql = ", password = '$hashed'";
             }
-        }
+            $conn->query("UPDATE users SET username = '$username' $pw_sql WHERE id = $user_id");
 
-        $conn->commit();
-        $message = "Supervisor updated successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
+            // 1. Update Supervisor entry
+            $conn->query("UPDATE supervisors SET name = '$fullname', contact_no = '$contact_no', agency_id = $agency_id WHERE id = $supervisor_id");
+
+            // 2. Clear old assignments for this supervisor
+            $conn->query("UPDATE agency_clients SET supervisor_id = NULL WHERE supervisor_id = $supervisor_id");
+
+            // 3. Re-assign Clients
+            if (!empty($assigned_clients)) {
+                foreach ($assigned_clients as $client_id) {
+                    $client_id = (int)$client_id;
+                    $conn->query("UPDATE agency_clients SET supervisor_id = $supervisor_id WHERE (agency_id = $agency_id OR $agency_id = 0) AND client_id = $client_id");
+                }
+            }
+
+            $conn->commit();
+            $message = "Supervisor updated successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        }
     } catch (Exception $e) {
         $conn->rollback();
         $message = $e->getMessage();
@@ -350,7 +362,7 @@ $mappings_result = $conn->query($mapping_sql);
 
 // Fetch all supervisors for User Accounts tab
 $supervisors_sql = "
-    SELECT s.*, u.username as access_key, 
+    SELECT s.*, u.username, 
            CASE WHEN s.agency_id = 0 THEN 'All Agencies' ELSE a.username END as agency_name,
            GROUP_CONCAT(c.username SEPARATOR ', ') as assigned_clients,
            GROUP_CONCAT(ac.client_id SEPARATOR ',') as assigned_client_ids
@@ -611,8 +623,15 @@ include 'admin_layout/sidebar.php';
                                 </div>
                                 <input type="text" name="fullname" id="account_fullname" class="form-control" required placeholder="Select agency to see personnel..." list="personnel_list">
                                 <datalist id="personnel_list"></datalist>
-                                <div style="margin-top: 8px; font-size: 0.75rem; color: #64748b; background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                                    <strong>Login Tip:</strong> Supervisors use their <strong>Access Key</strong> as both Username and Password at <a href="login.php" style="color: var(--primary); font-weight: 600;">login.php</a>.
+                            </div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div class="form-group">
+                                    <label class="form-label">Username</label>
+                                    <input type="text" name="username" class="form-control" required placeholder="Account username">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Password</label>
+                                    <input type="password" name="password" class="form-control" required placeholder="••••••••">
                                 </div>
                             </div>
                             <div class="form-group">
@@ -651,7 +670,7 @@ include 'admin_layout/sidebar.php';
                             <thead>
                                 <tr>
                                     <th>Name</th>
-                                    <th>Access Key</th>
+                                    <th>Username</th>
                                     <th>Agency</th>
                                     <th>Assigned Clients</th>
                                     <th>Control</th>
@@ -662,7 +681,7 @@ include 'admin_layout/sidebar.php';
                                     while($sup = $supervisors_result->fetch_assoc()): ?>
                                     <tr>
                                         <td><strong><?php echo htmlspecialchars($sup['name']); ?></strong></td>
-                                        <td><code><?php echo htmlspecialchars($sup['access_key']); ?></code></td>
+                                        <td><code><?php echo htmlspecialchars($sup['username']); ?></code></td>
                                         <td><span class="badge-agency"><?php echo htmlspecialchars($sup['agency_name']); ?></span></td>
                                         <td>
                                             <?php if ($sup['assigned_clients']): ?>
@@ -839,6 +858,7 @@ include 'admin_layout/sidebar.php';
         function openSupervisorEditModal(sup) {
             document.getElementById('edit_supervisor_id').value = sup.id;
             document.getElementById('edit_sup_fullname').value = sup.name;
+            document.getElementById('edit_sup_username').value = sup.username;
             document.getElementById('edit_sup_contact').value = sup.contact_no;
             
             const agencyId = sup.agency_id == 0 ? 'all' : sup.agency_id;
@@ -921,6 +941,16 @@ include 'admin_layout/sidebar.php';
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Contact Number</label>
                     <input type="text" name="contact_no" id="edit_sup_contact" class="form-control">
+                </div>
+                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Username</label>
+                        <input type="text" name="username" id="edit_sup_username" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">New Password (Optional)</label>
+                        <input type="password" name="password" class="form-control" placeholder="••••••••">
+                    </div>
                 </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Agency</label>

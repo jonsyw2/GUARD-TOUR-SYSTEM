@@ -315,7 +315,7 @@ if ($guards_res) {
                     <tbody>
                          <?php if ($clients_res && $clients_res->num_rows > 0): ?>
                             <?php while($row = $clients_res->fetch_assoc()): ?>
-                                <tr onclick="openSummaryModal('<?php echo addslashes($row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>')">
+                                <tr onclick="openSummaryModal('<?php echo addslashes($row['company_name'] ?: $row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>', '<?php echo addslashes($row['contact_person'] ?? ''); ?>', '<?php echo addslashes($row['contact_person_no'] ?? ''); ?>', '<?php echo addslashes($row['email_address'] ?? ''); ?>', '<?php echo addslashes($row['company_address'] ?? ''); ?>')">
                                     <td><strong><?php echo htmlspecialchars($row['client_username']); ?></strong></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -447,11 +447,43 @@ if ($guards_res) {
                 </div>
             </div>
 
-            <div style="background: #fafafa; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb;">
-                <label class="form-label" style="display: flex; align-items: center; gap: 8px; color: #374151;">
-                    <span style="font-size: 1.2rem;">👮</span> Assigned Personnel List
-                </label>
-                <div id="summary_guards_list" style="font-size: 0.95rem; color: #4b5563; font-weight: 500; line-height: 1.7; margin-top: 12px;">
+            <div style="background: #f9fafb; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb; margin-bottom: 20px;">
+                <div style="font-size: 0.8rem; font-weight: 700; color: #6b7280; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.05em;">Client Details</div>
+                <div style="display: grid; gap: 12px;">
+                    <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 1.1rem; filter: grayscale(1);">👤</span>
+                        <div>
+                            <div style="font-size: 0.75rem; color: #9ca3af;">Contact Person</div>
+                            <div id="summary_contact_person" style="font-size: 0.95rem; font-weight: 600; color: #374151;">---</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 1.1rem; filter: grayscale(1);">📞</span>
+                        <div>
+                            <div style="font-size: 0.75rem; color: #9ca3af;">Phone Number</div>
+                            <div id="summary_contact_no" style="font-size: 0.95rem; font-weight: 600; color: #374151;">---</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 1.1rem; filter: grayscale(1);">✉️</span>
+                        <div>
+                            <div style="font-size: 0.75rem; color: #9ca3af;">Email Address</div>
+                            <div id="summary_email" style="font-size: 0.95rem; font-weight: 600; color: #374151;">---</div>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: flex-start; gap: 10px;">
+                        <span style="font-size: 1.1rem; filter: grayscale(1);">📍</span>
+                        <div>
+                            <div style="font-size: 0.75rem; color: #9ca3af;">Company Address</div>
+                            <div id="summary_address" style="font-size: 0.9rem; font-weight: 500; color: #4b5563; line-height: 1.4;">---</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="background: #ffffff; padding: 20px; border-radius: 12px; border: 1px solid #e5e7eb;">
+                <div style="font-size: 0.8rem; font-weight: 700; color: #6b7280; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.05em;">Assigned Personnel</div>
+                <div id="summary_guards_list" style="font-size: 0.95rem; color: #4b5563; font-weight: 500; line-height: 1.7;">
                     <!-- Guards list injected here -->
                 </div>
             </div>
@@ -584,18 +616,23 @@ if ($guards_res) {
             btn.classList.add('active');
         }
 
-        function openSummaryModal(clientName, qrCount, guardNames) {
+        function openSummaryModal(clientName, qrCount, guardNames, contactPerson, contactNo, email, address) {
             document.getElementById('summary_title').innerText = "Site Summary: " + clientName;
             document.getElementById('summary_qr_count').innerText = qrCount;
+            
+            document.getElementById('summary_contact_person').innerText = contactPerson || "Not Set";
+            document.getElementById('summary_contact_no').innerText = contactNo || "Not Set";
+            document.getElementById('summary_email').innerText = email || "Not Set";
+            document.getElementById('summary_address').innerText = address || "Not Set";
             
             const listDiv = document.getElementById('summary_guards_list');
             if (guardNames && guardNames.trim() !== '') {
                 const names = guardNames.split(' | ');
                 document.getElementById('summary_guard_count').innerText = names.length;
-                listDiv.innerHTML = names.map(n => `<div style="padding: 4px 0; border-bottom: 1px solid #f3f4f6;">• ${n}</div>`).join('');
+                listDiv.innerHTML = names.map(n => `<div style="padding: 6px 0; border-bottom: 1px dotted #e5e7eb; display: flex; align-items: center; gap: 8px;"><span style="color: #10b981;">•</span> ${n}</div>`).join('');
             } else {
                 document.getElementById('summary_guard_count').innerText = "0";
-                listDiv.innerHTML = '<span style="color: #9ca3af; font-style: italic;">No guards assigned.</span>';
+                listDiv.innerHTML = '<span style="color: #9ca3af; font-style: italic; font-size: 0.9rem;">No guards assigned to this site.</span>';
             }
             document.getElementById('summaryModal').classList.add('show');
         }

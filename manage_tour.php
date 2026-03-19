@@ -1211,13 +1211,13 @@ if ($mapping_id) {
             const companyName = document.getElementById('companyLabel').textContent;
             const checkpointLabel = document.getElementById('checkpointNoLabel').textContent;
             
-            // Create a temporary canvas for the final image
+            // Create a temporary canvas for the final image (CR80 ID size - 638x1012 @ 300DPI approx)
             const finalCanvas = document.createElement('canvas');
             const ctx = finalCanvas.getContext('2d');
             
-            // Set dimensions (padding + QR size)
-            const width = 350;
-            const height = 450;
+            // Set dimensions
+            const width = 638;
+            const height = 1012;
             finalCanvas.width = width;
             finalCanvas.height = height;
             
@@ -1225,16 +1225,25 @@ if ($mapping_id) {
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, width, height);
             
+            // Draw subtle card border
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(5, 5, width - 10, height - 10);
+            
             // Draw Company Name
             ctx.fillStyle = '#111827';
-            ctx.font = 'bold 24px Arial';
+            ctx.font = 'bold 36px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(companyName, width / 2, 60);
+            ctx.fillText(companyName, width / 2, 80, width - 60);
             
-            // Draw QR Code
-            const qrSize = 256;
+            // Decorative line
+            ctx.fillStyle = '#3b82f6'; // Sentinel Blue
+            ctx.fillRect(width * 0.25, 110, width * 0.5, 4);
+            
+            // Draw QR Code (Scaled up)
+            const qrSize = 480;
             const qrX = (width - qrSize) / 2;
-            const qrY = 100;
+            const qrY = 180;
             
             if (qrCanvas) {
                 ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
@@ -1244,9 +1253,14 @@ if ($mapping_id) {
             
             // Draw Checkpoint Label
             ctx.fillStyle = '#111827';
-            ctx.font = 'bold 28px Monospace';
+            ctx.font = 'bold 54px Monospace';
             ctx.textAlign = 'center';
-            ctx.fillText(checkpointLabel, width / 2, 400);
+            ctx.fillText(checkpointLabel, width / 2, height - 150);
+            
+            // Footer branding
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText("GUARD TOUR SYSTEM", width / 2, height - 80);
             
             // Trigger download
             const link = document.createElement('a');
