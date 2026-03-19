@@ -945,8 +945,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <?php else: ?>
                             <form action="agency_patrol_management.php?tab=qr" method="POST" id="qrLimitForm">
                                 <div class="form-group">
-                                    <label class="form-label" for="agency_client_id">Select Client Site</label>
-                                    <select id="agency_client_id" name="agency_client_id" class="form-control" required onchange="updateLimitForm()">
+                                    <label class="form-label" for="qr_agency_client_id">Select Client Site</label>
+                                    <select id="qr_agency_client_id" name="agency_client_id" class="form-control" required onchange="updateLimitForm()">
                                         <option value="" disabled selected>-- Choose Client --</option>
                                         <?php foreach($clients_data as $client): ?>
                                             <option value="<?php echo $client['mapping_id']; ?>">
@@ -1145,18 +1145,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         // QR Limits Update Form Logic
         async function updateLimitForm() {
-            const select = document.getElementById('agency_client_id');
+            const select = document.getElementById('qr_agency_client_id');
             const mappingId = parseInt(select.value);
             const siteNameInput = document.getElementById('site_name');
             const container = document.getElementById('checkpoints-container');
             const shiftContainer = document.getElementById('shifts-container');
             const limitText = document.getElementById('qr-limit-text');
             
+            // Clear all previous data immediately
+            siteNameInput.value = '';
             container.innerHTML = '';
             shiftContainer.innerHTML = '';
             limitText.textContent = '';
             
             if (!mappingId) return;
+
+            // Store current mappingId to handle race conditions
+            select.dataset.currentLoading = mappingId;
 
             const client = clientsData.find(c => parseInt(c.mapping_id) === mappingId);
             if (client) {
@@ -1177,6 +1182,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     const response = await fetch(`agency_patrol_management.php?ajax_checkpoints=1&mapping_id=${mappingId}`);
                     const data = await response.json();
                     
+                    // Race condition check: only proceed if this was the latest request
+                    if (select.dataset.currentLoading !== String(mappingId)) return;
+
                     if (data.checkpoints && data.checkpoints.length > 0) {
                         data.checkpoints.forEach(cp => {
                             if (cp.isStart) return; // Skip Starting Point for regular checkpoint list
