@@ -43,7 +43,7 @@ if (empty($mapping_ids)) {
     $mapping_ids_str = implode(',', $mapping_ids);
 }
 
-// Ensure every mapping has a starting point (is_zero_checkpoint = 1) and ending point (is_end_checkpoint = 1)
+// Ensure every mapping has a starting point (is_zero_checkpoint = 1)
 if (!empty($mapping_ids)) {
     foreach ($mapping_ids as $m_id) {
         // Starting Point
@@ -51,12 +51,6 @@ if (!empty($mapping_ids)) {
         if ($conn->query($start_check)->num_rows == 0) {
             $start_code = "START-" . $m_id . "-" . strtoupper(bin2hex(random_bytes(3)));
             $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint) VALUES ($m_id, 'Starting Point', '$start_code', '$start_code', 1)");
-        }
-        // Ending Point
-        $end_check = "SELECT id FROM checkpoints WHERE agency_client_id = $m_id AND is_end_checkpoint = 1 LIMIT 1";
-        if ($conn->query($end_check)->num_rows == 0) {
-            $end_code = "END-" . $m_id . "-" . strtoupper(bin2hex(random_bytes(3)));
-            $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_end_checkpoint) VALUES ($m_id, 'Ending Point', '$end_code', '$end_code', 1)");
         }
     }
 }
@@ -91,9 +85,8 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
             $starting_point_visual['isStart'] = true;
         }
         
-        // 2. Fetch Regular Checkpoints in configured sequence with latest status
         $assign_res = $conn->query("
-            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint, cp.is_end_checkpoint,
+            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint,
             (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
             FROM tour_assignments ta 
             JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
@@ -108,7 +101,6 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
             if ($starting_point_visual && $row['id'] == $starting_point_visual['id']) continue;
             
             $row['isStart'] = (bool)($row['is_zero_checkpoint'] ?? false);
-            $row['isEnd'] = (bool)($row['is_end_checkpoint'] ?? false);
             $checkpoints[] = $row;
         }
         
@@ -154,49 +146,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
         $assignment_shifts = $_POST['assignment_shifts'] ?? [];
         // Durations are automated to 1 min for non-zero points, except for points already in sequence which might have 0
         $durations = $_POST['durations'] ?? []; 
-        // Validation: Count checkpoints excluding the starting AND ending points
-        $excluded_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 1 OR is_end_checkpoint = 1)");
+        // Validation: Count checkpoints excluding the starting point
+        $excluded_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1");
         $excluded_ids = [];
         while($row = $excluded_res->fetch_assoc()) $excluded_ids[] = $row['id'];
         
         $count = 0;
         foreach($checkpoint_ids as $id) if(!in_array($id, $excluded_ids)) $count++;
 
-        // Rebuild arrays to ensure Ending Point is last and indices match
+        // Rebuild arrays and indices match
         $final_ids = [];
         $final_intervals = [];
         $final_shifts = [];
         $final_durations = [];
-        $end_point_id = 0;
 
-        $end_res_save = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
-        if ($end_res_save && $end_res_save->num_rows > 0) {
-            $end_point_id = (int)$end_res_save->fetch_assoc()['id'];
-        }
-
-        // Add all EXCEPT ending point
         for ($i = 0; $i < count($checkpoint_ids); $i++) {
-            if ((int)$checkpoint_ids[$i] === $end_point_id) continue;
             $final_ids[] = (int)$checkpoint_ids[$i];
             $final_intervals[] = (int)($intervals[$i] ?? 0);
             $final_shifts[] = $conn->real_escape_string($assignment_shifts[$i] ?? '');
             $final_durations[] = (int)($durations[$i] ?? 0);
-        }
-
-        // Always append Ending Point
-        if ($end_point_id > 0) {
-            $final_ids[] = $end_point_id;
-            // Find original settings for end point if submitted
-            $found_idx = array_search($end_point_id, array_map('intval', $checkpoint_ids));
-            if ($found_idx !== false) {
-                $final_intervals[] = (int)($intervals[$found_idx] ?? 0);
-                $final_shifts[] = $conn->real_escape_string($assignment_shifts[$found_idx] ?? '');
-                $final_durations[] = (int)($durations[$found_idx] ?? 0);
-            } else {
-                $final_intervals[] = 0;
-                $final_shifts[] = '';
-                $final_durations[] = 0;
-            }
         }
         $checkpoint_ids = $final_ids;
         $intervals = $final_intervals;
@@ -250,8 +218,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
         }
     }
     
-    $is_zero_checkpoint = 0; // Manually created checkpoints are never zero or end checkpoints
-    $is_end_checkpoint = 0;
+    $is_zero_checkpoint = 0; // Manually created checkpoints are never zero
     $scan_interval = (int)($_POST['scan_interval'] ?? 0);
     
     // Verify this mapping belongs to the client and check limits
@@ -269,7 +236,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
             $limit_check = $conn->query("
                 SELECT u.qr_limit, 
                 (SELECT COUNT(*) FROM checkpoints cp 
-                 WHERE cp.agency_client_id = ac.id AND cp.is_zero_checkpoint = 0 AND cp.is_end_checkpoint = 0) as total_site_qrs
+                 WHERE cp.agency_client_id = ac.id AND cp.is_zero_checkpoint = 0) as total_site_qrs
                 FROM agency_clients ac
                 JOIN users u ON ac.agency_id = u.id
                 WHERE ac.id = $mapping_id_qr
@@ -282,7 +249,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
                     $message_type = "error";
                     $show_limit_modal = true;
                 } else {
-                    $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint, is_end_checkpoint, scan_interval) VALUES ($mapping_id_qr, '$qr_name', '$checkpoint_code', '$checkpoint_code', $is_zero_checkpoint, $is_end_checkpoint, $scan_interval)";
+                    $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint, scan_interval) VALUES ($mapping_id_qr, '$qr_name', '$checkpoint_code', '$checkpoint_code', $is_zero_checkpoint, $scan_interval)";
                     if ($conn->query($insert_sql)) {
                         $message = "Checkpoint '$qr_name' created successfully!";
                         $message_type = "success";
@@ -304,14 +271,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_checkpoint'])) 
     
     // Verify ownership
     $verify_own = $conn->query("
-        SELECT cp.id, cp.is_zero_checkpoint, cp.is_end_checkpoint FROM checkpoints cp
+        SELECT cp.id, cp.is_zero_checkpoint FROM checkpoints cp
         JOIN agency_clients ac ON cp.agency_client_id = ac.id
         WHERE cp.id = $cp_id AND ac.client_id = $client_id
     ");
     
     if ($verify_own && $verify_own->num_rows > 0) {
         $cp_data = $verify_own->fetch_assoc();
-        if ($cp_data['is_zero_checkpoint'] || $cp_data['is_end_checkpoint']) {
+        if ($cp_data['is_zero_checkpoint']) {
             $message = "Error: The Starting Point checkpoint cannot be deleted.";
             $message_type = "error";
             $show_status_modal = true;
@@ -338,8 +305,8 @@ $limits_sql = "
         u.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
-        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0) as current_site_qrs,
-        (SELECT COUNT(*) FROM checkpoints cp2 JOIN agency_clients ac2 ON cp2.agency_client_id = ac2.id WHERE ac2.agency_id = u.id AND cp2.is_zero_checkpoint = 0 AND cp2.is_end_checkpoint = 0) as agency_total_qrs
+        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_site_qrs,
+        (SELECT COUNT(*) FROM checkpoints cp2 JOIN agency_clients ac2 ON cp2.agency_client_id = ac2.id WHERE ac2.agency_id = u.id AND cp2.is_zero_checkpoint = 0) as agency_total_qrs
     FROM agency_clients ac
     JOIN users u ON ac.agency_id = u.id
     WHERE ac.client_id = $client_id
@@ -356,7 +323,6 @@ $qrs_sql = "
         c.checkpoint_code,
         c.agency_client_id,
         c.is_zero_checkpoint,
-        c.is_end_checkpoint,
         c.scan_interval,
         ac.company_name,
         MAX(s.scan_time) as last_scanned
@@ -365,12 +331,12 @@ $qrs_sql = "
     LEFT JOIN scans s ON c.id = s.checkpoint_id
     WHERE c.agency_client_id IN ($mapping_ids_str)
     GROUP BY c.id
-    ORDER BY c.is_zero_checkpoint DESC, c.is_end_checkpoint ASC, c.name ASC
+    ORDER BY c.is_zero_checkpoint DESC, c.name ASC
 ";
 $qrs_result = $conn->query($qrs_sql);
 
 // Fetch available checkpoints for Tour Setup tab (exclude zero)
-$checkpoints_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0 ORDER BY name ASC");
+$checkpoints_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 ORDER BY name ASC");
 $available_checkpoints = [];
 while ($row = $checkpoints_res->fetch_assoc()) {
     $available_checkpoints[] = $row;
@@ -379,15 +345,13 @@ while ($row = $checkpoints_res->fetch_assoc()) {
 // Fetch Starting Point for Tour Setup Tab
 $starting_point = null;
 $start_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
-$end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
 if ($start_res && $start_res->num_rows > 0) {
     $starting_point = $start_res->fetch_assoc();
 }
-$ending_point = ($end_res && $end_res->num_rows > 0) ? $end_res->fetch_assoc() : null;
 
 // Fetch current assignments for Tour Setup Tab
 $assignments_res = $conn->query("
-    SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name, cp.is_zero_checkpoint, cp.is_end_checkpoint 
+    SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name, cp.is_zero_checkpoint 
     FROM tour_assignments ta 
     JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
     WHERE ta.agency_client_id = $mapping_id 
@@ -784,9 +748,9 @@ if ($mapping_id) {
                                 </div>
                             <?php endif; ?>
 
-                            <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?> <?php echo $ending_point ? 'margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;' : ''; ?>">
+                            <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?>">
                                 <?php foreach ($current_assignments as $item): ?>
-                                    <?php if (($starting_point && $item['checkpoint_id'] == $starting_point['id']) || ($ending_point && $item['checkpoint_id'] == $ending_point['id'])) continue; ?>
+                                    <?php if ($starting_point && $item['checkpoint_id'] == $starting_point['id']) continue; ?>
                                     <div class="tour-item">
                                         <span class="handle">☰</span>
                                         <span class="checkpoint-name"><?php echo htmlspecialchars($item['name']); ?></span>
@@ -823,49 +787,6 @@ if ($mapping_id) {
                                 <?php endforeach; ?>
                             </div>
 
-                            <?php if ($ending_point): 
-                                $end_shift = '';
-                                $end_interval = 0;
-                                foreach($current_assignments as $as) {
-                                    if($as['checkpoint_id'] == $ending_point['id']) {
-                                        $end_shift = $as['shift_name'];
-                                        $end_interval = $as['interval_minutes'];
-                                        break;
-                                    }
-                                }
-                            ?>
-                                <div class="tour-list" style="margin-top: 0px; border-top: none; border-top-left-radius: 0; border-top-right-radius: 0; padding-top: 0;">
-                                    <div class="tour-item" style="cursor: default; background: #fff7ed; border-color: #ffedd5; margin-top: 0;">
-                                        <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
-                                        <span class="checkpoint-name"><?php echo htmlspecialchars($ending_point['name']); ?></span>
-                                        <input type="hidden" name="checkpoint_ids[]" value="<?php echo $ending_point['id']; ?>">
-                                        <div class="setting-inputs">
-                                            <div class="input-group">
-                                                <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $end_interval; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
-                                                <label>min</label>
-                                            </div>
-                                            <div class="input-group">
-                                                <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
-                                                    <?php if (empty($client_shifts)): ?>
-                                                        <option value="Day Shift" <?php echo $end_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                        <option value="Night Shift" <?php echo $end_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                    <?php else: ?>
-                                                        <?php foreach ($client_shifts as $s_name): ?>
-                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo $end_shift === $s_name ? 'selected' : ''; ?>>
-                                                                <?php echo htmlspecialchars($s_name); ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    <?php endif; ?>
-                                                </select>
-                                            </div>
-                                            <input type="hidden" name="durations[]" value="0">
-                                        </div>
-                                        <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
-                                    </div>
-                                </div>
-                            <?php endif; ?>
                         </div>
 
                         <?php if (!$is_patrol_locked): ?>
@@ -912,12 +833,12 @@ if ($mapping_id) {
                                             $last_scan = $row['last_scanned'] ? date('M d, Y h:i:s A', strtotime($row['last_scanned'])) : '<span style="color:#9ca3af">Never Scanned</span>';
                                         ?>
                                         <tr>
-                                            <td><?php echo ($row['is_zero_checkpoint'] || $row['is_end_checkpoint']) ? '0' : $counter++; ?></td>
-                                            <?php $display_no = ($row['is_zero_checkpoint'] || $row['is_end_checkpoint']) ? '0' : ($counter - 1); ?>
+                                            <td><?php echo $row['is_zero_checkpoint'] ? '0' : $counter++; ?></td>
+                                            <?php $display_no = $row['is_zero_checkpoint'] ? '0' : ($counter - 1); ?>
                                             <td>
                                                 <strong><?php echo htmlspecialchars($row['checkpoint_name']); ?></strong>
-                                                <?php if ($row['is_zero_checkpoint'] || $row['is_end_checkpoint']): ?>
-                                                    <span class="badge" style="background: #ecfdf5; color: #065f46; font-size: 0.7rem; border: none; padding: 2px 8px; margin-left: 5px;">Site <?php echo $row['is_zero_checkpoint'] ? 'Starting' : 'Ending'; ?> Point</span>
+                                                <?php if ($row['is_zero_checkpoint']): ?>
+                                                    <span class="badge" style="background: #ecfdf5; color: #065f46; font-size: 0.7rem; border: none; padding: 2px 8px; margin-left: 5px;">Site Starting Point</span>
                                                 <?php endif; ?>
                                             </td>
                                             <td>
@@ -929,7 +850,7 @@ if ($mapping_id) {
                                                 <div style="display: flex; gap: 8px;">
                                                     <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['company_name'] ?: $_SESSION['username'] ?: 'Client')); ?>', '<?php echo $display_no; ?>')">Show</button>
                                                     <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR()">Download QR</button>
-                                                    <?php if (!$row['is_zero_checkpoint'] && !$row['is_end_checkpoint']): ?>
+                                                    <?php if (!$row['is_zero_checkpoint']): ?>
                                                     <form action="manage_tour.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this checkpoint? This will also remove it from any tour sequence.');">
                                                         <input type="hidden" name="checkpoint_id" value="<?php echo $row['id']; ?>">
                                                         <button type="submit" name="delete_checkpoint" class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #ef4444;">Delete</button>

@@ -19,7 +19,7 @@ $mapping_ids = [];
 while($r = $mapping_ids_res->fetch_assoc()) $mapping_ids[] = (int)$r['id'];
 $mapping_ids_str = !empty($mapping_ids) ? implode(',', $mapping_ids) : '0';
 
-$total_checkpoints = $conn->query("SELECT COUNT(*) as count FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0")->fetch_assoc()['count'];
+$total_checkpoints = $conn->query("SELECT COUNT(*) as count FROM checkpoints WHERE agency_client_id IN ($mapping_ids_str) AND is_zero_checkpoint = 0")->fetch_assoc()['count'];
 
 $scans_today = 0;
 if ($mapping_ids_str !== '0') {
