@@ -211,7 +211,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_client'])) {
 
 // Handle Add Supervisor
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_supervisor'])) {
-    $agency_id = (int)$_POST['agency_id'];
+    $agency_id = $_POST['agency_id'];
+    if ($agency_id === 'all') {
+        $agency_id = 0;
+    } else {
+        $agency_id = (int)$agency_id;
+    }
     $fullname = $conn->real_escape_string($_POST['fullname']);
     $contact_no = $conn->real_escape_string($_POST['contact_no']);
     $assigned_clients = $_POST['assigned_clients'] ?? [];
@@ -257,7 +262,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_supervisor'])) {
 // Handle Update Supervisor
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_supervisor'])) {
     $supervisor_id = (int)$_POST['edit_supervisor_id'];
-    $agency_id = (int)$_POST['agency_id'];
+    $agency_id = $_POST['agency_id'];
+    if ($agency_id === 'all') {
+        $agency_id = 0;
+    } else {
+        $agency_id = (int)$agency_id;
+    }
+
     $fullname = $conn->real_escape_string($_POST['fullname']);
     $contact_no = $conn->real_escape_string($_POST['contact_no']);
     $assigned_clients = $_POST['assigned_clients'] ?? [];
@@ -339,12 +350,13 @@ $mappings_result = $conn->query($mapping_sql);
 
 // Fetch all supervisors for User Accounts tab
 $supervisors_sql = "
-    SELECT s.*, u.username as access_key, a.username as agency_name,
+    SELECT s.*, u.username as access_key, 
+           CASE WHEN s.agency_id = 0 THEN 'All Agencies' ELSE a.username END as agency_name,
            GROUP_CONCAT(c.username SEPARATOR ', ') as assigned_clients,
            GROUP_CONCAT(ac.client_id SEPARATOR ',') as assigned_client_ids
     FROM supervisors s
     JOIN users u ON s.user_id = u.id
-    JOIN users a ON s.agency_id = a.id
+    LEFT JOIN users a ON s.agency_id = a.id
     LEFT JOIN agency_clients ac ON s.id = ac.supervisor_id
     LEFT JOIN users c ON ac.client_id = c.id
     GROUP BY s.id
@@ -366,6 +378,20 @@ while ($ac_row = $agency_clients_raw->fetch_assoc()) {
     ];
 }
 $agency_clients_json = json_encode($agency_clients_map);
+
+// NEW: Fetch all registered personnel for the typeable dropdown
+$personnel_sql = "
+    (SELECT name, agency_id FROM guards)
+    UNION
+    (SELECT name, agency_id FROM inspectors)
+    ORDER BY name ASC
+";
+$personnel_res = $conn->query($personnel_sql);
+$personnel_map = [];
+while ($p = $personnel_res->fetch_assoc()) {
+    $personnel_map[$p['agency_id']][] = $p['name'];
+}
+$personnel_json = json_encode($personnel_map);
 
 ?>
 <?php
@@ -579,8 +605,15 @@ include 'admin_layout/sidebar.php';
                     <div class="card-body">
                         <form action="agency_maintenance.php" method="POST">
                             <div class="form-group">
-                                <label class="form-label">Full Name</label>
-                                <input type="text" name="fullname" class="form-control" required placeholder="Ex: Juan Dela Cruz">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <label class="form-label" style="margin-bottom: 0;">Full Name (Registered Personnel)</label>
+                                    <span style="font-size: 0.7rem; color: #64748b;">Type name or select from list</span>
+                                </div>
+                                <input type="text" name="fullname" id="account_fullname" class="form-control" required placeholder="Select agency to see personnel..." list="personnel_list">
+                                <datalist id="personnel_list"></datalist>
+                                <div style="margin-top: 8px; font-size: 0.75rem; color: #64748b; background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                                    <strong>Login Tip:</strong> Supervisors use their <strong>Access Key</strong> as both Username and Password at <a href="login.php" style="color: var(--primary); font-weight: 600;">login.php</a>.
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Contact Number</label>
@@ -588,20 +621,24 @@ include 'admin_layout/sidebar.php';
                             </div>
                             <div class="form-group">
                                 <label class="form-label">Agency</label>
-                                <select name="agency_id" id="account_agency_id" class="form-control" required onchange="filterClientsByAgency(this.value, 'account_clients_container')">
+                                <select name="agency_id" id="account_agency_id" class="form-control" required onchange="handleAgencyChange(this.value, 'account_clients_container')">
                                     <option value="" disabled selected>Select Agency</option>
+                                    <option value="all" style="font-weight: bold; color: var(--primary);">All Agency (Global Access)</option>
                                     <?php 
                                     $agencies_result->data_seek(0);
                                     while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
                                     ?>
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label class="form-label">Assign to Clients</label>
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <label class="form-label" style="margin-bottom: 0;">Assign to Clients</label>
+                                    <label style="font-size: 0.75rem; color: var(--primary); font-weight: 600; cursor: pointer;">
+                                        <input type="checkbox" id="select_all_clients" onclick="toggleSelectAllClients('account_clients_container', this.checked)"> Select All
+                                    </label>
+                                </div>
                                 <div id="account_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
                                     <span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">Select an agency first...</span>
                                 </div>
-                            </div>
                             <button type="submit" name="add_supervisor" class="btn btn-primary" style="margin-top: 10px;">Create Supervisor Account</button>
                         </form>
                     </div>
@@ -711,17 +748,81 @@ include 'admin_layout/sidebar.php';
         }
 
         const agencyClientsMap = <?php echo $agency_clients_json; ?>;
+        const personnelMap = <?php echo $personnel_json; ?>;
+
+        function handleAgencyChange(agencyId, containerId) {
+            filterClientsByAgency(agencyId, containerId);
+            filterPersonnelByAgency(agencyId);
+        }
+
+        function filterPersonnelByAgency(agencyId) {
+            const datalist = document.getElementById('personnel_list');
+            datalist.innerHTML = '';
+            
+            let names = [];
+            if (agencyId === 'all') {
+                // Collect all names from all agencies
+                Object.values(personnelMap).forEach(list => {
+                    names = names.concat(list);
+                });
+            } else if (personnelMap[agencyId]) {
+                names = personnelMap[agencyId];
+            }
+
+            // Deduplicate and sort
+            const uniqueNames = [...new Set(names)].sort();
+            
+            uniqueNames.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                datalist.appendChild(option);
+            });
+        }
+
+        // Initialize lists on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            const agencyId = document.getElementById('account_agency_id').value;
+            if (agencyId) {
+                filterPersonnelByAgency(agencyId);
+                filterClientsByAgency(agencyId, 'account_clients_container');
+            }
+        });
+
+        function toggleSelectAllClients(containerId, isChecked) {
+            const container = document.getElementById(containerId);
+            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = isChecked);
+        }
 
         function filterClientsByAgency(agencyId, containerId, selectedIds = []) {
             const container = document.getElementById(containerId);
             container.innerHTML = '';
             
-            if (!agencyId || !agencyClientsMap[agencyId]) {
-                container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No clients found for this agency...</span>';
+            document.getElementById('select_all_clients').checked = false;
+
+            let clients = [];
+            if (agencyId === 'all') {
+                Object.values(agencyClientsMap).forEach(list => {
+                    clients = clients.concat(list);
+                });
+            } else if (agencyClientsMap[agencyId]) {
+                clients = agencyClientsMap[agencyId];
+            }
+
+            if (clients.length === 0) {
+                container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No clients found for this selection...</span>';
                 return;
             }
 
-            agencyClientsMap[agencyId].forEach(client => {
+            // Deduplicate clients by ID (important for 'all' selection)
+            const seenIds = new Set();
+            const uniqueClients = clients.filter(c => {
+                if (seenIds.has(c.id)) return false;
+                seenIds.add(c.id);
+                return true;
+            });
+
+            uniqueClients.forEach(client => {
                 const isChecked = selectedIds.includes(client.id.toString()) || selectedIds.includes(parseInt(client.id));
                 const div = document.createElement('div');
                 div.style.display = 'flex';
@@ -739,17 +840,15 @@ include 'admin_layout/sidebar.php';
             document.getElementById('edit_supervisor_id').value = sup.id;
             document.getElementById('edit_sup_fullname').value = sup.name;
             document.getElementById('edit_sup_contact').value = sup.contact_no;
-            document.getElementById('edit_sup_agency_id').value = sup.agency_id;
             
-            // Handle client mapping - need to fetch currently assigned IDs
-            // We can infer this from the sup object if we passed them, but easier to just use the modal's internal logic
-            // Since grouped concat only gives names, we should have probably grouped IDs too.
-            // Let's assume we'll just fix the query to include IDs.
+            const agencyId = sup.agency_id == 0 ? 'all' : sup.agency_id;
+            document.getElementById('edit_sup_agency_id').value = agencyId;
             
-            // Re-filtering clients based on agency
-            // For now, let's just trigger the filter. We'll improve the sup data fetch in a moment.
+            // Ensure personnel list is updated for the edit modal as well
+            filterPersonnelByAgency(agencyId);
+            
             const selectedIds = sup.assigned_client_ids ? sup.assigned_client_ids.split(',') : [];
-            filterClientsByAgency(sup.agency_id, 'edit_sup_clients_container', selectedIds);
+            filterClientsByAgency(agencyId, 'edit_sup_clients_container', selectedIds);
             
             document.getElementById('editSupervisorModal').classList.add('show');
         }
@@ -817,7 +916,7 @@ include 'admin_layout/sidebar.php';
                 <input type="hidden" name="edit_supervisor_id" id="edit_supervisor_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Full Name</label>
-                    <input type="text" name="fullname" id="edit_sup_fullname" class="form-control" required>
+                    <input type="text" name="fullname" id="edit_sup_fullname" class="form-control" required list="personnel_list">
                 </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Contact Number</label>
@@ -825,7 +924,8 @@ include 'admin_layout/sidebar.php';
                 </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Agency</label>
-                    <select name="agency_id" id="edit_sup_agency_id" class="form-control" required onchange="filterClientsByAgency(this.value, 'edit_sup_clients_container')">
+                    <select name="agency_id" id="edit_sup_agency_id" class="form-control" required onchange="handleAgencyChange(this.value, 'edit_sup_clients_container')">
+                        <option value="all" style="font-weight: bold; color: var(--primary);">All Agency (Global Access)</option>
                         <?php 
                         $agencies_result->data_seek(0);
                         while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
@@ -833,7 +933,12 @@ include 'admin_layout/sidebar.php';
                     </select>
                 </div>
                 <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Assigned Clients</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label class="form-label" style="margin-bottom:0;">Assigned Clients</label>
+                        <label style="font-size: 0.75rem; color: var(--primary); font-weight: 600; cursor: pointer;">
+                            <input type="checkbox" id="edit_select_all_clients" onclick="toggleSelectAllClients('edit_sup_clients_container', this.checked)"> Select All
+                        </label>
+                    </div>
                     <div id="edit_sup_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
                     </div>
                 </div>
