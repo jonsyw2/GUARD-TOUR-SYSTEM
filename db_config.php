@@ -1,6 +1,6 @@
 <?php
 // Detect environment: local XAMPP vs live cPanel server
-$is_local = (strpos($_SERVER['HTTP_HOST'] ?? '', 'localhost') !== false);
+$is_local = (strpos($_SERVER['HTTP_HOST'] ?? '', 'localhost') !== false || PHP_SAPI === 'cli');
 
 if ($is_local) {
     // --- Local XAMPP credentials ---

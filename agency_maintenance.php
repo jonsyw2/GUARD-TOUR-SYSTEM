@@ -9,11 +9,16 @@ if ($_SESSION['user_level'] !== 'admin') {
 // Ensure limits columns exist in Users Table (Keep client_limit for Agency)
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS client_limit INT DEFAULT 0");
 
+<<<<<<< HEAD
 // Migration: Add limit columns to agency_clients if they don't exist
 $conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS qr_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS guard_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS inspector_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS supervisor_limit INT DEFAULT 0");
+=======
+// Auto-Migration: Add supervisor_id to agency_clients if missing
+$conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS supervisor_id INT DEFAULT NULL");
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
 
 // Auto-Migration: Create supervisors table
 $conn->query("
@@ -55,10 +60,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_limits']
 
 // Handle Unassign Client
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['unassign_client_action'])) {
-    $mapping_id = (int)$_POST['mapping_id'];
-    if ($conn->query("DELETE FROM agency_clients WHERE id = $mapping_id")) {
-        $message = "Client unassigned successfully!";
-        $message_type = "success";
+    $mapping_id = (int)$_POST['uu_mapping_id'];
+    $agency_id = (int)$_POST['uu_agency_id'];
+    $client_id = (int)$_POST['uu_client_id'];
+    
+    $where = "id = $mapping_id";
+    if ($mapping_id <= 0 && $agency_id > 0 && $client_id > 0) {
+        $where = "agency_id = $agency_id AND client_id = $client_id";
+    }
+    
+    $sql = "DELETE FROM agency_clients WHERE $where";
+    if ($conn->query($sql)) {
+        $affected = $conn->affected_rows;
+        if ($affected > 0) {
+            $message = "Client unassigned successfully!";
+            $message_type = "success";
+        } else {
+            $message = "No record found to unassign (ID: $mapping_id, A:$agency_id, C:$client_id). Check your database.";
+            $message_type = "error";
+        }
         $show_status_modal = true;
     } else {
         $message = "Error unassigning client: " . $conn->error;
@@ -93,6 +113,47 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
             $message_type = "error";
             $show_status_modal = true;
         }
+    }
+}
+
+// Handle Delete Agency
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_agency_action'])) {
+    $agency_id = (int)$_POST['agency_id'];
+    
+    // 1. Check if it's an agency
+    $check = $conn->query("SELECT id FROM users WHERE id = $agency_id AND user_level = 'agency'");
+    if ($check && $check->num_rows > 0) {
+        $conn->begin_transaction();
+        try {
+            // 2. Remove client assignments
+            $conn->query("DELETE FROM agency_clients WHERE agency_id = $agency_id");
+            
+            // 3. Remove supervisors belonging to this agency
+            // First get their user IDs to remove from users table
+            $sups = $conn->query("SELECT user_id FROM supervisors WHERE agency_id = $agency_id");
+            while($s = $sups->fetch_assoc()) {
+                $uid = $s['user_id'];
+                $conn->query("DELETE FROM users WHERE id = $uid");
+            }
+            $conn->query("DELETE FROM supervisors WHERE agency_id = $agency_id");
+
+            // 4. Remove the agency user
+            $conn->query("DELETE FROM users WHERE id = $agency_id");
+
+            $conn->commit();
+            $message = "Agency and all related assignments/supervisors deleted successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = "Error deleting agency: " . $e->getMessage();
+            $message_type = "error";
+            $show_status_modal = true;
+        }
+    } else {
+        $message = "Invalid agency ID.";
+        $message_type = "error";
+        $show_status_modal = true;
     }
 }
 
@@ -388,15 +449,25 @@ $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_lev
 $clients_result = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
 
 // Fetch agency-client mappings
+<<<<<<< HEAD
 $agency_clients_sql = "
     SELECT ac.id, a.username AS agency_name, c.username AS client_name, ac.created_at,
            ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit
+=======
+$mapping_sql = "
+    SELECT ac.id AS ac_id, ac.agency_id, ac.client_id, a.username AS agency_name, c.username AS client_name, ac.created_at, 
+           a.qr_limit, a.guard_limit, a.inspector_limit, a.supervisor_limit, a.client_limit
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id
     ORDER BY ac.created_at DESC
 ";
+<<<<<<< HEAD
 $agency_clients_result = $conn->query($agency_clients_sql);
+=======
+$mappings_result_original = $conn->query($mapping_sql);
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
 
 // Fetch all supervisors for User Accounts tab
 $supervisors_sql = "
@@ -524,6 +595,7 @@ include 'admin_layout/sidebar.php';
                                     <th>ID</th>
                                     <th>Agency Username</th>
                                     <th>Status</th>
+                                    <th>Control</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -540,6 +612,9 @@ include 'admin_layout/sidebar.php';
                                             </div>
                                         </td>
                                         <td><span style="color: var(--success); font-weight: 600;">● Active</span></td>
+                                        <td>
+                                            <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="event.stopPropagation(); openAgencyDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['username']); ?>')">Delete</button>
+                                        </td>
                                     </tr>
                                 <?php endwhile; else: ?>
                                     <tr><td colspan="3" class="empty-state">No agencies registered yet.</td></tr>
@@ -562,7 +637,11 @@ include 'admin_layout/sidebar.php';
 
                         <!-- Form: Assign Existing -->
                         <div id="form-assign-existing">
+<<<<<<< HEAD
                             <form action="agency_maintenance.php?tab=assignments" method="POST">
+=======
+                            <form action="" method="POST">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                 <div class="form-grid">
                                     <div class="form-group">
                                         <label class="form-label">Target Agency</label>
@@ -597,7 +676,11 @@ include 'admin_layout/sidebar.php';
 
                         <!-- Form: Add New Client -->
                         <div id="form-assign-new" style="display: none;">
+<<<<<<< HEAD
                             <form action="agency_maintenance.php?tab=assignments" method="POST" autocomplete="off">
+=======
+                            <form action="" method="POST" autocomplete="off">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                 <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 15px;">
                                     <div class="form-group">
                                         <label class="form-label">Client Username</label>
@@ -636,9 +719,15 @@ include 'admin_layout/sidebar.php';
                                 </tr>
                             </thead>
                             <tbody>
+<<<<<<< HEAD
                                 <?php if ($agency_clients_result && $agency_clients_result->num_rows > 0): 
                                     while($row = $agency_clients_result->fetch_assoc()): ?>
                                     <tr onclick='openAssignmentEditModal(<?php echo json_encode($row); ?>)' style="cursor: pointer;">
+=======
+                                <?php if ($mappings_result_original && $mappings_result_original->num_rows > 0): 
+                                    while($row = $mappings_result_original->fetch_assoc()): ?>
+                                    <tr onclick="openUnassignModal(<?php echo $row['ac_id']; ?>, <?php echo $row['agency_id']; ?>, <?php echo $row['client_id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                         <td><strong><?php echo htmlspecialchars($row['agency_name']); ?></strong></td>
                                         <td><strong><?php echo htmlspecialchars($row['client_name']); ?></strong></td>
                                         <td>
@@ -648,6 +737,11 @@ include 'admin_layout/sidebar.php';
                                         <td>
                                             <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="event.stopPropagation(); openUnassignModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">Unassign</button>
                                         </td>
+<<<<<<< HEAD
+=======
+                                        <td><span style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('M d, Y', strtotime($row['created_at'])); ?></span></td>
+                                        <td><button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="event.stopPropagation(); openUnassignModal(<?php echo $row['ac_id']; ?>, <?php echo $row['agency_id']; ?>, <?php echo $row['client_id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">Unassign</button></td>
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                     </tr>
                                 <?php endwhile; else: ?>
                                     <tr><td colspan="5" class="empty-state">No business mappings found.</td></tr>
@@ -663,7 +757,11 @@ include 'admin_layout/sidebar.php';
                 <div class="card" style="max-width: 600px;">
                     <div class="card-header"><h3>Add New User (Supervisor)</h3></div>
                     <div class="card-body">
+<<<<<<< HEAD
                         <form action="agency_maintenance.php?tab=user-accounts" method="POST">
+=======
+                        <form action="" method="POST">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                             <div class="form-group">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                     <label class="form-label" style="margin-bottom: 0;">Full Name (Registered Personnel)</label>
@@ -754,27 +852,22 @@ include 'admin_layout/sidebar.php';
             </div>
         </div>
 
-        <!-- Status Process Modal (Generic) -->
-        <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
-            <div class="modal-content">
-                <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
-                    <?php echo $message_type === 'success' ? '✓' : '!'; ?>
-                </div>
-                <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
-                <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
-                <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
-            </div>
-        </div>
     </main>
 
-    <script>
-        function switchTab(tabId, btn) {
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            if (btn) btn.classList.add('active');
-        }
+    <!-- MODALS -->
+    <!-- Status Process Modal -->
+    <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
+                <?php echo $message_type === 'success' ? '✓' : '!'; ?>
+            </div>
+            <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
+            <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
+            <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
+        </div>
+    </div>
 
+<<<<<<< HEAD
         function toggleAssignForm(type, btn) {
             document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
@@ -940,12 +1033,33 @@ include 'admin_layout/sidebar.php';
             document.getElementById('unassignModal').classList.add('show');
         }
     </script>
+=======
+    <!-- Agency Delete Confirmation Modal -->
+    <div id="deleteAgencyModal" class="modal">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
+            <h3>Delete Agency?</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to delete <strong id="delete_agency_display_name"></strong>? This will also remove all their client assignments and supervisor accounts.</p>
+            <form action="" method="POST">
+                <input type="hidden" name="agency_id" id="delete_agency_id">
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="btn" style="background: #e2e8f0; color: #475569;" onclick="closeModal('deleteAgencyModal')">Cancel</button>
+                    <button type="submit" name="delete_agency_action" class="btn" style="background: #ef4444; color: white;">Delete Permanently</button>
+                </div>
+            </form>
+        </div>
+    </div>
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
 
     <!-- Edit Agency Modal -->
     <div id="editAgencyModal" class="modal">
         <div class="modal-content">
             <h3 style="margin-bottom: 20px;">Edit Agency Limits</h3>
+<<<<<<< HEAD
             <form action="agency_maintenance.php?tab=agencies" method="POST">
+=======
+            <form action="" method="POST">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 <input type="hidden" name="agency_id" id="edit_agency_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Agency Name</label>
@@ -962,6 +1076,7 @@ include 'admin_layout/sidebar.php';
         </div>
     </div>
 
+<<<<<<< HEAD
     <!-- Edit Assignment Modal -->
     <div id="editAssignmentModal" class="modal">
         <div class="modal-content" style="max-width: 500px;">
@@ -1003,6 +1118,21 @@ include 'admin_layout/sidebar.php';
                 <div style="display: flex; gap: 12px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('unassignModal')">Cancel</button>
                     <button type="submit" name="unassign_client_action" class="btn" style="background: #ef4444; color: white; flex: 1;">Unassign</button>
+=======
+    <!-- Assignment Unassign Confirmation Modal -->
+    <div id="unassignModal" class="modal">
+        <div class="modal-content">
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">?</div>
+            <h3>Unassign Client?</h3>
+            <p style="color: #6b7280; margin-bottom: 24px;">Remove assignment between <strong id="unassign_agency_name"></strong> and <strong id="unassign_client_name"></strong>?</p>
+            <form action="" method="POST">
+                <input type="hidden" name="uu_mapping_id" id="uu_unassign_id">
+                <input type="hidden" name="uu_agency_id" id="uu_unassign_agency_id">
+                <input type="hidden" name="uu_client_id" id="uu_unassign_client_id">
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="btn" style="background: #e2e8f0; color: #475569;" onclick="closeModal('unassignModal')">Cancel</button>
+                    <button type="submit" name="unassign_client_action" class="btn" style="background: #ef4444; color: white;">Unassign</button>
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 </div>
             </form>
         </div>
@@ -1012,7 +1142,11 @@ include 'admin_layout/sidebar.php';
     <div id="editSupervisorModal" class="modal">
         <div class="modal-content" style="max-width: 500px;">
             <h3 style="margin-bottom: 20px;">Edit Supervisor Account</h3>
+<<<<<<< HEAD
             <form action="agency_maintenance.php?tab=user-accounts" method="POST">
+=======
+            <form action="" method="POST">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 <input type="hidden" name="edit_supervisor_id" id="edit_supervisor_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Full Name</label>
@@ -1063,10 +1197,14 @@ include 'admin_layout/sidebar.php';
     <!-- Delete Supervisor Modal -->
     <div id="deleteSupervisorModal" class="modal">
         <div class="modal-content">
-            <div class="modal-icon">!</div>
+            <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
             <h3>Delete Supervisor Account?</h3>
             <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to delete <strong id="delete_supervisor_name"></strong>? This will remove their access permanently.</p>
+<<<<<<< HEAD
             <form action="agency_maintenance.php?tab=user-accounts" method="POST">
+=======
+            <form action="" method="POST">
+>>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 <input type="hidden" name="delete_supervisor_id" id="delete_supervisor_id">
                 <div style="display: flex; gap: 12px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('deleteSupervisorModal')">Cancel</button>
@@ -1075,6 +1213,186 @@ include 'admin_layout/sidebar.php';
             </form>
         </div>
     </div>
+
+    <!-- SCRIPTS -->
+    <script>
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            if (btn) btn.classList.add('active');
+            
+            // Update URL query parameter
+            const tabName = tabId.replace('tab-', '');
+            const newurl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?tab=' + tabName;
+            window.history.replaceState({path:newurl}, '', newurl);
+        }
+
+        function toggleAssignForm(type, btn) {
+            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            if(type === 'existing') {
+                document.getElementById('form-assign-existing').style.display = 'block';
+                document.getElementById('form-assign-new').style.display = 'none';
+            } else {
+                document.getElementById('form-assign-existing').style.display = 'none';
+                document.getElementById('form-assign-new').style.display = 'block';
+            }
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function openAgencyDeleteModal(id, name) {
+            document.getElementById('delete_agency_id').value = id;
+            document.getElementById('delete_agency_display_name').innerText = name;
+            document.getElementById('deleteAgencyModal').classList.add('show');
+        }
+
+        function openUnassignModal(id, agency_id, client_id, agency_name, client_name) {
+            document.getElementById('uu_unassign_id').value = id;
+            document.getElementById('uu_unassign_agency_id').value = agency_id;
+            document.getElementById('uu_unassign_client_id').value = client_id;
+            document.getElementById('unassign_agency_name').innerText = agency_name;
+            document.getElementById('unassign_client_name').innerText = client_name;
+            document.getElementById('unassignModal').classList.add('show');
+        }
+
+        function openAgencyEditModal(id, name, qr, guard, insp, supervisor, client) {
+            document.getElementById('edit_agency_id').value = id;
+            document.getElementById('edit_agency_name').value = name;
+            document.getElementById('edit_qr_limit').value = qr;
+            document.getElementById('edit_guard_limit').value = guard;
+            document.getElementById('edit_inspector_limit').value = insp;
+            document.getElementById('edit_supervisor_limit').value = supervisor;
+            document.getElementById('edit_client_limit').value = client;
+            document.getElementById('editAgencyModal').classList.add('show');
+        }
+
+        function openSupervisorEditModal(sup) {
+            document.getElementById('edit_supervisor_id').value = sup.id;
+            document.getElementById('edit_sup_fullname').value = sup.name;
+            document.getElementById('edit_sup_username').value = sup.username;
+            document.getElementById('edit_sup_contact').value = sup.contact_no;
+            
+            const agencyId = sup.agency_id == 0 ? 'all' : sup.agency_id;
+            document.getElementById('edit_sup_agency_id').value = agencyId;
+            
+            filterPersonnelByAgency(agencyId);
+            
+            const selectedIds = sup.assigned_client_ids ? sup.assigned_client_ids.split(',') : [];
+            filterClientsByAgency(agencyId, 'edit_sup_clients_container', selectedIds);
+            
+            document.getElementById('editSupervisorModal').classList.add('show');
+        }
+
+        function openSupervisorDeleteModal(id, name) {
+            document.getElementById('delete_supervisor_id').value = id;
+            document.getElementById('delete_supervisor_name').textContent = name;
+            document.getElementById('deleteSupervisorModal').classList.add('show');
+        }
+
+        // Configuration and Maps
+        const agencyClientsMap = <?php echo $agency_clients_json; ?>;
+        const personnelMap = <?php echo $personnel_json; ?>;
+
+        function handleAgencyChange(agencyId, containerId) {
+            filterClientsByAgency(agencyId, containerId);
+            filterPersonnelByAgency(agencyId);
+        }
+
+        function filterPersonnelByAgency(agencyId) {
+            const datalist = document.getElementById('personnel_list');
+            datalist.innerHTML = '';
+            
+            let names = [];
+            if (agencyId === 'all') {
+                Object.values(personnelMap).forEach(list => { names = names.concat(list); });
+            } else if (personnelMap[agencyId]) {
+                names = personnelMap[agencyId];
+            }
+
+            const uniqueNames = [...new Set(names)].sort();
+            uniqueNames.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                datalist.appendChild(option);
+            });
+        }
+
+        function toggleSelectAllClients(containerId, isChecked) {
+            const container = document.getElementById(containerId);
+            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = isChecked);
+        }
+
+        function filterClientsByAgency(agencyId, containerId, selectedIds = []) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            if (document.getElementById('select_all_clients')) document.getElementById('select_all_clients').checked = false;
+
+            let clients = [];
+            if (agencyId === 'all') {
+                Object.values(agencyClientsMap).forEach(list => { clients = clients.concat(list); });
+            } else if (agencyClientsMap[agencyId]) {
+                clients = agencyClientsMap[agencyId];
+            }
+
+            if (clients.length === 0) {
+                container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No clients found...</span>';
+                return;
+            }
+
+            const seenIds = new Set();
+            const uniqueClients = clients.filter(c => {
+                if (seenIds.has(c.id)) return false;
+                seenIds.add(c.id);
+                return true;
+            });
+
+            uniqueClients.forEach(client => {
+                const isChecked = selectedIds.includes(client.id.toString()) || selectedIds.includes(parseInt(client.id));
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.alignItems = 'center';
+                div.style.gap = '8px';
+                div.innerHTML = `
+                    <input type="checkbox" name="assigned_clients[]" value="${client.id}" id="client_${containerId}_${client.id}" ${isChecked ? 'checked' : ''}>
+                    <label for="client_${containerId}_${client.id}" style="font-size: 0.85rem; cursor: pointer;">${client.name}</label>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // Initialize state on DOM load
+        window.addEventListener('DOMContentLoaded', () => {
+            // URL Tab Selection
+            const urlParams = new URLSearchParams(window.location.search);
+            const tab = urlParams.get('tab');
+            if (tab) {
+                const tabPane = document.getElementById('tab-' + tab);
+                if (tabPane) {
+                    // Find the corresponding button
+                    let btnIndex = 1;
+                    if (tab === 'assignments') btnIndex = 2;
+                    else if (tab === 'user-accounts') btnIndex = 3;
+                    
+                    const btn = document.querySelector(`.tab-btn:nth-child(${btnIndex})`);
+                    switchTab('tab-' + tab, btn);
+                }
+            }
+
+            // Supervisor Form Init
+            const agencySelect = document.getElementById('account_agency_id');
+            if (agencySelect && agencySelect.value) {
+                filterPersonnelByAgency(agencySelect.value);
+                filterClientsByAgency(agencySelect.value, 'account_clients_container');
+            }
+        });
+    </script>
 
 <?php include 'admin_layout/footer.php'; ?>
 </html>

@@ -106,35 +106,48 @@ $incidents_result = $conn->query($incidents_sql);
         .incident-desc { font-size: 0.9rem; line-height: 1.6; color: #374151; margin-bottom: 16px; }
 
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative; }
-        .detail-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
-        .detail-item { font-size: 0.85rem; }
-        .detail-label { color: #6b7280; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
-        .detail-value { color: #111827; font-weight: 600; }
-        
-        .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 16px; border-top: 1px solid #f1f5f9; font-size: 0.85rem; color: #6b7280; }
-        .status { font-weight: 600; }
-        .status-active { color: #ef4444; }
-        .status-resolved { color: #10b981; }
-
-        .empty-state { text-align: center; padding: 60px 20px; grid-column: 1 / -1; color: #6b7280; background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-
-        /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
+        .modal-overlay { 
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(17, 24, 39, 0.7); 
+            z-index: 2000; 
+            backdrop-filter: blur(4px); 
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .modal-overlay.show { 
+            display: flex; 
+            align-items: flex-start; 
+            justify-content: center; 
+        }
+        .modal-content { 
+            background: white; 
+            padding: 32px; 
+            border-radius: 12px; 
+            width: 100%; 
+            max-width: 500px; 
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); 
+            position: relative;
+            margin: auto;
+            animation: modalFadeIn 0.3s ease-out forwards;
+        }
         @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
-        .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
-        .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
-        .modal-actions { display: flex; gap: 12px; }
-        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
-        .btn-cancel { background: #f3f4f6; color: #374151; }
-        .btn-cancel:hover { background: #e5e7eb; }
-        .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
-        .btn-confirm:hover { background: #be123c; }
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 24px;
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            transition: color 0.2s;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .modal-close:hover { color: #111827; background: #f3f4f6; }
     </style>
 </head>
 <body>
@@ -234,13 +247,14 @@ $incidents_result = $conn->query($incidents_sql);
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
         <div class="modal-content">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
             <div class="modal-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
             </div>
             <h3 class="modal-title">Ready to Leave?</h3>
             <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
             <div class="modal-actions">
-                <button class="btn-modal btn-cancel" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
+                <button class="btn-modal btn-cancel" onclick="closeAllModals()">Cancel</button>
                 <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
             </div>
         </div>
@@ -249,6 +263,7 @@ $incidents_result = $conn->query($incidents_sql);
     <!-- Report Details Modal -->
     <div class="modal-overlay" id="reportDetailModal">
         <div class="modal-content">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
             <h3 id="modal_report_title" style="margin-bottom: 16px; font-size: 1.25rem; font-weight: 700; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Report Details</h3>
             
             <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
@@ -275,7 +290,7 @@ $incidents_result = $conn->query($incidents_sql);
             </div>
 
             <div style="margin-top: 32px;">
-                <button class="btn-modal btn-cancel" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; background: white; border-radius: 8px; font-weight: 600; cursor: pointer;" onclick="document.getElementById('reportDetailModal').classList.remove('show');">Close Details</button>
+                <button class="btn-modal btn-cancel" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; background: white; border-radius: 8px; font-weight: 600; cursor: pointer;" onclick="closeAllModals()">Close Details</button>
             </div>
         </div>
     </div>
@@ -289,17 +304,20 @@ $incidents_result = $conn->query($incidents_sql);
             document.getElementById('modal_investigated').innerText = investigated || '---';
             document.getElementById('modal_approved').innerText = approved || '---';
             document.getElementById('reportDetailModal').classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
         }
 
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const logoutModal = document.getElementById('logoutModal');
-            const detailModal = document.getElementById('reportDetailModal');
-            if (event.target == logoutModal) {
-                logoutModal.classList.remove('show');
-            }
-            if (event.target == detailModal) {
-                detailModal.classList.remove('show');
+            if (event.target.classList.contains('modal-overlay')) {
+                closeAllModals();
             }
         }
     </script>

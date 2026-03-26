@@ -80,7 +80,9 @@ $history_sql = "
         g.name as guard_name,
         s.status,
         s.shift,
-        s.justification
+        s.justification,
+        s.photo_path,
+        s.justification_photo_path
     FROM scans s
     JOIN checkpoints c ON s.checkpoint_id = c.id
     JOIN guards g ON s.guard_id = g.id
@@ -203,10 +205,49 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         .empty-state { text-align: center; padding: 40px; color: #6b7280; font-style: italic; }
 
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
+        .modal-overlay { 
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(17, 24, 39, 0.7); 
+            z-index: 2000; 
+            backdrop-filter: blur(4px); 
+            overflow-y: auto; 
+            padding: 20px;
+        }
+        .modal-overlay.show { 
+            display: flex; 
+            align-items: flex-start; 
+            justify-content: center; 
+        }
+        .modal-content { 
+            background: white; 
+            padding: 32px; 
+            border-radius: 12px; 
+            width: 100%; 
+            max-width: 450px; 
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); 
+            text-align: center; 
+            animation: modalFadeIn 0.3s ease-out forwards; 
+            position: relative;
+            margin: auto;
+        }
         @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 24px;
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            transition: color 0.2s;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .modal-close:hover { color: #111827; background: #f3f4f6; }
         .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
         .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
         .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
@@ -216,6 +257,47 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         .btn-cancel:hover { background: #e5e7eb; }
         .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
         .btn-confirm:hover { background: #be123c; }
+
+        /* Photo View Styles */
+        .btn-view-photo {
+            padding: 6px 12px;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-view-photo:hover { background-color: #2563eb; }
+        .btn-view-photo.justification { background-color: #f59e0b; }
+        .btn-view-photo.justification:hover { background-color: #d97706; }
+        
+        .photo-modal-content { max-width: 800px !important; }
+        .modal-image-container { 
+            position: relative; 
+            width: 100%; 
+            background: #f3f4f6; 
+            border-radius: 8px; 
+            overflow: auto; 
+            margin: 20px 0; 
+            max-height: 65vh;
+            border: 1px solid #e5e7eb;
+        }
+        #modalImage { 
+            max-width: 100%; 
+            display: block; 
+            border-radius: 8px; 
+            margin: 0 auto;
+            cursor: zoom-in;
+        }
+        .modal-reason-container { text-align: left; background: #f9fafb; padding: 15px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 10px; display: none; }
+        .modal-reason-label { font-size: 0.75rem; font-weight: 700; color: #b45309; text-transform: uppercase; margin-bottom: 4px; display: block; }
+        .modal-reason-text { font-size: 0.95rem; color: #1f2937; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -330,6 +412,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                                 <th>Guard Name</th>
                                 <th>Status</th>
                                 <th>Remarks</th>
+                                <th>Photos</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -346,7 +429,38 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                                             </span>
                                         </td>
                                         <td style="font-size: 0.85rem; color: #4b5563; font-style: italic;">
-                                            <?php echo htmlspecialchars($row['justification'] ?? '---'); ?>
+                                                <?php if (!empty($row['justification'])): ?>
+                                                    <?php echo htmlspecialchars($row['justification']); ?>
+                                                    <button class="btn-view-photo justification" style="margin-left: 8px; transform: scale(0.85);" onclick="viewPhoto('<?php echo htmlspecialchars($row['justification_photo_path'] ?? ''); ?>', 'Justification - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'])); ?>')">View Full</button>
+                                                <?php else: ?>
+                                                    ---
+                                                <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <div style="display: flex; gap: 4px;">
+                                                <?php if (!empty($row['photo_path'])): ?>
+                                                    <button class="btn-view-photo" onclick="viewPhoto('<?php echo htmlspecialchars($row['photo_path']); ?>', 'Patrol Selfie - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'] ?? '')); ?>')">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                                                        Selfie
+                                                    </button>
+                                                <?php endif; ?>
+                                                
+                                                 <?php if (!empty($row['justification_photo_path'])): ?>
+                                                    <button class="btn-view-photo justification" onclick="viewPhoto('<?php echo htmlspecialchars($row['justification_photo_path']); ?>', 'Justification Photo - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'] ?? '')); ?>')">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                                                        Justification
+                                                    </button>
+                                                <?php elseif (!empty($row['justification'])): ?>
+                                                    <button class="btn-view-photo justification" onclick="viewPhoto('', 'Justification - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'])); ?>')">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                                                        Reason
+                                                    </button>
+                                                <?php endif; ?>
+                                                
+                                                <?php if (empty($row['photo_path']) && empty($row['justification_photo_path']) && empty($row['justification'])): ?>
+                                                    <span style="color: #9ca3af; font-size: 0.75rem;">No Photo</span>
+                                                <?php endif; ?>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
@@ -363,16 +477,35 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         </div>
     </main>
 
+    <!-- Photo Modal -->
+    <div class="modal-overlay" id="photoModal">
+        <div class="modal-content photo-modal-content">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
+            <h3 class="modal-title" id="photoModalTitle">Patrol Photo</h3>
+            <div class="modal-image-container">
+                <img id="modalImage" src="" alt="Patrol Photo" onclick="window.open(this.src, '_blank')" title="Click to view full size">
+            </div>
+            <div class="modal-reason-container" id="modalReasonContainer">
+                <span class="modal-reason-label">Reason / Remark:</span>
+                <p class="modal-reason-text" id="modalReasonText"></p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" onclick="closeAllModals()" style="width: 100%;">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
         <div class="modal-content">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
             <div class="modal-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
             </div>
             <h3 class="modal-title">Ready to Leave?</h3>
             <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
             <div class="modal-actions">
-                <button class="btn-modal btn-cancel" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
+                <button class="btn-modal btn-cancel" onclick="closeAllModals()">Cancel</button>
                 <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
             </div>
         </div>
@@ -385,11 +518,38 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
             window.location.href = url.toString();
         }
 
+        function viewPhoto(url, title, reason = '') {
+            const modal = document.getElementById('photoModal');
+            const modalImg = document.getElementById('modalImage');
+            const modalTitle = document.getElementById('photoModalTitle');
+            const reasonContainer = document.getElementById('modalReasonContainer');
+            const reasonText = document.getElementById('modalReasonText');
+            
+            modalTitle.innerText = title;
+            modalImg.src = url;
+            
+            if (reason && reason.trim() !== '') {
+                reasonText.innerText = reason;
+                reasonContainer.style.display = 'block';
+            } else {
+                reasonContainer.style.display = 'none';
+            }
+            
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
+        }
+
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const logoutModal = document.getElementById('logoutModal');
-            if (event.target == logoutModal) {
-                logoutModal.classList.remove('show');
+            if (event.target.classList.contains('modal-overlay')) {
+                closeAllModals();
             }
         }
     </script>

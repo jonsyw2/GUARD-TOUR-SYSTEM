@@ -174,9 +174,48 @@ $incidents_res = $conn->query($incidents_sql);
         .btn-secondary { background: #f3f4f6; color: #374151; }
 
         /* Modal */
-        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
+        .modal { 
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(0,0,0,0.5); 
+            z-index: 2000; 
+            backdrop-filter: blur(4px); 
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .modal.show { 
+            display: flex; 
+            align-items: flex-start; 
+            justify-content: center; 
+        }
+        .modal-content { 
+            background: white; 
+            padding: 32px; 
+            border-radius: 12px; 
+            width: 100%; 
+            max-width: 500px; 
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); 
+            position: relative;
+            margin: auto;
+            animation: modalFadeIn 0.3s ease-out forwards;
+        }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 24px;
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            transition: color 0.2s;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .modal-close:hover { color: #111827; background: #f3f4f6; }
         .form-group { margin-bottom: 16px; }
         .form-label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 6px; }
         .form-control { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; outline: none; }
@@ -282,6 +321,7 @@ $incidents_res = $conn->query($incidents_sql);
     <!-- Create Modal -->
     <div id="createModal" class="modal">
         <div class="modal-content">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
             <h3 style="margin-bottom: 20px;">Create Incident Report</h3>
             <form action="agency_incidents.php" method="POST" enctype="multipart/form-data">
                 <div class="form-group">
@@ -341,6 +381,7 @@ $incidents_res = $conn->query($incidents_sql);
     <!-- Detail Modal -->
     <div id="detailModal" class="modal">
         <div class="modal-content" style="text-align: left;">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
             <h3 style="margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px;" id="detail_title">Report Details</h3>
             
             <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
@@ -374,6 +415,7 @@ $incidents_res = $conn->query($incidents_sql);
     <!-- Logout Modal -->
     <div id="logoutModal" class="modal">
         <div class="modal-content" style="max-width: 400px; text-align: center;">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
             <h3 style="margin-bottom: 20px;">Ready to Logout?</h3>
             <div style="display: flex; gap: 12px;">
                 <button class="btn btn-secondary" style="flex: 1;" onclick="document.getElementById('logoutModal').classList.remove('show')">Cancel</button>
@@ -392,11 +434,19 @@ $incidents_res = $conn->query($incidents_sql);
             document.getElementById('detail_investigated').innerText = investigated || '---';
             document.getElementById('detail_approved').innerText = approved || '---';
             document.getElementById('detailModal').classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
         }
 
         window.onclick = function(event) {
             if (event.target.classList.contains('modal')) {
-                event.target.classList.remove('show');
+                closeAllModals();
             }
         }
     </script>
