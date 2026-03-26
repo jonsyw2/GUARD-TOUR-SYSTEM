@@ -45,7 +45,12 @@ if (
         $code_value = $qr_raw;
     }
     
-    $code_value = $conn->real_escape_string($code_value);
+    // Get additional optional parameters
+    $status = !empty($data->status) ? $conn->real_escape_string($data->status) : "on-time";
+    $justification = !empty($data->justification) ? "'" . $conn->real_escape_string($data->justification) . "'" : "NULL";
+    $photo_path = !empty($data->photo_path) ? "'" . $conn->real_escape_string($data->photo_path) . "'" : "NULL";
+    $justification_photo_path = !empty($data->justification_photo_path) ? "'" . $conn->real_escape_string($data->justification_photo_path) . "'" : "NULL";
+    $shift = !empty($data->shift) ? "'" . $conn->real_escape_string($data->shift) . "'" : "NULL";
 
     // Validate the checkpoint code exists
     $cp_sql = "SELECT id, agency_client_id FROM checkpoints WHERE checkpoint_code = '$code_value'";
@@ -61,18 +66,16 @@ if (
 
         if ($assign_res && $assign_res->num_rows > 0) {
             
-            // Insert scan record defaults to 'on-time'.
-            // In a full implementation, you'd compare current time against schedule limits!
-            $status = "on-time"; 
-            
-            $insert_sql = "INSERT INTO scans (checkpoint_id, guard_id, scan_time, status) VALUES ($checkpoint_id, $guard_id, NOW(), '$status')";
+            // Insert scan record
+            $insert_sql = "INSERT INTO scans (checkpoint_id, guard_id, scan_time, status, justification, photo_path, justification_photo_path, shift) 
+                          VALUES ($checkpoint_id, $guard_id, NOW(), '$status', $justification, $photo_path, $justification_photo_path, $shift)";
             
             if ($conn->query($insert_sql)) {
                 http_response_code(201); // Created
                 echo json_encode(["message" => "Checkpoint scanned successfully.", "status" => $status]);
             } else {
                 http_response_code(503); // Service Unavailable
-                echo json_encode(["message" => "Unable to log scan. Database Error."]);
+                echo json_encode(["message" => "Unable to log scan. Database Error: " . $conn->error]);
             }
         } else {
             http_response_code(403); // Forbidden

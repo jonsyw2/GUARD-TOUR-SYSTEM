@@ -43,7 +43,7 @@ if (empty($mapping_ids)) {
     $mapping_ids_str = implode(',', $mapping_ids);
 }
 
-// Ensure every mapping has a starting point (is_zero_checkpoint = 1) and ending point (is_end_checkpoint = 1)
+// Ensure every mapping has a starting point (is_zero_checkpoint = 1)
 if (!empty($mapping_ids)) {
     foreach ($mapping_ids as $m_id) {
         // Starting Point
@@ -51,12 +51,6 @@ if (!empty($mapping_ids)) {
         if ($conn->query($start_check)->num_rows == 0) {
             $start_code = "START-" . $m_id . "-" . strtoupper(bin2hex(random_bytes(3)));
             $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint) VALUES ($m_id, 'Starting Point', '$start_code', '$start_code', 1)");
-        }
-        // Ending Point
-        $end_check = "SELECT id FROM checkpoints WHERE agency_client_id = $m_id AND is_end_checkpoint = 1 LIMIT 1";
-        if ($conn->query($end_check)->num_rows == 0) {
-            $end_code = "END-" . $m_id . "-" . strtoupper(bin2hex(random_bytes(3)));
-            $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_end_checkpoint) VALUES ($m_id, 'Ending Point', '$end_code', '$end_code', 1)");
         }
     }
 }
@@ -154,49 +148,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
         $assignment_shifts = $_POST['assignment_shifts'] ?? [];
         // Durations are automated to 1 min for non-zero points, except for points already in sequence which might have 0
         $durations = $_POST['durations'] ?? []; 
-        // Validation: Count checkpoints excluding the starting AND ending points
-        $excluded_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 1 OR is_end_checkpoint = 1)");
+        // Validation: Count checkpoints excluding the starting point
+        $excluded_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1");
         $excluded_ids = [];
         while($row = $excluded_res->fetch_assoc()) $excluded_ids[] = $row['id'];
         
         $count = 0;
         foreach($checkpoint_ids as $id) if(!in_array($id, $excluded_ids)) $count++;
 
-        // Rebuild arrays to ensure Ending Point is last and indices match
+        // Rebuild arrays to ensure indices match
         $final_ids = [];
         $final_intervals = [];
         $final_shifts = [];
         $final_durations = [];
-        $end_point_id = 0;
 
-        $end_res_save = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
-        if ($end_res_save && $end_res_save->num_rows > 0) {
-            $end_point_id = (int)$end_res_save->fetch_assoc()['id'];
-        }
-
-        // Add all EXCEPT ending point
+        // Add all checkpoints submitted
         for ($i = 0; $i < count($checkpoint_ids); $i++) {
-            if ((int)$checkpoint_ids[$i] === $end_point_id) continue;
             $final_ids[] = (int)$checkpoint_ids[$i];
             $final_intervals[] = (int)($intervals[$i] ?? 0);
             $final_shifts[] = $conn->real_escape_string($assignment_shifts[$i] ?? '');
             $final_durations[] = (int)($durations[$i] ?? 0);
-        }
-
-        // Always append Ending Point
-        if ($end_point_id > 0) {
-            $final_ids[] = $end_point_id;
-            // Find original settings for end point if submitted
-            $found_idx = array_search($end_point_id, array_map('intval', $checkpoint_ids));
-            if ($found_idx !== false) {
-                $final_intervals[] = (int)($intervals[$found_idx] ?? 0);
-                $final_shifts[] = $conn->real_escape_string($assignment_shifts[$found_idx] ?? '');
-                $final_durations[] = (int)($durations[$found_idx] ?? 0);
-            } else {
-                $final_intervals[] = 0;
-                $final_shifts[] = '';
-                $final_durations[] = 0;
-            }
         }
         $checkpoint_ids = $final_ids;
         $intervals = $final_intervals;
@@ -376,14 +347,11 @@ while ($row = $checkpoints_res->fetch_assoc()) {
     $available_checkpoints[] = $row;
 }
 
-// Fetch Starting Point for Tour Setup Tab
 $starting_point = null;
 $start_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
-$end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
 if ($start_res && $start_res->num_rows > 0) {
     $starting_point = $start_res->fetch_assoc();
 }
-$ending_point = ($end_res && $end_res->num_rows > 0) ? $end_res->fetch_assoc() : null;
 
 // Fetch current assignments for Tour Setup Tab
 $assignments_res = $conn->query("
@@ -512,10 +480,48 @@ if ($mapping_id) {
         .alert-warning { background-color: #fef3c7; color: #92400e; border: 1px solid #fcd34d; padding: 12px 16px; margin-top: 12px; border-radius: 6px;}
 
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; animation: modalFadeIn 0.3s ease-out; }
-        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .modal-overlay { 
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0; right: 0; bottom: 0; 
+            background: rgba(17, 24, 39, 0.7); 
+            z-index: 2000; 
+            backdrop-filter: blur(4px); 
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .modal-overlay.show { 
+            display: flex; 
+            align-items: flex-start; 
+            justify-content: center; 
+        }
+        .modal-content { 
+            background: white; 
+            padding: 32px; 
+            border-radius: 12px; 
+            width: 100%; 
+            max-width: 450px; 
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); 
+            position: relative;
+            margin: auto;
+            animation: modalFadeIn 0.3s ease-out forwards;
+        }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 24px;
+            background: none;
+            border: none;
+            color: #9ca3af;
+            cursor: pointer;
+            transition: color 0.2s;
+            line-height: 1;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .modal-close:hover { color: #111827; background: #f3f4f6; }
         
         .qr-display { padding: 20px; text-align: center; display: flex; flex-direction: column; align-items: center;}
         .qr-img { margin: 0 auto; display: block; }
@@ -587,11 +593,6 @@ if ($mapping_id) {
         }
         .checkpoint-circle.start {
             background: linear-gradient(135deg, #2563eb, #111827);
-            color: white;
-            z-index: 10;
-        }
-        .checkpoint-circle.end {
-            background: linear-gradient(135deg, #ea580c, #111827);
             color: white;
             z-index: 10;
         }
@@ -784,9 +785,9 @@ if ($mapping_id) {
                                 </div>
                             <?php endif; ?>
 
-                            <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?> <?php echo $ending_point ? 'margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;' : ''; ?>">
+                            <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?>">
                                 <?php foreach ($current_assignments as $item): ?>
-                                    <?php if (($starting_point && $item['checkpoint_id'] == $starting_point['id']) || ($ending_point && $item['checkpoint_id'] == $ending_point['id'])) continue; ?>
+                                    <?php if ($starting_point && $item['checkpoint_id'] == $starting_point['id']) continue; ?>
                                     <div class="tour-item">
                                         <span class="handle">☰</span>
                                         <span class="checkpoint-name"><?php echo htmlspecialchars($item['name']); ?></span>
@@ -822,50 +823,6 @@ if ($mapping_id) {
                                     </div>
                                 <?php endforeach; ?>
                             </div>
-
-                            <?php if ($ending_point): 
-                                $end_shift = '';
-                                $end_interval = 0;
-                                foreach($current_assignments as $as) {
-                                    if($as['checkpoint_id'] == $ending_point['id']) {
-                                        $end_shift = $as['shift_name'];
-                                        $end_interval = $as['interval_minutes'];
-                                        break;
-                                    }
-                                }
-                            ?>
-                                <div class="tour-list" style="margin-top: 0px; border-top: none; border-top-left-radius: 0; border-top-right-radius: 0; padding-top: 0;">
-                                    <div class="tour-item" style="cursor: default; background: #fff7ed; border-color: #ffedd5; margin-top: 0;">
-                                        <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
-                                        <span class="checkpoint-name"><?php echo htmlspecialchars($ending_point['name']); ?></span>
-                                        <input type="hidden" name="checkpoint_ids[]" value="<?php echo $ending_point['id']; ?>">
-                                        <div class="setting-inputs">
-                                            <div class="input-group">
-                                                <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $end_interval; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
-                                                <label>min</label>
-                                            </div>
-                                            <div class="input-group">
-                                                <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
-                                                    <?php if (empty($client_shifts)): ?>
-                                                        <option value="Day Shift" <?php echo $end_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                        <option value="Night Shift" <?php echo $end_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                    <?php else: ?>
-                                                        <?php foreach ($client_shifts as $s_name): ?>
-                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo $end_shift === $s_name ? 'selected' : ''; ?>>
-                                                                <?php echo htmlspecialchars($s_name); ?>
-                                                            </option>
-                                                        <?php endforeach; ?>
-                                                    <?php endif; ?>
-                                                </select>
-                                            </div>
-                                            <input type="hidden" name="durations[]" value="0">
-                                        </div>
-                                        <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
-                                    </div>
-                                </div>
-                            <?php endif; ?>
                         </div>
 
                         <?php if (!$is_patrol_locked): ?>
@@ -912,12 +869,12 @@ if ($mapping_id) {
                                             $last_scan = $row['last_scanned'] ? date('M d, Y h:i:s A', strtotime($row['last_scanned'])) : '<span style="color:#9ca3af">Never Scanned</span>';
                                         ?>
                                         <tr>
-                                            <td><?php echo ($row['is_zero_checkpoint'] || $row['is_end_checkpoint']) ? '0' : $counter++; ?></td>
-                                            <?php $display_no = ($row['is_zero_checkpoint'] || $row['is_end_checkpoint']) ? '0' : ($counter - 1); ?>
+                                            <td><?php echo $row['is_zero_checkpoint'] ? '0' : $counter++; ?></td>
+                                            <?php $display_no = $row['is_zero_checkpoint'] ? '0' : ($counter - 1); ?>
                                             <td>
                                                 <strong><?php echo htmlspecialchars($row['checkpoint_name']); ?></strong>
-                                                <?php if ($row['is_zero_checkpoint'] || $row['is_end_checkpoint']): ?>
-                                                    <span class="badge" style="background: #ecfdf5; color: #065f46; font-size: 0.7rem; border: none; padding: 2px 8px; margin-left: 5px;">Site <?php echo $row['is_zero_checkpoint'] ? 'Starting' : 'Ending'; ?> Point</span>
+                                                <?php if ($row['is_zero_checkpoint']): ?>
+                                                    <span class="badge" style="background: #ecfdf5; color: #065f46; font-size: 0.7rem; border: none; padding: 2px 8px; margin-left: 5px;">Site Starting Point</span>
                                                 <?php endif; ?>
                                             </td>
                                             <td>
@@ -1035,7 +992,7 @@ if ($mapping_id) {
                         </div>
                     <?php endforeach; ?>
                     <div class="btn-visual-info">
-                    <strong>Visual Map:</strong> Drag checkpoints to position them. <strong>Blue (S)</strong> is Start, <strong>Orange (E)</strong> is End point.
+                    <strong>Visual Map:</strong> Drag checkpoints to position them. <strong>Blue (S)</strong> is Start point.
                 </div>
                 </div>
             </div>
@@ -1066,7 +1023,7 @@ if ($mapping_id) {
                 <button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280;" onclick="closeVisualDesigner()">&times;</button>
             </div>
             <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px; text-align: left;">
-                Draggable overview of checkpoints. <strong>Blue (S)</strong> is Start, <strong>Orange (E)</strong> is End, and <strong>White</strong> are checkpoints.
+                Draggable overview of checkpoints. <strong>Blue (S)</strong> is Start, and <strong>White</strong> are checkpoints.
             </p>
             <div id="visual-canvas" class="visual-container">
                 <svg id="visual-svg" class="visual-svg">
@@ -1413,11 +1370,10 @@ if ($mapping_id) {
                         const status = (cp.latest_status || '').toLowerCase();
                         if (status === 'on-time' || status === 'on time') statusClass = 'cp-status-on-time';
                         else if (status === 'late') statusClass = 'cp-status-late';
-                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
-                        circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : 'regular'} ${statusClass}`;
+                        circle.style.zIndex = cp.isStart ? 10 : 5;
                         let typeLabel = index;
                         if (cp.isStart) typeLabel = 'S';
-                        else if (cp.isEnd) typeLabel = 'E';
                         circle.innerHTML = `<span>${typeLabel}</span><div class="label">${cp.name}</div>`;
                         
                         let x = parseInt(cp.visual_pos_x) || 0;
@@ -1497,13 +1453,16 @@ if ($mapping_id) {
                 });
         }
 
+        function closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
+        }
+
         window.onclick = function(event) {
             if (event.target.classList.contains('modal-overlay')) {
-                if (event.target.id === 'visualDesignerModal') {
-                    closeVisualDesigner();
-                } else {
-                    event.target.classList.remove('show');
-                }
+                closeAllModals();
             }
         }
     </script>
