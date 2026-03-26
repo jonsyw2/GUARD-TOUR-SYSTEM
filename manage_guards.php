@@ -71,49 +71,59 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     $fullname = $last_name . ", " . $first_name . " " . $middle_name;
     $fullname = trim($fullname);
     
-    // Check Agency Guard Limit
-    $limit_check = $conn->query("SELECT guard_limit FROM users WHERE id = $agency_id");
-    $current_count_check = $conn->query("SELECT COUNT(*) as count FROM guards WHERE agency_id = $agency_id");
-    
-    if ($limit_check && $current_count_check) {
-        $max_guards = $limit_check->fetch_assoc()['guard_limit'];
-        $current_guards = $current_count_check->fetch_assoc()['count'];
-        
-        if ($max_guards > 0 && $current_guards >= $max_guards) {
-            $message = "Creation failed: Your agency has reached its maximum limit of $max_guards guards.";
-            $message_type = "error";
-            $show_limit_modal = true;
-        } else {
-            // Generate Unique 6-character Key
-            $unique_key = generateUniqueGuardKey($conn);
-            $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
+    $can_create = true;
+    if ($client_mapping_id) {
+        // Check Client's Guard Limit
+        $limit_sql = "
+            SELECT ac.guard_limit, 
+                   (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
+            FROM agency_clients ac 
+            WHERE ac.id = $client_mapping_id
+        ";
+        $limit_res = $conn->query($limit_sql);
+        if ($limit_res && $row = $limit_res->fetch_assoc()) {
+            $max_guards = (int)$row['guard_limit'];
+            $current_guards = (int)$row['current_guards'];
             
-            $conn->begin_transaction();
-            try {
-                // 1. Create User (Username is the unique key)
-                $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'guard')");
-                $user_id = $conn->insert_id;
-                
-                // 2. Create Guard entry
-                $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry) 
-                             VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry')");
-                $guard_id = $conn->insert_id;
-
-                // 3. Optional Client Assignment
-                if ($client_mapping_id) {
-                    $conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $client_mapping_id)");
-                }
-                
-                $conn->commit();
-                $_SESSION['guard_created_key'] = $unique_key;
-                header("Location: manage_guards.php");
-                exit();
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = "Error creating guard: " . $e->getMessage();
+            if ($max_guards > 0 && $current_guards >= $max_guards) {
+                $message = "Creation failed: This client site has reached its limit of $max_guards guards.";
                 $message_type = "error";
-                $show_status_modal = true;
+                $show_limit_modal = true;
+                $can_create = false;
             }
+        }
+    }
+
+    if ($can_create) {
+        // Generate Unique 6-character Key
+        $unique_key = generateUniqueGuardKey($conn);
+        $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
+        
+        $conn->begin_transaction();
+        try {
+            // 1. Create User
+            $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'guard')");
+            $user_id = $conn->insert_id;
+            
+            // 2. Create Guard entry
+            $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry) 
+                         VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry')");
+            $guard_id = $conn->insert_id;
+
+            // 3. Handle Auto-assignment
+            if ($client_mapping_id) {
+                $conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $client_mapping_id)");
+            }
+            
+            $conn->commit();
+            $_SESSION['guard_created_key'] = $unique_key;
+            header("Location: manage_guards.php");
+            exit();
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = "Error creating guard: " . $e->getMessage();
+            $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -221,26 +231,43 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
     $guard_id = (int)$_POST['guard_id'];
     $mapping_id = (int)$_POST['agency_client_id'];
     
-    // Check if already assigned
-    $check_assigned = $conn->query("SELECT id FROM guard_assignments WHERE guard_id = $guard_id AND agency_client_id = $mapping_id");
-    if ($check_assigned && $check_assigned->num_rows > 0) {
-        $message = "This guard is already assigned to this client.";
-        $message_type = "error";
-    } else {
-        // Check Agency Guard Limit (Ensuring we don't exceed global pool if assignments are the constraint)
-        // Note: The user wants limits at the agency level. If assignments are still per-site, 
-        // they might still want a per-site subset, but the request was to move them TO the agency.
-        // For now, I'll allow unlimited assignments per site as long as the agency owns the guards,
-        // unless you want to keep per-site limits (in which case they'd be managed by the agency).
+    // Check Client's Guard Limit
+    $limit_sql = "
+        SELECT ac.guard_limit, 
+               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
+        FROM agency_clients ac 
+        WHERE ac.id = $mapping_id
+    ";
+    $limit_res = $conn->query($limit_sql);
+    $can_assign = true;
+    if ($limit_res && $row = $limit_res->fetch_assoc()) {
+        $max_guards = (int)$row['guard_limit'];
+        $current_guards = (int)$row['current_guards'];
         
-        if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
-            $message = "Guard assigned to client successfully!";
-            $message_type = "success";
-            $show_status_modal = true;
-        } else {
-            $message = "Error assigning guard: " . $conn->error;
+        if ($max_guards > 0 && $current_guards >= $max_guards) {
+            $message = "Assignment failed: This client site has reached its limit of $max_guards guards.";
             $message_type = "error";
-            $show_status_modal = true;
+            $show_limit_modal = true;
+            $can_assign = false;
+        }
+    }
+
+    if ($can_assign) {
+        // Check if already assigned
+        $check_assigned = $conn->query("SELECT id FROM guard_assignments WHERE guard_id = $guard_id AND agency_client_id = $mapping_id");
+        if ($check_assigned && $check_assigned->num_rows > 0) {
+            $message = "This guard is already assigned to this client.";
+            $message_type = "error";
+        } else {
+            if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
+                $message = "Guard assigned to client successfully!";
+                $message_type = "success";
+                $show_status_modal = true;
+            } else {
+                $message = "Error assigning guard: " . $conn->error;
+                $message_type = "error";
+                $show_status_modal = true;
+            }
         }
     }
 }
@@ -463,7 +490,7 @@ if ($clients_res) {
                                     $first = $fm_parts[0] ?? '';
                                     $middle = $fm_parts[1] ?? '';
                                 ?>
-                                    <tr>
+                                    <tr onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" style="cursor: pointer;">
                                         <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                         <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
                                         <td>
@@ -480,10 +507,7 @@ if ($clients_res) {
                                         </td>
                                         <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                         <td>
-                                            <div style="display: flex; gap: 8px;">
-                                                <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #6366f1; width: auto;">Edit</button>
-                                                <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
-                                            </div>
+                                            <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>

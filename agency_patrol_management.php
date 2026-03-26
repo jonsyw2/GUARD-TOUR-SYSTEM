@@ -198,16 +198,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     $verify_sql = "SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id";
     $verify_res = $conn->query($verify_sql);
     
-    // Also need to get limit to enforce on backend
-    $client_limit_sql = "
-        SELECT ag_u.qr_limit, ac.qr_override 
-        FROM agency_clients ac 
-        JOIN users ag_u ON ac.agency_id = ag_u.id 
-        WHERE ac.id = $mapping_id
-    ";
+    // Get client-specific QR limit
+    $client_limit_sql = "SELECT qr_limit FROM agency_clients WHERE id = $mapping_id";
     $limit_res = $conn->query($client_limit_sql);
-    $limit_data = $limit_res->fetch_assoc();
-    $qr_limit = $limit_data['qr_override'] ?? $limit_data['qr_limit'];
+    $qr_limit = 0;
+    if ($limit_res && $row = $limit_res->fetch_assoc()) {
+        $qr_limit = (int)$row['qr_limit'];
+    }
     
     if ($verify_res && $verify_res->num_rows > 0) {
         if ($qr_limit > 0 && count($checkpoints) > $qr_limit) {
@@ -296,7 +293,7 @@ $clients_sql = "
         ac.is_patrol_locked,
         ac.shift_type,
         ac.company_name,
-        ag_u.qr_limit, 
+        ac.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
         (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_qrs

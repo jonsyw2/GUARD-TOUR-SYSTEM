@@ -22,6 +22,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
     
     // Handle File Upload
     $logo_path = null;
@@ -55,7 +59,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
             website_link = '$website_link',
             contact_person = '$contact_person',
             contact_person_position = '$contact_person_position',
-            contact_person_no = '$contact_person_no'
+            contact_person_no = '$contact_person_no',
+            qr_limit = $qr_limit,
+            guard_limit = $guard_limit,
+            inspector_limit = $inspector_limit,
+            supervisor_limit = $supervisor_limit
             $update_logo_sql 
             WHERE id = $mapping_id AND agency_id = $agency_id";
     
@@ -82,6 +90,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
 
     $conn->begin_transaction();
     try {
@@ -98,7 +110,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
             $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
         }
 
-        $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+        $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
         $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
 
         if ($client_limit > 0 && $current_clients >= $client_limit) {
@@ -112,8 +124,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         $new_client_id = $conn->insert_id;
 
         // 4. Create Agency-Client Assignment and Profile
-        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no) 
-                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no')")) {
+        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no, qr_limit, guard_limit, inspector_limit, supervisor_limit) 
+                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit)")) {
             throw new Exception("Error creating client profile: " . $conn->error);
         }
         $mapping_id = $conn->insert_id;
@@ -158,9 +170,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        // The user has moved guard limits to the Agency level. 
-        // Guards are already limit-checked during creation in manage_guards.php.
-        // We can now allow assignments without a per-site limit.
+    // Check Client's Guard Limit
+    $limit_sql = "
+        SELECT ac.guard_limit, 
+               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
+        FROM agency_clients ac 
+        WHERE ac.id = $mapping_id
+    ";
+    $limit_res = $conn->query($limit_sql);
+    $can_assign = true;
+    if ($limit_res && $row = $limit_res->fetch_assoc()) {
+        $max_guards = (int)$row['guard_limit'];
+        $current_guards = (int)$row['current_guards'];
+        
+        if ($max_guards > 0 && $current_guards >= $max_guards) {
+            $message = "Assignment failed: This client site has reached its limit of $max_guards guards.";
+            $message_type = "error";
+            $show_status_modal = true;
+            $can_assign = false;
+        }
+    }
+
+    if ($can_assign) {
         if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
             $message = "Guard assigned successfully!";
             $message_type = "success";
@@ -175,7 +206,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 
 // Fetch Assigned Clients
 $clients_sql = "
-    SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, a.guard_limit,
+    SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, 
+           ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit,
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
            (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
@@ -306,8 +338,8 @@ if ($guards_res) {
                     <table>
                         <thead>
                             <tr>
-                                <th>Account Name</th>
                                 <th>Company Details</th>
+                                <th>System Limits (QR/G/I/S)</th>
                                 <th>Guards Assigned</th>
                                 <th style="text-align: right;">Actions</th>
                             </tr>
@@ -330,8 +362,15 @@ if ($guards_res) {
                                         </div>
                                     </td>
                                     <td>
+                                        <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 4px;">
+                                            <div>QR: <span style="font-weight:600;"><?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?></span></div>
+                                            <div>Guard: <span style="font-weight:600;"><?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?></span></div>
+                                            <div>Insp: <span style="font-weight:600;"><?php echo $row['inspector_limit']; ?></span> | Supr: <span style="font-weight:600;"><?php echo $row['supervisor_limit']; ?></span></div>
+                                        </div>
+                                    </td>
+                                    <td>
                                         <span style="font-weight: 600; color: <?php echo $row['current_guards'] >= $row['guard_limit'] ? '#ef4444' : '#10b981'; ?>">
-                                            <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
+                                            Active: <?php echo $row['current_guards']; ?>
                                         </span>
                                     </td>
                                      <td style="text-align: right;">
@@ -416,9 +455,15 @@ if ($guards_res) {
                                 <input type="text" name="contact_person_no" class="form-control" placeholder="Personal or Office Phone">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2; margin-top: 16px; border-top: 1px solid #f3f4f6; padding-top: 24px;">
-                                <label class="form-label">Company Logo (Photo)</label>
-                                <input type="file" name="company_logo" class="form-control" accept="image/*">
+                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                                <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT SYSTEM LIMITS</label>
+                            </div>
+
+                            <div class="form-grid" style="grid-column: span 2; display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+                                <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Supervisor Limit</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
                             </div>
                         </div>
 
@@ -547,6 +592,26 @@ if ($guards_res) {
                     </div>
 
                     <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
+                        <label class="form-label" style="font-weight: 700; color: var(--primary);">SYSTEM LIMITS</label>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">QR Limit</label>
+                        <input type="number" name="qr_limit" id="details_qr_limit" class="form-control" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Guard Limit</label>
+                        <input type="number" name="guard_limit" id="details_guard_limit" class="form-control" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Inspector Limit</label>
+                        <input type="number" name="inspector_limit" id="details_inspector_limit" class="form-control" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Supervisor Limit</label>
+                        <input type="number" name="supervisor_limit" id="details_supervisor_limit" class="form-control" min="0">
+                    </div>
+
+                    <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
                         <label class="form-label">Company Logo (Photo)</label>
                         <input type="file" name="company_logo" id="details_company_logo" class="form-control" accept="image/*">
                         <small style="color: #6b7280; font-size: 0.75rem;">Upload a photo of the client logo.</small>
@@ -647,6 +712,10 @@ if ($guards_res) {
             document.getElementById('details_contact_person').value = data.contact_person || '';
             document.getElementById('details_contact_person_position').value = data.contact_person_position || '';
             document.getElementById('details_contact_person_no').value = data.contact_person_no || '';
+            document.getElementById('details_qr_limit').value = data.qr_limit || 0;
+            document.getElementById('details_guard_limit').value = data.guard_limit || 0;
+            document.getElementById('details_inspector_limit').value = data.inspector_limit || 0;
+            document.getElementById('details_supervisor_limit').value = data.supervisor_limit || 0;
             
             document.getElementById('detailsModal').classList.add('show');
         }
