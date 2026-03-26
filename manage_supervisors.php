@@ -26,21 +26,12 @@ $conn->query("
     ) ENGINE=InnoDB
 ");
 
-// Function to generate unique 6-character alphanumeric key (access key)
-function generateUniqueSupervisorKey($conn) {
-    $chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    do {
-        $key = "";
-        for ($i = 0; $i < 6; $i++) {
-            $key .= $chars[rand(0, strlen($chars) - 1)];
-        }
-        $check = $conn->query("SELECT id FROM users WHERE username = '$key'");
-    } while ($check && $check->num_rows > 0);
-    return $key;
-}
+// Removed generateUniqueSupervisorKey function as it is no longer used.
 
 // Handle Creating Supervisor
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) {
+    $username = $conn->real_escape_string($_POST['username']);
+    $password = $_POST['password'];
     $first_name = $conn->real_escape_string($_POST['first_name']);
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
@@ -48,9 +39,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
     
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
-    // Generate Unique Access Key
-    $unique_key = generateUniqueSupervisorKey($conn);
-    $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
+    // Check if username already exists
+    $user_check = $conn->query("SELECT id FROM users WHERE username = '$username'");
+    if ($user_check && $user_check->num_rows > 0) {
+        $message = "Creation failed: Username already exists.";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else {
+        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
     
         // Check Agency Supervisor Limit
         $limit_check = $conn->query("SELECT supervisor_limit FROM users WHERE id = $agency_id");
@@ -72,16 +68,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
             $conn->begin_transaction();
             try {
                 // 1. Create User
-                $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'supervisor')");
+                $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$username', '$hashed_password', 'supervisor')");
                 $user_id = $conn->insert_id;
                 
-                // 2. Create Supervisor entry
                 $conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')");
+                $new_supervisor_id = $conn->insert_id;
+
+                // 3. Assign to Clients
+                $assigned_clients = $_POST['assigned_clients'] ?? [];
+                if (!empty($assigned_clients)) {
+                    foreach ($assigned_clients as $client_id) {
+                        $client_id = (int)$client_id;
+                        $conn->query("UPDATE agency_clients SET supervisor_id = $new_supervisor_id WHERE agency_id = $agency_id AND client_id = $client_id");
+                    }
+                }
                 
                 $conn->commit();
-                $_SESSION['supervisor_created_key'] = $unique_key;
-                header("Location: manage_supervisors.php?success=1");
-                exit();
+                $message = "Supervisor account created successfully!";
+                $message_type = "success";
+                $show_status_modal = true;
             } catch (Exception $e) {
                 $conn->rollback();
                 $message = "Error creating supervisor: " . $e->getMessage();
@@ -89,22 +94,39 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
                 $show_status_modal = true;
             }
         }
+    }
 }
 
 // Handle Editing Supervisor
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_supervisor'])) {
     $sup_id = (int)$_POST['supervisor_id'];
+    $username = $conn->real_escape_string($_POST['username']);
+    $password = $_POST['password'];
     $name = $conn->real_escape_string($_POST['name']);
     $contact = $conn->real_escape_string($_POST['contact_no']);
     
-    if ($conn->query("UPDATE supervisors SET name = '$name', contact_no = '$contact' WHERE id = $sup_id AND agency_id = $agency_id")) {
-        $message = "Supervisor updated successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
-    } else {
-        $message = "Error updating supervisor: " . $conn->error;
-        $message_type = "error";
-        $show_status_modal = true;
+    $fetch_user = $conn->query("SELECT user_id FROM supervisors WHERE id = $sup_id");
+    if ($fetch_user && $fetch_user->num_rows > 0) {
+        $user_id = $fetch_user->fetch_assoc()['user_id'];
+        
+        // Update user account
+        $pw_sql = "";
+        if (!empty($password)) {
+            $hashed = password_hash($password, PASSWORD_DEFAULT);
+            $pw_sql = ", password = '$hashed'";
+        }
+        
+        $conn->query("UPDATE users SET username = '$username' $pw_sql WHERE id = $user_id");
+        
+        if ($conn->query("UPDATE supervisors SET name = '$name', contact_no = '$contact' WHERE id = $sup_id AND agency_id = $agency_id")) {
+            $message = "Supervisor updated successfully!";
+            $message_type = "success";
+            $show_status_modal = true;
+        } else {
+            $message = "Error updating supervisor: " . $conn->error;
+            $message_type = "error";
+            $show_status_modal = true;
+        }
     }
 }
 
@@ -116,6 +138,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor'])) 
         $user_id = $res->fetch_assoc()['user_id'];
         $conn->begin_transaction();
         try {
+            // Clear site assignments first
+            $conn->query("UPDATE agency_clients SET supervisor_id = NULL WHERE supervisor_id = $sup_id AND agency_id = $agency_id");
+            
             $conn->query("DELETE FROM supervisors WHERE id = $sup_id");
             $conn->query("DELETE FROM users WHERE id = $user_id");
             $conn->commit();
@@ -137,6 +162,8 @@ $supervisors_res = $conn->query("
     WHERE s.agency_id = $agency_id 
     ORDER BY s.created_at DESC
 ");
+
+
 
 $generated_key = '';
 if (isset($_SESSION['supervisor_created_key'])) {
@@ -234,6 +261,14 @@ if (isset($_SESSION['supervisor_created_key'])) {
                     <h3 class="card-header">Add New Supervisor</h3>
                     <form action="manage_supervisors.php" method="POST">
                         <div class="form-group">
+                            <label class="form-label">Username</label>
+                            <input type="text" name="username" class="form-control" required placeholder="Account username">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" name="password" class="form-control" required placeholder="••••••••">
+                        </div>
+                        <div class="form-group">
                             <label class="form-label">First Name</label>
                             <input type="text" name="first_name" class="form-control" required>
                         </div>
@@ -249,9 +284,6 @@ if (isset($_SESSION['supervisor_created_key'])) {
                             <label class="form-label">Contact Number</label>
                             <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
                         </div>
-                        <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 20px;">
-                            The supervisor will use their 6-character access key to log in.
-                        </p>
                         <button type="submit" name="create_supervisor" class="btn">Create Account</button>
                     </form>
                 </div>
@@ -263,7 +295,7 @@ if (isset($_SESSION['supervisor_created_key'])) {
                             <thead>
                                 <tr>
                                     <th>Name</th>
-                                    <th>Access Key</th>
+                                    <th>Username</th>
                                     <th>Contact</th>
                                     <th>Actions</th>
                                 </tr>
@@ -277,7 +309,7 @@ if (isset($_SESSION['supervisor_created_key'])) {
                                             <td><?php echo htmlspecialchars($row['contact_no'] ?: '---'); ?></td>
                                             <td>
                                                 <div style="display: flex; gap: 8px;">
-                                                    <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['contact_no']); ?>')" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Edit</button>
+                                                    <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['contact_no']); ?>', '<?php echo addslashes($row['username']); ?>')" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Edit</button>
                                                     <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Delete</button>
                                                 </div>
                                             </td>
@@ -294,18 +326,6 @@ if (isset($_SESSION['supervisor_created_key'])) {
         </div>
     </main>
 
-    <!-- Key Success Modal -->
-    <div id="keyModal" class="modal <?php echo $generated_key ? 'show' : ''; ?>">
-        <div class="modal-content">
-            <div style="width: 60px; height: 60px; background: #d1fae5; color: #10b981; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">✓</div>
-            <h3>Account Created!</h3>
-            <p style="color: #6b7280; margin: 12px 0 24px;">Provide this access key to the supervisor:</p>
-            <div style="background: #f9fafb; padding: 20px; border-radius: 12px; border: 2px dashed #d1d5db; font-size: 2.5rem; font-weight: 800; font-family: monospace; letter-spacing: 2px;">
-                <?php echo $generated_key; ?>
-            </div>
-            <button class="btn" style="margin-top: 24px;" onclick="closeModal('keyModal')">Done</button>
-        </div>
-    </div>
 
     <!-- Status Process Modal -->
     <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
@@ -338,6 +358,14 @@ if (isset($_SESSION['supervisor_created_key'])) {
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Full Name</label>
                     <input type="text" name="name" id="edit_name" class="form-control" required>
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Username</label>
+                    <input type="text" name="username" id="edit_username" class="form-control" required>
+                </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">New Password (Leave blank to keep current)</label>
+                    <input type="password" name="password" class="form-control" placeholder="••••••••">
                 </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Contact Number</label>
@@ -379,10 +407,11 @@ if (isset($_SESSION['supervisor_created_key'])) {
     </div>
 
     <script>
-        function openEditModal(id, name, contact) {
+        function openEditModal(id, name, contact, username) {
             document.getElementById('edit_id').value = id;
             document.getElementById('edit_name').value = name;
             document.getElementById('edit_contact').value = contact;
+            document.getElementById('edit_username').value = username;
             document.getElementById('editModal').classList.add('show');
         }
 

@@ -1,8 +1,7 @@
 <?php
-require_once 'db_config.php';
+include 'db_config.php';
 $res = $conn->query("DESCRIBE agency_clients");
-while($row = $res->fetch_assoc()) {
-    echo $row['Field'] . " - " . $row['Type'] . "\n";
+while ($row = $res->fetch_assoc()) {
+    echo $row['Field'] . ' ' . $row['Type'] . PHP_EOL;
 }
-unlink(__FILE__);
 ?>
