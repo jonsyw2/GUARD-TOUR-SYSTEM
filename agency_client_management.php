@@ -11,6 +11,7 @@ $message = '';
 $message_type = '';
 $show_status_modal = false;
 
+
 // Handle Company Details Update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $mapping_id = (int)$_POST['mapping_id'];
@@ -203,6 +204,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         }
     }
 }
+}
+
+// Fetch Client Limit and Current Count for Headers (after potential POST updates)
+$limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
+$client_limit = 0;
+if ($limit_res && $row = $limit_res->fetch_assoc()) {
+    $client_limit = (int)$row['client_limit'];
+}
+
+$count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+$current_clients = (int)$count_res->fetch_assoc()['current_clients'];
+
+$display_title = "Assigned Clients";
+$clients = [];
 
 // Fetch Assigned Clients
 $clients_sql = "
@@ -225,6 +240,11 @@ $clients_sql = "
     ORDER BY u.username ASC
 ";
 $clients_res = $conn->query($clients_sql);
+if ($clients_res) {
+    while($row = $clients_res->fetch_assoc()) {
+        $clients[] = $row;
+    }
+}
 
 // Fetch All Guards for this agency for the modals
 $guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY name ASC";
@@ -261,11 +281,6 @@ if ($guards_res) {
 
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
-        .tabs-header { display: flex; gap: 2px; margin-bottom: 24px; background: #e5e7eb; padding: 4px; border-radius: 12px; width: fit-content; }
-        .tab-btn { padding: 10px 24px; border: none; background: transparent; color: #6b7280; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all 0.2s; font-size: 0.95rem; }
-        .tab-btn.active { background: white; color: #10b981; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-        .tab-content { display: none; margin-top: 20px; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: 500; }
@@ -273,7 +288,7 @@ if ($guards_res) {
         .alert-error { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
 
         .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
+        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
@@ -287,7 +302,7 @@ if ($guards_res) {
         .btn-outline:hover { background: #f9fafb; }
 
         .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); max-height: 90vh; overflow-y: auto; }
         .modal.show { display: flex; }
         
         .form-group { margin-bottom: 16px; }
@@ -324,20 +339,19 @@ if ($guards_res) {
 
         <div class="content-area">
 
-            <div class="tabs-header">
-                <button class="tab-btn active" onclick="switchTab('tab-clients-list', this)">Assigned Clients</button>
-                <button class="tab-btn" onclick="switchTab('tab-add-client', this)">Add New Client</button>
-            </div>
-
-            <!-- Tab: Clients List -->
-            <div id="tab-clients-list" class="tab-content active">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 style="margin: 0; border: none;">Assigned Clients</h3>
-                    </div>
+            <!-- Registered Clients Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="margin: 0; border: none;"><?php echo $display_title; ?></h3>
+                    <?php if ($current_clients < $client_limit): ?>
+                        <button class="btn-sm btn-primary" onclick="openAddClientModal()">+ Add New Client</button>
+                    <?php endif; ?>
+                </div>
                     <table>
                         <thead>
                             <tr>
+                                <th>#</th>
+                                <th>Client Account</th>
                                 <th>Company Details</th>
                                 <th>System Limits (QR/G/I/S)</th>
                                 <th>Guards Assigned</th>
@@ -345,9 +359,13 @@ if ($guards_res) {
                             </tr>
                         </thead>
                     <tbody>
-                         <?php if ($clients_res && $clients_res->num_rows > 0): ?>
-                            <?php while($row = $clients_res->fetch_assoc()): ?>
+                         <?php 
+                            for ($i = 1; $i <= $client_limit; $i++): 
+                                $row = isset($clients[$i-1]) ? $clients[$i-1] : null;
+                                if ($row):
+                         ?>
                                 <tr onclick="openSummaryModal('<?php echo addslashes($row['company_name'] ?: $row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>', '<?php echo addslashes($row['contact_person'] ?? ''); ?>', '<?php echo addslashes($row['contact_person_no'] ?? ''); ?>', '<?php echo addslashes($row['email_address'] ?? ''); ?>', '<?php echo addslashes($row['company_address'] ?? ''); ?>')">
+                                    <td><?php echo $i; ?></td>
                                     <td><strong><?php echo htmlspecialchars($row['client_username']); ?></strong></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -380,21 +398,29 @@ if ($guards_res) {
                                         </div>
                                     </td>
                                 </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr><td colspan="4" style="text-align:center; padding: 40px; color:#6b7280;">No clients assigned by admin yet.</td></tr>
-                        <?php endif; ?>
+                            <?php else: ?>
+                                <tr style="cursor: default; background: transparent;">
+                                    <td><?php echo $i; ?></td>
+                                    <td colspan="4" style="color: #94a3b8; font-style: italic;">Available Client slot</td>
+                                    <td style="text-align: right;">
+                                        <button class="btn-sm btn-link" style="color: #10b981; font-weight: 600; background: none; border: none; cursor: pointer; text-decoration: underline;" onclick="openAddClientModal()">Add Client</button>
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        <?php endfor; ?>
                     </tbody>
                 </table>
                 </div>
             </div>
+        </main>
 
-            <!-- Tab: Add New Client -->
-            <div id="tab-add-client" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 style="margin: 0; border: none;">Create New Client Account</h3>
-                    </div>
+    <!-- Modal: Add New Client -->
+    <div id="addClientModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; text-align: left;">
+            <div class="card-header" style="padding-top: 0;">
+                <h3 style="margin: 0; border: none;">Create New Client Account</h3>
+                <button type="button" class="btn-sm btn-outline" onclick="closeModal('addClientModal')" style="border:none; font-size: 1.5rem; line-height: 1;">&times;</button>
+            </div>
                     <form action="agency_client_management.php" method="POST" enctype="multipart/form-data" autocomplete="off">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
                             <div class="form-group" style="grid-column: span 2;">
@@ -467,12 +493,13 @@ if ($guards_res) {
                             </div>
                         </div>
 
-                        <div style="margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 24px;">
-                            <button type="submit" name="add_client" class="btn-sm btn-primary" style="padding: 14px 40px; font-size: 1rem; border-radius: 8px;">Create & Register Client</button>
+                        <div style="margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 24px; display: flex; gap: 12px; justify-content: flex-end;">
+                            <button type="button" class="btn-sm btn-outline" onclick="closeModal('addClientModal')" style="padding: 12px 24px;">Cancel</button>
+                            <button type="submit" name="add_client" class="btn-sm btn-primary" style="padding: 12px 40px; font-size: 1rem; border-radius: 8px;">Create & Register Client</button>
                         </div>
                     </form>
-                </div>
-            </div>
+        </div>
+    </div>
         </div>
     </main>
 
@@ -674,12 +701,6 @@ if ($guards_res) {
     </div>
 
     <script>
-        function switchTab(tabId, btn) {
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            btn.classList.add('active');
-        }
 
         function openSummaryModal(clientName, qrCount, guardNames, contactPerson, contactNo, email, address) {
             document.getElementById('summary_title').innerText = "Site Summary: " + clientName;
@@ -718,6 +739,10 @@ if ($guards_res) {
             document.getElementById('details_supervisor_limit').value = data.supervisor_limit || 0;
             
             document.getElementById('detailsModal').classList.add('show');
+        }
+
+        function openAddClientModal() {
+            document.getElementById('addClientModal').classList.add('show');
         }
 
         function openGuardModal(id, clientUname) {
