@@ -6,19 +6,15 @@ if ($_SESSION['user_level'] !== 'admin') {
     exit();
 }
 
-// Ensure limits columns exist in Users Table (Keep client_limit for Agency)
+// Ensure limits columns exist in users table
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guard_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS inspector_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS supervisor_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS client_limit INT DEFAULT 0");
 
-<<<<<<< HEAD
-// Migration: Add limit columns to agency_clients if they don't exist
-$conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS qr_limit INT DEFAULT 0");
-$conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS guard_limit INT DEFAULT 0");
-$conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS inspector_limit INT DEFAULT 0");
-$conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS supervisor_limit INT DEFAULT 0");
-=======
 // Auto-Migration: Add supervisor_id to agency_clients if missing
 $conn->query("ALTER TABLE agency_clients ADD COLUMN IF NOT EXISTS supervisor_id INT DEFAULT NULL");
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
 
 // Auto-Migration: Create supervisors table
 $conn->query("
@@ -45,9 +41,13 @@ $show_status_modal = false;
 // Handle updating agency limits
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_limits'])) {
     $agency_id = (int)$_POST['agency_id'];
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
     $client_limit = (int)$_POST['client_limit'];
 
-    if ($conn->query("UPDATE users SET client_limit = $client_limit WHERE id = $agency_id")) {
+    if ($conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_limit = $inspector_limit, supervisor_limit = $supervisor_limit, client_limit = $client_limit WHERE id = $agency_id")) {
         $message = "Agency limits updated successfully!";
         $message_type = "success";
         $show_status_modal = true;
@@ -91,6 +91,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['unassign_client_action
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $agency_name = $conn->real_escape_string($_POST['agency_name']);
     $password = password_hash($_POST['agency_password'], PASSWORD_DEFAULT);
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
     $client_limit = (int)$_POST['client_limit'];
     
     // Check if username exists
@@ -102,8 +106,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, password, user_level, client_limit) 
-                VALUES ('$agency_name', '$password', 'agency', $client_limit)";
+        $sql = "INSERT INTO users (username, password, user_level, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit) 
+                VALUES ('$agency_name', '$password', 'agency', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit, $client_limit)";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
@@ -161,71 +165,46 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_agency_action']
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_client'])) {
     $agency_id = (int)$_POST['agency_id'];
     $client_id = (int)$_POST['client_id'];
-    $qr_limit = (int)($_POST['qr_limit'] ?? 0);
-    $guard_limit = (int)($_POST['guard_limit'] ?? 0);
-    $inspector_limit = (int)($_POST['inspector_limit'] ?? 0);
-    $supervisor_limit = (int)($_POST['supervisor_limit'] ?? 0);
 
-    // Check if assignment already exists
-    $check_assignment = "SELECT id FROM agency_clients WHERE agency_id = $agency_id AND client_id = $client_id";
-    $assignment_result = $conn->query($check_assignment);
-    
-    if ($assignment_result->num_rows > 0) {
-        $message = "This client is already assigned to this agency!";
-        $message_type = "error";
-        $show_status_modal = true;
-    } else {
-        // Check Client Limit
-        $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
-        $client_limit = 0;
-        if ($limit_res && $limit_res->num_rows > 0) {
-            $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
-        }
-
-        $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
-        $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
-
-        if ($client_limit > 0 && $current_clients >= $client_limit) {
-            $message = "This agency has reached its maximum client limit ($client_limit).";
+    if ($agency_id && $client_id) {
+        // Check if assignment already exists
+        $check_assignment = "SELECT id FROM agency_clients WHERE agency_id = $agency_id AND client_id = $client_id";
+        $assignment_result = $conn->query($check_assignment);
+        
+        if ($assignment_result->num_rows > 0) {
+            $message = "This client is already assigned to this agency!";
             $message_type = "error";
             $show_status_modal = true;
         } else {
-            $sql = "INSERT INTO agency_clients (agency_id, client_id, qr_limit, guard_limit, inspector_limit, supervisor_limit) 
-                    VALUES ($agency_id, $client_id, $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit)";
-            if ($conn->query($sql) === TRUE) {
-                $message = "Client assigned to agency successfully!";
-                $message_type = "success";
-                $show_status_modal = true;
-            } else {
-                $message = "Error assigning client: " . $conn->error;
+            // Check Client Limit
+            $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
+            $client_limit = 0;
+            if ($limit_res && $limit_res->num_rows > 0) {
+                $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
+            }
+
+            $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+            $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
+
+            if ($client_limit > 0 && $current_clients >= $client_limit) {
+                $message = "This agency has reached its maximum client limit ($client_limit).";
                 $message_type = "error";
                 $show_status_modal = true;
+            } else {
+                $sql = "INSERT INTO agency_clients (agency_id, client_id) VALUES ($agency_id, $client_id)";
+                if ($conn->query($sql) === TRUE) {
+                    $message = "Client assigned to agency successfully!";
+                    $message_type = "success";
+                    $show_status_modal = true;
+                } else {
+                    $message = "Error assigning client: " . $conn->error;
+                    $message_type = "error";
+                    $show_status_modal = true;
+                }
             }
         }
-    }
-}
-
-// Handle updating assignment limits
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_assignment_limits'])) {
-    $mapping_id = (int)$_POST['mapping_id'];
-    $qr_limit = (int)$_POST['qr_limit'];
-    $guard_limit = (int)$_POST['guard_limit'];
-    $inspector_limit = (int)$_POST['inspector_limit'];
-    $supervisor_limit = (int)$_POST['supervisor_limit'];
-
-    $sql = "UPDATE agency_clients SET 
-            qr_limit = $qr_limit, 
-            guard_limit = $guard_limit, 
-            inspector_limit = $inspector_limit, 
-            supervisor_limit = $supervisor_limit 
-            WHERE id = $mapping_id";
-
-    if ($conn->query($sql) === TRUE) {
-        $message = "Assignment limits updated successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
     } else {
-        $message = "Error updating assignment: " . $conn->error;
+        $message = "Please select both an agency and a client.";
         $message_type = "error";
         $show_status_modal = true;
     }
@@ -235,8 +214,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_assignment_limi
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $client_username = $conn->real_escape_string($_POST['client_username']);
     $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
-    
-    // Check if username exists
+
+    // Check if client username exists
     $checkSql = "SELECT id FROM users WHERE username = '$client_username'";
     $result = $conn->query($checkSql);
 
@@ -245,31 +224,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $qr_limit = (int)($_POST['qr_limit'] ?? 0);
-        $guard_limit = (int)($_POST['guard_limit'] ?? 0);
-        $inspector_limit = (int)($_POST['inspector_limit'] ?? 0);
-        $supervisor_limit = (int)($_POST['supervisor_limit'] ?? 0);
-        
-        $conn->begin_transaction();
-        try {
-            if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
-                throw new Exception("Error creating client: " . $conn->error);
-            }
-            $new_client_id = $conn->insert_id;
-            
-            // If an agency was pre-selected or the user intends to assign immediately, we could do it here.
-            // But the UI seems to separate "Add Client" and "Assign". 
-            // However, we want these limits to be set.
-            // Let's add them to the users table for the client as well for redundancy or if the system uses it.
-            $conn->query("UPDATE users SET qr_limit = $qr_limit, guard_limit = $guard_limit, inspector_limit = $inspector_limit, supervisor_limit = $supervisor_limit WHERE id = $new_client_id");
-
-            $conn->commit();
+        if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
             $message = "Client created successfully!";
             $message_type = "success";
             $show_status_modal = true;
-        } catch (Exception $e) {
-            $conn->rollback();
-            $message = $e->getMessage();
+        } else {
+            $message = "Error creating client: " . $conn->error;
             $message_type = "error";
             $show_status_modal = true;
         }
@@ -449,25 +409,15 @@ $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_lev
 $clients_result = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
 
 // Fetch agency-client mappings
-<<<<<<< HEAD
-$agency_clients_sql = "
-    SELECT ac.id, a.username AS agency_name, c.username AS client_name, ac.created_at,
-           ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit
-=======
 $mapping_sql = "
     SELECT ac.id AS ac_id, ac.agency_id, ac.client_id, a.username AS agency_name, c.username AS client_name, ac.created_at, 
            a.qr_limit, a.guard_limit, a.inspector_limit, a.supervisor_limit, a.client_limit
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id
-    ORDER BY ac.created_at DESC
+    ORDER BY a.username ASC, c.username ASC
 ";
-<<<<<<< HEAD
-$agency_clients_result = $conn->query($agency_clients_sql);
-=======
 $mappings_result_original = $conn->query($mapping_sql);
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
 
 // Fetch all supervisors for User Accounts tab
 $supervisors_sql = "
@@ -569,7 +519,7 @@ include 'admin_layout/sidebar.php';
                 <div class="card" style="max-width: 600px;">
                     <div class="card-header"><h3>Add New Agency</h3></div>
                     <div class="card-body">
-                        <form action="agency_maintenance.php?tab=agencies" method="POST" autocomplete="off">
+                        <form action="agency_maintenance.php" method="POST" autocomplete="off">
                             <div class="form-group">
                                 <label class="form-label">Agency Name</label>
                                 <input type="text" name="agency_name" class="form-control" required placeholder="Ex: Shield Security" autocomplete="off">
@@ -578,8 +528,12 @@ include 'admin_layout/sidebar.php';
                                 <label class="form-label">Security Password</label>
                                 <input type="password" name="agency_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                             </div>
-                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px;">
-                                <div class="form-group"><label class="form-label">Client Account Limit</label><input type="number" name="client_limit" class="form-control" value="0" min="0"></div>
+                            <div class="form-grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px;">
+                                <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Inspector</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Supervisor</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Client Limit</label><input type="number" name="client_limit" class="form-control" value="0" min="0"></div>
                             </div>
                             <button type="submit" name="add_agency" class="btn btn-primary">Create Agency Profile</button>
                         </form>
@@ -608,7 +562,11 @@ include 'admin_layout/sidebar.php';
                                         <td>
                                             <strong><?php echo htmlspecialchars($row['username']); ?></strong>
                                             <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
-                                                Client Limit: <?php echo $row['client_limit']; ?>
+                                                QR: <?php echo $row['qr_limit']; ?> | 
+                                                Guards: <?php echo $row['guard_limit']; ?> | 
+                                                Insp: <?php echo $row['inspector_limit']; ?> | 
+                                                Supr: <?php echo $row['supervisor_limit']; ?> |
+                                                Clnt: <?php echo $row['client_limit']; ?>
                                             </div>
                                         </td>
                                         <td><span style="color: var(--success); font-weight: 600;">● Active</span></td>
@@ -637,11 +595,7 @@ include 'admin_layout/sidebar.php';
 
                         <!-- Form: Assign Existing -->
                         <div id="form-assign-existing">
-<<<<<<< HEAD
-                            <form action="agency_maintenance.php?tab=assignments" method="POST">
-=======
                             <form action="" method="POST">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                 <div class="form-grid">
                                     <div class="form-group">
                                         <label class="form-label">Target Agency</label>
@@ -664,23 +618,13 @@ include 'admin_layout/sidebar.php';
                                         </select>
                                     </div>
                                 </div>
-                                <div class="form-grid" style="grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 15px;">
-                                    <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
-                                    <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
-                                    <div class="form-group"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
-                                    <div class="form-group"><label class="form-label">Supervisor Limit</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
-                                </div>
                                 <button type="submit" name="assign_client" class="btn btn-primary" style="margin-top: 20px;">Finalize Assignment</button>
                             </form>
                         </div>
 
                         <!-- Form: Add New Client -->
                         <div id="form-assign-new" style="display: none;">
-<<<<<<< HEAD
-                            <form action="agency_maintenance.php?tab=assignments" method="POST" autocomplete="off">
-=======
                             <form action="" method="POST" autocomplete="off">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                 <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 15px;">
                                     <div class="form-group">
                                         <label class="form-label">Client Username</label>
@@ -690,14 +634,6 @@ include 'admin_layout/sidebar.php';
                                         <label class="form-label">Password</label>
                                         <input type="password" name="client_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                                     </div>
-                                    <div class="form-group" style="grid-column: span 2;">
-                                        <hr style="margin: 10px 0; border: none; border-top: 1px solid #e2e8f0;">
-                                        <label class="form-label" style="color: var(--primary); font-weight: 700;">DEFAULT CLIENT LIMITS</label>
-                                    </div>
-                                    <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
-                                    <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
-                                    <div class="form-group"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
-                                    <div class="form-group"><label class="form-label">Supervisor Limit</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
                                 </div>
                                 <button type="submit" name="add_client" class="btn btn-primary" style="margin-top: 20px;">Create Client Account</button>
                             </form>
@@ -713,38 +649,23 @@ include 'admin_layout/sidebar.php';
                                 <tr>
                                     <th>Agency</th>
                                     <th>Assigned Client</th>
-                                    <th>Limits (QR/G/I/S)</th>
-                                    <th>Date Assigned</th>
-                                    <th>Actions</th>
+                                    <th>Setup Date</th>
+                                    <th>Control</th>
                                 </tr>
                             </thead>
                             <tbody>
-<<<<<<< HEAD
-                                <?php if ($agency_clients_result && $agency_clients_result->num_rows > 0): 
-                                    while($row = $agency_clients_result->fetch_assoc()): ?>
-                                    <tr onclick='openAssignmentEditModal(<?php echo json_encode($row); ?>)' style="cursor: pointer;">
-=======
                                 <?php if ($mappings_result_original && $mappings_result_original->num_rows > 0): 
                                     while($row = $mappings_result_original->fetch_assoc()): ?>
                                     <tr onclick="openUnassignModal(<?php echo $row['ac_id']; ?>, <?php echo $row['agency_id']; ?>, <?php echo $row['client_id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                         <td><strong><?php echo htmlspecialchars($row['agency_name']); ?></strong></td>
-                                        <td><strong><?php echo htmlspecialchars($row['client_name']); ?></strong></td>
                                         <td>
-                                            <code><?php echo $row['qr_limit']; ?>/<?php echo $row['guard_limit']; ?>/<?php echo $row['inspector_limit']; ?>/<?php echo $row['supervisor_limit']; ?></code>
+                                            <div style="font-weight: 700; color: var(--text-main);"><?php echo htmlspecialchars($row['client_name']); ?></div>
                                         </td>
-                                        <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
-                                        <td>
-                                            <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="event.stopPropagation(); openUnassignModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">Unassign</button>
-                                        </td>
-<<<<<<< HEAD
-=======
                                         <td><span style="font-size: 0.85rem; color: var(--text-muted);"><?php echo date('M d, Y', strtotime($row['created_at'])); ?></span></td>
                                         <td><button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="event.stopPropagation(); openUnassignModal(<?php echo $row['ac_id']; ?>, <?php echo $row['agency_id']; ?>, <?php echo $row['client_id']; ?>, '<?php echo addslashes($row['agency_name']); ?>', '<?php echo addslashes($row['client_name']); ?>')">Unassign</button></td>
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                                     </tr>
                                 <?php endwhile; else: ?>
-                                    <tr><td colspan="5" class="empty-state">No business mappings found.</td></tr>
+                                    <tr><td colspan="4" class="empty-state">No business mappings found.</td></tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
@@ -757,11 +678,7 @@ include 'admin_layout/sidebar.php';
                 <div class="card" style="max-width: 600px;">
                     <div class="card-header"><h3>Add New User (Supervisor)</h3></div>
                     <div class="card-body">
-<<<<<<< HEAD
-                        <form action="agency_maintenance.php?tab=user-accounts" method="POST">
-=======
                         <form action="" method="POST">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                             <div class="form-group">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                     <label class="form-label" style="margin-bottom: 0;">Full Name (Registered Personnel)</label>
@@ -825,7 +742,7 @@ include 'admin_layout/sidebar.php';
                             <tbody>
                                 <?php if ($supervisors_result && $supervisors_result->num_rows > 0): 
                                     while($sup = $supervisors_result->fetch_assoc()): ?>
-                                    <tr onclick='openSupervisorEditModal(<?php echo json_encode($sup); ?>)' style="cursor: pointer;">
+                                    <tr>
                                         <td><strong><?php echo htmlspecialchars($sup['name']); ?></strong></td>
                                         <td><code><?php echo htmlspecialchars($sup['username']); ?></code></td>
                                         <td><span class="badge-agency"><?php echo htmlspecialchars($sup['agency_name']); ?></span></td>
@@ -838,8 +755,9 @@ include 'admin_layout/sidebar.php';
                                                 <span class="badge-none">None</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td>
-                                            <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="event.stopPropagation(); openSupervisorDeleteModal(<?php echo $sup['id']; ?>, '<?php echo addslashes($sup['name']); ?>')">Delete</button>
+                                        <td style="display: flex; gap: 8px;">
+                                            <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;" onclick='openSupervisorEditModal(<?php echo json_encode($sup); ?>)'>Edit</button>
+                                            <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="openSupervisorDeleteModal(<?php echo $sup['id']; ?>, '<?php echo addslashes($sup['name']); ?>')">Delete</button>
                                         </td>
                                     </tr>
                                 <?php endwhile; else: ?>
@@ -867,173 +785,6 @@ include 'admin_layout/sidebar.php';
         </div>
     </div>
 
-<<<<<<< HEAD
-        function toggleAssignForm(type, btn) {
-            document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            
-            if(type === 'existing') {
-                document.getElementById('form-assign-existing').style.display = 'block';
-                document.getElementById('form-assign-new').style.display = 'none';
-            } else {
-                document.getElementById('form-assign-existing').style.display = 'none';
-                document.getElementById('form-assign-new').style.display = 'block';
-            }
-        }
-
-        function closeModal(modalId) {
-            document.getElementById(modalId).classList.remove('show');
-        }
-
-        // Handle tab selection via URL parameter
-        window.addEventListener('DOMContentLoaded', () => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const tab = urlParams.get('tab');
-            if (tab === 'assignments') {
-                const btn = document.querySelector('.tab-btn:nth-child(2)');
-                switchTab('tab-assignments', btn);
-            }
-        });
-
-        function openAgencyEditModal(id, name, client) {
-            document.getElementById('edit_agency_id').value = id;
-            document.getElementById('edit_agency_name').value = name;
-            document.getElementById('edit_client_limit').value = client;
-            document.getElementById('editAgencyModal').classList.add('show');
-        }
-
-        function openAssignmentEditModal(row) {
-            document.getElementById('edit_mapping_id').value = row.id;
-            document.getElementById('edit_assign_agency').value = row.agency_name;
-            document.getElementById('edit_assign_client').value = row.client_name;
-            document.getElementById('edit_assign_qr').value = row.qr_limit;
-            document.getElementById('edit_assign_guard').value = row.guard_limit;
-            document.getElementById('edit_assign_inspector').value = row.inspector_limit;
-            document.getElementById('edit_assign_supervisor').value = row.supervisor_limit;
-            document.getElementById('editAssignmentModal').classList.add('show');
-        }
-
-        const agencyClientsMap = <?php echo $agency_clients_json; ?>;
-        const personnelMap = <?php echo $personnel_json; ?>;
-
-        function handleAgencyChange(agencyId, containerId) {
-            filterClientsByAgency(agencyId, containerId);
-            filterPersonnelByAgency(agencyId);
-        }
-
-        function filterPersonnelByAgency(agencyId) {
-            const datalist = document.getElementById('personnel_list');
-            datalist.innerHTML = '';
-            
-            let names = [];
-            if (agencyId === 'all') {
-                // Collect all names from all agencies
-                Object.values(personnelMap).forEach(list => {
-                    names = names.concat(list);
-                });
-            } else if (personnelMap[agencyId]) {
-                names = personnelMap[agencyId];
-            }
-
-            // Deduplicate and sort
-            const uniqueNames = [...new Set(names)].sort();
-            
-            uniqueNames.forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                datalist.appendChild(option);
-            });
-        }
-
-        // Initialize lists on page load
-        window.addEventListener('DOMContentLoaded', () => {
-            const agencyId = document.getElementById('account_agency_id').value;
-            if (agencyId) {
-                filterPersonnelByAgency(agencyId);
-                filterClientsByAgency(agencyId, 'account_clients_container');
-            }
-        });
-
-        function toggleSelectAllClients(containerId, isChecked) {
-            const container = document.getElementById(containerId);
-            const checkboxes = container.querySelectorAll('input[type="checkbox"]');
-            checkboxes.forEach(cb => cb.checked = isChecked);
-        }
-
-        function filterClientsByAgency(agencyId, containerId, selectedIds = []) {
-            const container = document.getElementById(containerId);
-            container.innerHTML = '';
-            
-            document.getElementById('select_all_clients').checked = false;
-
-            let clients = [];
-            if (agencyId === 'all') {
-                Object.values(agencyClientsMap).forEach(list => {
-                    clients = clients.concat(list);
-                });
-            } else if (agencyClientsMap[agencyId]) {
-                clients = agencyClientsMap[agencyId];
-            }
-
-            if (clients.length === 0) {
-                container.innerHTML = '<span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">No clients found for this selection...</span>';
-                return;
-            }
-
-            // Deduplicate clients by ID (important for 'all' selection)
-            const seenIds = new Set();
-            const uniqueClients = clients.filter(c => {
-                if (seenIds.has(c.id)) return false;
-                seenIds.add(c.id);
-                return true;
-            });
-
-            uniqueClients.forEach(client => {
-                const isChecked = selectedIds.includes(client.id.toString()) || selectedIds.includes(parseInt(client.id));
-                const div = document.createElement('div');
-                div.style.display = 'flex';
-                div.style.alignItems = 'center';
-                div.style.gap = '8px';
-                div.innerHTML = `
-                    <input type="checkbox" name="assigned_clients[]" value="${client.id}" id="client_${containerId}_${client.id}" ${isChecked ? 'checked' : ''}>
-                    <label for="client_${containerId}_${client.id}" style="font-size: 0.85rem; cursor: pointer;">${client.name}</label>
-                `;
-                container.appendChild(div);
-            });
-        }
-
-        function openSupervisorEditModal(sup) {
-            document.getElementById('edit_supervisor_id').value = sup.id;
-            document.getElementById('edit_sup_fullname').value = sup.name;
-            document.getElementById('edit_sup_username').value = sup.username;
-            document.getElementById('edit_sup_contact').value = sup.contact_no;
-            
-            const agencyId = sup.agency_id == 0 ? 'all' : sup.agency_id;
-            document.getElementById('edit_sup_agency_id').value = agencyId;
-            
-            // Ensure personnel list is updated for the edit modal as well
-            filterPersonnelByAgency(agencyId);
-            
-            const selectedIds = sup.assigned_client_ids ? sup.assigned_client_ids.split(',') : [];
-            filterClientsByAgency(agencyId, 'edit_sup_clients_container', selectedIds);
-            
-            document.getElementById('editSupervisorModal').classList.add('show');
-        }
-
-        function openSupervisorDeleteModal(id, name) {
-            document.getElementById('delete_supervisor_id').value = id;
-            document.getElementById('delete_supervisor_name').textContent = name;
-            document.getElementById('deleteSupervisorModal').classList.add('show');
-        }
-
-        function openUnassignModal(id, agency, client) {
-            document.getElementById('unassign_mapping_id').value = id;
-            document.getElementById('unassign_agency_name').textContent = agency;
-            document.getElementById('unassign_client_name').textContent = client;
-            document.getElementById('unassignModal').classList.add('show');
-        }
-    </script>
-=======
     <!-- Agency Delete Confirmation Modal -->
     <div id="deleteAgencyModal" class="modal">
         <div class="modal-content">
@@ -1049,24 +800,23 @@ include 'admin_layout/sidebar.php';
             </form>
         </div>
     </div>
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
 
     <!-- Edit Agency Modal -->
     <div id="editAgencyModal" class="modal">
         <div class="modal-content">
             <h3 style="margin-bottom: 20px;">Edit Agency Limits</h3>
-<<<<<<< HEAD
-            <form action="agency_maintenance.php?tab=agencies" method="POST">
-=======
             <form action="" method="POST">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 <input type="hidden" name="agency_id" id="edit_agency_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Agency Name</label>
                     <input type="text" id="edit_agency_name" class="form-control" disabled>
                 </div>
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px;">
-                    <div class="form-group" style="text-align: left;"><label class="form-label">Client Site Limit</label><input type="number" name="client_limit" id="edit_client_limit" class="form-control" min="0"></div>
+                <div class="form-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px;">
+                    <div class="form-group" style="text-align: left;"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" id="edit_qr_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" id="edit_guard_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Inspector</label><input type="number" name="inspector_limit" id="edit_inspector_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Supervisor</label><input type="number" name="supervisor_limit" id="edit_supervisor_limit" class="form-control" min="0"></div>
+                    <div class="form-group" style="text-align: left;"><label class="form-label">Client Limit</label><input type="number" name="client_limit" id="edit_client_limit" class="form-control" min="0"></div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editAgencyModal')">Cancel</button>
@@ -1076,49 +826,6 @@ include 'admin_layout/sidebar.php';
         </div>
     </div>
 
-<<<<<<< HEAD
-    <!-- Edit Assignment Modal -->
-    <div id="editAssignmentModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
-            <h3 style="margin-bottom: 20px;">Edit Assignment Limits</h3>
-            <form action="agency_maintenance.php?tab=assignments" method="POST">
-                <input type="hidden" name="mapping_id" id="edit_mapping_id">
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                    <div class="form-group" style="text-align: left;">
-                        <label class="form-label">Agency</label>
-                        <input type="text" id="edit_assign_agency" class="form-control" disabled>
-                    </div>
-                    <div class="form-group" style="text-align: left;">
-                        <label class="form-label">Client</label>
-                        <input type="text" id="edit_assign_client" class="form-control" disabled>
-                    </div>
-                </div>
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                    <div class="form-group" style="text-align: left;"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" id="edit_assign_qr" class="form-control" min="0"></div>
-                    <div class="form-group" style="text-align: left;"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" id="edit_assign_guard" class="form-control" min="0"></div>
-                    <div class="form-group" style="text-align: left;"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" id="edit_assign_inspector" class="form-control" min="0"></div>
-                    <div class="form-group" style="text-align: left;"><label class="form-label">Supervisor Limit</label><input type="number" name="supervisor_limit" id="edit_assign_supervisor" class="form-control" min="0"></div>
-                </div>
-                <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editAssignmentModal')">Cancel</button>
-                    <button type="submit" name="update_assignment_limits" class="btn btn-primary" style="flex: 1;">Save Changes</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Unassign Modal -->
-    <div id="unassignModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-icon">!</div>
-            <h3>Confirm Unassignment</h3>
-            <p style="color: #6b7280; margin-bottom: 24px;">Unassign <strong id="unassign_client_name"></strong> from <strong id="unassign_agency_name"></strong>?</p>
-            <form action="agency_maintenance.php?tab=assignments" method="POST">
-                <input type="hidden" name="mapping_id" id="unassign_mapping_id">
-                <div style="display: flex; gap: 12px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('unassignModal')">Cancel</button>
-                    <button type="submit" name="unassign_client_action" class="btn" style="background: #ef4444; color: white; flex: 1;">Unassign</button>
-=======
     <!-- Assignment Unassign Confirmation Modal -->
     <div id="unassignModal" class="modal">
         <div class="modal-content">
@@ -1132,7 +839,6 @@ include 'admin_layout/sidebar.php';
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     <button type="button" class="btn" style="background: #e2e8f0; color: #475569;" onclick="closeModal('unassignModal')">Cancel</button>
                     <button type="submit" name="unassign_client_action" class="btn" style="background: #ef4444; color: white;">Unassign</button>
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 </div>
             </form>
         </div>
@@ -1142,11 +848,7 @@ include 'admin_layout/sidebar.php';
     <div id="editSupervisorModal" class="modal">
         <div class="modal-content" style="max-width: 500px;">
             <h3 style="margin-bottom: 20px;">Edit Supervisor Account</h3>
-<<<<<<< HEAD
-            <form action="agency_maintenance.php?tab=user-accounts" method="POST">
-=======
             <form action="" method="POST">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 <input type="hidden" name="edit_supervisor_id" id="edit_supervisor_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Full Name</label>
@@ -1200,11 +902,7 @@ include 'admin_layout/sidebar.php';
             <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
             <h3>Delete Supervisor Account?</h3>
             <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to delete <strong id="delete_supervisor_name"></strong>? This will remove their access permanently.</p>
-<<<<<<< HEAD
-            <form action="agency_maintenance.php?tab=user-accounts" method="POST">
-=======
             <form action="" method="POST">
->>>>>>> 6ed648ff630cfdebf2d56d106fdf7351e18f1d02
                 <input type="hidden" name="delete_supervisor_id" id="delete_supervisor_id">
                 <div style="display: flex; gap: 12px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('deleteSupervisorModal')">Cancel</button>
