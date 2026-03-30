@@ -59,7 +59,7 @@ if ($_SESSION['user_level'] !== 'agency') {
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link active">Reports</a></li>
-            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
+
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>

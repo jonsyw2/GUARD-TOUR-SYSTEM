@@ -130,15 +130,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_inspector'])) {
     $first_name = $conn->real_escape_string($_POST['first_name']);
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
+    $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
     
+    $assigned_client = isset($_POST['assigned_client']) && $_POST['assigned_client'] !== '' ? (int)$_POST['assigned_client'] : null;
+
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
-    if ($conn->query("UPDATE inspectors SET name = '$fullname' WHERE id = $inspector_id")) {
+    $conn->begin_transaction();
+    try {
+        $conn->query("UPDATE inspectors SET name = '$fullname', contact_no = '$contact_no' WHERE id = $inspector_id");
+        $conn->query("DELETE FROM inspector_assignments WHERE inspector_id = $inspector_id");
+        if ($assigned_client) {
+            $conn->query("INSERT INTO inspector_assignments (inspector_id, agency_client_id) VALUES ($inspector_id, $assigned_client)");
+        }
+        $conn->commit();
         $message = "Inspector details updated successfully!";
         $message_type = "success";
         $show_status_modal = true;
-    } else {
-        $message = "Error updating inspector: " . $conn->error;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = "Error updating inspector: " . $e->getMessage();
         $message_type = "error";
         $show_status_modal = true;
     }
@@ -176,8 +187,9 @@ if ($clients_res) {
 
 // Fetch Inspectors created by this agency with assigned clients
 $inspectors_sql = "
-    SELECT i.id, i.name, u.username, i.created_at,
-           GROUP_CONCAT(COALESCE(ac.company_name, cu.username) SEPARATOR ', ') as assigned_clients
+    SELECT i.id, i.name, i.contact_no, u.username, i.created_at,
+           GROUP_CONCAT(COALESCE(ac.company_name, cu.username) SEPARATOR ', ') as assigned_clients,
+           MAX(ia.agency_client_id) as client_id
     FROM inspectors i 
     JOIN users u ON i.user_id = u.id 
     LEFT JOIN inspector_assignments ia ON i.id = ia.inspector_id
@@ -243,7 +255,7 @@ $inspectors_res = $conn->query($inspectors_sql);
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
+
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -310,7 +322,7 @@ $inspectors_res = $conn->query($inspectors_sql);
                                     unset($first_parts[0]);
                                     $middle = trim(implode(' ', $first_parts));
                                 ?>
-                                    <tr onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>')" style="cursor: pointer;">
+                                    <tr onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo $row['client_id'] ?? ''; ?>')" style="cursor: pointer;">
                                         <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                         <td>
                                             <?php if ($row['assigned_clients']): ?>
@@ -379,6 +391,16 @@ $inspectors_res = $conn->query($inspectors_sql);
                 <div class="form-group" style="text-align: left;"><label class="form-label">Last Name</label><input type="text" name="last_name" id="edit_last_name" class="form-control" required></div>
                 <div class="form-group" style="text-align: left;"><label class="form-label">First Name</label><input type="text" name="first_name" id="edit_first_name" class="form-control" required></div>
                 <div class="form-group" style="text-align: left;"><label class="form-label">Middle Name</label><input type="text" name="middle_name" id="edit_middle_name" class="form-control"></div>
+                <div class="form-group" style="text-align: left;"><label class="form-label">Contact No.</label><input type="text" name="contact_no" id="edit_contact_no" class="form-control" placeholder="09XXXXXXXXX"></div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Assign to Client (Optional)</label>
+                    <select name="assigned_client" id="edit_assigned_client" class="form-control">
+                        <option value="">-- No Direct Assignment --</option>
+                        <?php foreach ($all_clients as $client): ?>
+                            <option value="<?php echo $client['id']; ?>"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_username']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editInspectorModal')">Cancel</button>
                     <button type="submit" name="update_inspector" class="btn btn-primary" style="flex: 1;">Update Details</button>
@@ -416,11 +438,13 @@ $inspectors_res = $conn->query($inspectors_sql);
 
     <script>
         function closeModal(id) { document.getElementById(id).classList.remove('show'); }
-        function openEditModal(id, last, first, middle) {
+        function openEditModal(id, last, first, middle, contact, client_id) {
             document.getElementById('edit_inspector_id').value = id;
             document.getElementById('edit_last_name').value = last;
             document.getElementById('edit_first_name').value = first;
             document.getElementById('edit_middle_name').value = middle;
+            document.getElementById('edit_contact_no').value = contact;
+            document.getElementById('edit_assigned_client').value = client_id;
             document.getElementById('editInspectorModal').classList.add('show');
         }
         function openDeleteModal(id, name) {

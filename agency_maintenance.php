@@ -1212,7 +1212,7 @@ include 'admin_layout/sidebar.php';
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', 1)">+</button>
                                     </div>
                                 </div>
-                                <button class="btn-save-adj" onclick="saveAdj(${item.id})">Save Incremental Adjustments</button>
+                                <button class="btn-save-adj" onclick="saveAdj(${item.id})">Save</button>
                             </div>
                         </li>`;
                 });
@@ -1303,17 +1303,17 @@ include 'admin_layout/sidebar.php';
         }
 
         async function saveAdj(id) {
-            const addClient = document.getElementById(`adj_client_${id}`).value;
-            const addQr = document.getElementById(`adj_qr_${id}`).value;
-            const addGuard = document.getElementById(`adj_guard_${id}`).value;
-            const addInsp = document.getElementById(`adj_insp_${id}`).value;
+            const addClient = document.getElementById(`adj_client_${id}`) ? document.getElementById(`adj_client_${id}`).value : 0;
+            const addQr = document.getElementById(`adj_qr_${id}`) ? document.getElementById(`adj_qr_${id}`).value : 0;
+            const addGuard = document.getElementById(`adj_guard_${id}`) ? document.getElementById(`adj_guard_${id}`).value : 0;
+            const addInsp = document.getElementById(`adj_insp_${id}`) ? document.getElementById(`adj_insp_${id}`).value : 0;
 
             try {
                 const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&type=update_client_limits&mapping_id=${id}&add_client=${addClient}&add_qr=${addQr}&add_guards=${addGuard}&add_inspectors=${addInsp}`);
                 const data = await response.json();
                 if (data.success) {
                     alert('Limits updated successfully!');
-                    window.location.reload(); 
+                    loadQuickLinkTab('clients'); 
                 } else {
                     alert('Error: ' + data.message);
                 }

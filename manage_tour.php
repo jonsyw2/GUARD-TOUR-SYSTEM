@@ -796,7 +796,6 @@ if ($mapping_id) {
             <li><a href="client_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
-            <li><a href="client_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -880,6 +879,11 @@ if ($mapping_id) {
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
+                                                <label>Duration</label>
+                                                <input type="number" name="durations[]" value="0" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <label>min</label>
+                                            </div>
+                                            <div class="input-group">
                                                 <label>Shift Declare</label>
                                                 <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
                                                     <?php if (empty($client_shifts)): ?>
@@ -897,7 +901,6 @@ if ($mapping_id) {
     endif; ?>
                                                 </select>
                                             </div>
-                                            <input type="hidden" name="durations[]" value="0">
                                         </div>
                                         <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                     </div>
@@ -920,6 +923,11 @@ endif; ?>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
+                                                <label>Duration</label>
+                                                <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <label>min</label>
+                                            </div>
+                                            <div class="input-group">
                                                 <label>Shift Declare</label>
                                                 <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                     <?php if (empty($client_shifts)): ?>
@@ -937,7 +945,6 @@ endif; ?>
     endif; ?>
                                                 </select>
                                             </div>
-                                            <input type="hidden" name="durations[]" value="1">
                                         </div>
                                         <?php if (!$is_patrol_locked): ?>
                                             <button type="button" class="remove-btn" onclick="removeItem(this)">
@@ -973,6 +980,11 @@ endforeach; ?>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
+                                                <label>Duration</label>
+                                                <input type="number" name="durations[]" value="0" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <label>min</label>
+                                            </div>
+                                            <div class="input-group">
                                                 <label>Shift Declare</label>
                                                 <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                     <?php if (empty($client_shifts)): ?>
@@ -990,7 +1002,6 @@ endforeach; ?>
     endif; ?>
                                                 </select>
                                             </div>
-                                            <input type="hidden" name="durations[]" value="0">
                                         </div>
                                         <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                     </div>
@@ -1062,7 +1073,7 @@ endif; ?>
                                             <td><?php echo $last_scan; ?></td>
                                             <td>
                                                 <div style="display: flex; gap: 8px;">
-                                                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['company_name'] ?: $_SESSION['username'] ?: 'Client')); ?>', '<?php echo $display_no; ?>')">Show</button>
+                                                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['company_name'] ?: $_SESSION['username'] ?: 'Client')); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>', '<?php echo $display_no; ?>')">Show</button>
                                                     <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR()">Download QR</button>
                                                     <?php if (!$row['is_zero_checkpoint']): ?>
                                                     <form action="manage_tour.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this checkpoint? This will also remove it from any tour sequence.');">
@@ -1281,12 +1292,16 @@ endforeach; ?>
                         <label>min</label>
                     </div>
                     <div class="input-group">
+                        <label>Duration</label>
+                        <input type="number" name="durations[]" value="0" min="0">
+                        <label>min</label>
+                    </div>
+                    <div class="input-group">
                         <label>Shift Declare</label>
                         <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
                             ${shiftOptions}
                         </select>
                     </div>
-                    <input type="hidden" name="durations[]" value="1">
                 </div>
                 <button type="button" class="remove-btn" onclick="removeItem(this)">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -1331,9 +1346,9 @@ endforeach; ?>
             }
         }
 
-        function showPrintModal(code, company, index) {
+        function showPrintModal(code, company, cpName, index) {
             document.getElementById('companyLabel').textContent = company;
-            document.getElementById('checkpointNoLabel').textContent = "Checkpoint " + index;
+            document.getElementById('checkpointNoLabel').textContent = cpName;
             document.getElementById('qrcode').innerHTML = '';
             new QRCode(document.getElementById("qrcode"), {
                 text: code,
@@ -1485,12 +1500,13 @@ endforeach; ?>
             for (let i = 0; i < visualCheckpoints.length - 1; i++) {
                 const startCp = visualCheckpoints[i];
                 const endCp = visualCheckpoints[i+1];
+                
                 const startEl = document.getElementById(`cp-circle-${startCp.id}`);
                 const endEl = document.getElementById(`cp-circle-${endCp.id}`);
                 
                 if (!startEl || !endEl) continue;
 
-                const r = 22; // 44px diameter / 2
+                const r = 22; // circle radius (44px diameter / 2)
                 const x1 = parseInt(startEl.style.left) + r;
                 const y1 = parseInt(startEl.style.top) + r;
                 const x2 = parseInt(endEl.style.left) + r;
@@ -1504,11 +1520,17 @@ endforeach; ?>
                 const edgeY2 = y2 - (r + 5) * Math.sin(angle);
 
                 const d = `M ${edgeX1} ${edgeY1} L ${edgeX2} ${edgeY2}`;
-                
-                // Static path
+
+                // Check destination status for glowing line
+                const status = (endCp.latest_status || '').toLowerCase();
+                let pathStatusClass = '';
+                if (status === 'on-time' || status === 'on time') pathStatusClass = ' path-status-on-time';
+                else if (status === 'late') pathStatusClass = ' path-status-late';
+
+                // Create static path
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 path.setAttribute("d", d);
-                path.setAttribute("class", "visual-path");
+                path.setAttribute("class", "visual-path" + pathStatusClass);
                 svg.appendChild(path);
 
                 // Create midpoint static arrow (for PNG download)
@@ -1521,12 +1543,6 @@ endforeach; ?>
                 sArrow.setAttribute("class", "static-arrow");
                 sArrow.setAttribute("transform", `translate(${midX}, ${midY}) rotate(${deg})`);
                 svg.appendChild(sArrow);
-
-                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                arrow.setAttribute("points", "0,0 12,6 0,12");
-                arrow.setAttribute("class", "flowing-arrow");
-                arrow.style.offsetPath = `path('${d}')`;
-                svg.appendChild(arrow);
             }
         }
 
@@ -1569,11 +1585,12 @@ endforeach; ?>
                         const status = (cp.latest_status || '').toLowerCase();
                         if (status === 'on-time' || status === 'on time') statusClass = 'cp-status-on-time';
                         else if (status === 'late') statusClass = 'cp-status-late';
-                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : 'regular'} ${statusClass}`;
-                        circle.style.zIndex = cp.isStart ? 10 : 5;
-                        let typeLabel = index;
-                        if (cp.isStart) typeLabel = 'S';
-                        circle.innerHTML = `<span>${typeLabel}</span><div class="label">${cp.name}</div>`;
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
+                        circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
+                        
+                        circle.innerHTML = `
+                            <div class="label">${cp.name}</div>
+                        `;
                         
                         let x = parseInt(cp.visual_pos_x) || 0;
                         let y = parseInt(cp.visual_pos_y) || 0;

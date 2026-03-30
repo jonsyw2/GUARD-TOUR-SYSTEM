@@ -262,6 +262,7 @@ $clients_sql = "
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
            (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
+           (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors,
            (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count,
            (
                SELECT GROUP_CONCAT(g.name SEPARATOR ' | ')
@@ -332,7 +333,7 @@ if ($guards_res) {
         tbody tr:hover { background-color: #f8fafc; }
         th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
         
-        .btn-sm { padding: 6px 12px; font-size: 0.85rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; font-weight: 500; }
+        .btn-sm { padding: 5px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; font-weight: 500; }
         .btn-primary { background: #10b981; color: white; }
         .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #374151; }
         .btn-outline:hover { background: #f9fafb; }
@@ -360,7 +361,7 @@ if ($guards_res) {
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
+
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -385,9 +386,10 @@ if ($guards_res) {
                                 <th>#</th>
                                 <th>Client Account</th>
                                 <th>Company Details</th>
-                                <th>Client Limits (QR/G/I)</th>
+                                <th>QR Checkpoints</th>
                                 <th>Guards Assigned</th>
-                                <th style="text-align: right;">Actions</th>
+                                <th>Inspectors</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                     <tbody>
@@ -411,29 +413,23 @@ if ($guards_res) {
                                             </div>
                                         </div>
                                     </td>
-                                    <td>
-                                        <div style="font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; color: #64748b; min-width: 120px;">
-                                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">
-                                                <span>QR Checkpoints</span>
-                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?></span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">
-                                                <span>Security Guards</span>
-                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?></span>
-                                            </div>
-                                            <div style="display: flex; justify-content: space-between;">
-                                                <span>Inspectors</span>
-                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['inspector_limit']; ?></span>
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span style="font-weight: 600; color: <?php echo $row['current_guards'] >= $row['guard_limit'] ? '#ef4444' : '#10b981'; ?>">
-                                            Active: <?php echo $row['current_guards']; ?>
+                                    <td style="white-space: nowrap;">
+                                        <span style="font-weight: 600; color: <?php echo $row['qr_count'] >= $row['qr_limit'] ? '#ef4444' : '#10b981'; ?>">
+                                            Active: <?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?>
                                         </span>
                                     </td>
-                                     <td style="text-align: right;">
-                                        <div style="display: flex; gap: 8px; justify-content: flex-end;" onclick="event.stopPropagation()">
+                                    <td style="white-space: nowrap;">
+                                        <span style="font-weight: 600; color: <?php echo $row['current_guards'] >= $row['guard_limit'] ? '#ef4444' : '#10b981'; ?>">
+                                            Active: <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
+                                        </span>
+                                    </td>
+                                    <td style="white-space: nowrap;">
+                                        <span style="font-weight: 600; color: <?php echo $row['current_inspectors'] >= $row['inspector_limit'] ? '#ef4444' : '#10b981'; ?>">
+                                            Active: <?php echo $row['current_inspectors']; ?> / <?php echo $row['inspector_limit']; ?>
+                                        </span>
+                                    </td>
+                                     <td>
+                                        <div style="display: flex; gap: 8px; justify-content: flex-start;" onclick="event.stopPropagation()">
                                              <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">Edit Details</button>
                                             <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
                                         </div>
@@ -442,7 +438,7 @@ if ($guards_res) {
                             <?php else: ?>
                                 <tr onclick="openAddClientModal()" style="cursor: pointer;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='transparent'">
                                     <td><?php echo $i; ?></td>
-                                    <td colspan="5" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
+                                    <td colspan="6" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
                                 </tr>
                             <?php endif; ?>
                         <?php endfor; ?>
