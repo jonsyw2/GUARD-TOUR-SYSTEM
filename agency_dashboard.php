@@ -30,7 +30,7 @@ if ($mapping_ids_str !== '0') {
     ")->fetch_assoc()['count'];
 }
 
-// Fetch 5 recent scans
+// Fetch 5 recent scans (Keep for sidebar/footer context if needed, but we'll focus on the map)
 $recent_scans = $conn->query("
     SELECT g.name as guard_name, c.name as checkpoint_name, s.scan_time, ac.site_name
     FROM scans s
@@ -41,6 +41,31 @@ $recent_scans = $conn->query("
     ORDER BY s.scan_time DESC
     LIMIT 5
 ");
+
+// Sites for the selector
+$sites_res = $conn->query("SELECT id, site_name FROM agency_clients WHERE agency_id = $agency_id ORDER BY site_name ASC");
+$sites = [];
+while($s = $sites_res->fetch_assoc()) $sites[] = $s;
+
+// Determine active site for visual map
+$selected_mapping_id = isset($_GET['mapping_id']) ? (int)$_GET['mapping_id'] : ($sites[0]['id'] ?? null);
+
+// Fetch checkpoints for the visual map of selected site
+$checkpoints = [];
+if ($selected_mapping_id) {
+    $cp_res = $conn->query("
+        SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint,
+        (SELECT scan_time FROM scans WHERE checkpoint_id = cp.id AND DATE(scan_time) = CURDATE() ORDER BY scan_time DESC LIMIT 1) as last_scan_today
+        FROM checkpoints cp
+        WHERE cp.agency_client_id = $selected_mapping_id
+        ORDER BY cp.is_zero_checkpoint DESC, (SELECT ta.sort_order FROM tour_assignments ta WHERE ta.checkpoint_id = cp.id AND ta.agency_client_id = $selected_mapping_id LIMIT 1) ASC
+    ");
+    if ($cp_res) {
+        while ($row = $cp_res->fetch_assoc()) {
+            $checkpoints[] = $row;
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -99,6 +124,74 @@ $recent_scans = $conn->query("
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); margin-bottom: 24px;}
         .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
+
+        /* Visual Map Styles */
+        .visual-map-card { background: white; padding: 28px; border-radius: 12px; box-shadow: var(--shadow); border: 1px solid var(--border); margin-bottom: 24px; position: relative; }
+        .visual-container {
+            width: 100%;
+            height: 450px;
+            background-color: #f8fafc;
+            background-image: 
+                linear-gradient(rgba(203, 213, 225, 0.2) 1.5px, transparent 1.5px),
+                linear-gradient(90deg, rgba(203, 213, 225, 0.2) 1.5px, transparent 1.5px);
+            background-size: 30px 30px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            margin-top: 15px;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+        }
+        .checkpoint-pin {
+            width: 36px;
+            height: 36px;
+            border-radius: 50% 50% 50% 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.9rem;
+            position: absolute;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border: 2px solid #ffffff;
+            transform: rotate(-45deg);
+            z-index: 5;
+            transition: transform 0.2s;
+        }
+        .checkpoint-pin:hover { transform: rotate(-45deg) scale(1.15); z-index: 10; }
+        .checkpoint-pin > span { transform: rotate(45deg); display: block; }
+        .pin-label {
+            position: absolute;
+            bottom: -35px;
+            white-space: nowrap;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            transform: rotate(45deg);
+            pointer-events: none;
+        }
+
+        /* Status Colors */
+        .status-scanned { background: linear-gradient(135deg, #10b981, #059669); color: white; animation: pulse-green 2s infinite; }
+        .status-pending { background: linear-gradient(135deg, #94a3b8, #64748b); color: white; }
+        .status-start { background: linear-gradient(135deg, #3b82f6, #1e40af); color: white; }
+
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .visual-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .visual-path { stroke: #6366f1; stroke-width: 2; stroke-linecap: round; fill: none; stroke-dasharray: 6 3; }
+        .flowing-arrow { fill: #4f46e5; animation: flow 4s linear infinite; }
+        @keyframes flow { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+
+        .form-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; font-family: inherit; color: var(--text-main); outline: none; transition: border-color 0.2s; }
+        .form-select:focus { border-color: var(--primary); }
     </style>
 </head>
 <body>
@@ -193,8 +286,42 @@ $recent_scans = $conn->query("
             </div>
 
             <div class="list-layout">
+                <!-- Visual Patrol Map -->
+                <div class="visual-map-card">
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom:1px solid #eee; padding-bottom:15px;">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <span style="font-weight: 700; color: #111827;">Live Site Monitor</span>
+                            <?php if (count($sites) > 0): ?>
+                                <form action="agency_dashboard.php" method="GET" style="margin: 0;">
+                                    <select name="mapping_id" class="form-select" onchange="this.form.submit()" style="font-weight: 600; border-color: var(--primary);">
+                                        <?php foreach ($sites as $site): ?>
+                                            <option value="<?php echo $site['id']; ?>" <?php echo $selected_mapping_id == $site['id'] ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($site['site_name']); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </form>
+                            <?php endif; ?>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <div style="display: flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 600;">
+                                <div style="width: 10px; height: 10px; border-radius: 50%; background: #10b981;"></div> Scanned
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 600;">
+                                <div style="width: 10px; height: 10px; border-radius: 50%; background: #94a3b8;"></div> Pending
+                            </div>
+                            <a href="agency_patrol_history.php" class="badge" style="background: var(--bg-main); color: var(--primary); text-decoration: none; border: 1px solid var(--border);">History →</a>
+                        </div>
+                    </div>
+
+                    <div class="visual-container" id="visualContainer">
+                        <svg class="visual-svg" id="visualSvg"></svg>
+                        <!-- Checkpoints injected by JS -->
+                    </div>
+                </div>
+
                 <div class="card">
-                    <div class="card-header">Latest Patrol Activity</div>
+                    <div class="card-header">Recent Scans Today</div>
                     <div style="overflow-x: auto;">
                         <table class="activity-table">
                             <thead>
@@ -216,7 +343,7 @@ $recent_scans = $conn->query("
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>
-                                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px;">No patrol activity recorded yet.</td></tr>
+                                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 40px;">No scan activity recorded today.</td></tr>
                                 <?php endif; ?>
                             </tbody>
                         </table>
@@ -242,6 +369,62 @@ $recent_scans = $conn->query("
     </div>
 
     <script>
+        const checkpoints = <?php echo json_encode($checkpoints); ?>;
+        const container = document.getElementById('visualContainer');
+        const svg = document.getElementById('visualSvg');
+
+        function renderMap() {
+            if (!checkpoints || !checkpoints.length) {
+                container.innerHTML = '<div style="height:100%; display:flex; align-items:center; justify-content:center; color:#6b7280; font-style:italic;">No checkpoints configured for this site.</div>';
+                return;
+            }
+
+            // Clear previous map objects (keep SVG)
+            const pins = container.querySelectorAll('.checkpoint-pin');
+            pins.forEach(p => p.remove());
+            svg.innerHTML = '';
+
+            let pathD = '';
+
+            checkpoints.forEach((cp, index) => {
+                const x = cp.visual_pos_x || (50 + index * 60);
+                const y = cp.visual_pos_y || (50 + index * 40);
+
+                // Create Pin
+                const pin = document.createElement('div');
+                pin.className = 'checkpoint-pin ' + (cp.is_zero_checkpoint == 1 ? 'status-start' : (cp.last_scan_today ? 'status-scanned' : 'status-pending'));
+                pin.style.left = x + 'px';
+                pin.style.top = y + 'px';
+                pin.innerHTML = `<span>${index + 1}</span><div class="pin-label">${cp.name} ${cp.last_scan_today ? '<br><small>✅ ' + new Date(cp.last_scan_today).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</small>' : ''}</div>`;
+                container.appendChild(pin);
+
+                // Build Path
+                if (index === 0) {
+                    pathD = `M ${x + 18} ${y + 18}`;
+                } else {
+                    pathD += ` L ${x + 18} ${y + 18}`;
+                }
+            });
+
+            // Draw Path Line
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", pathD);
+            path.setAttribute("class", "visual-path");
+            path.id = "mainPath";
+            svg.appendChild(path);
+
+            // Flowing Arrow
+            if (checkpoints.length > 1) {
+                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                arrow.setAttribute("points", "0,-6 10,0 0,6");
+                arrow.setAttribute("class", "flowing-arrow");
+                arrow.style.offsetPath = `path('${pathD}')`;
+                svg.appendChild(arrow);
+            }
+        }
+
+        renderMap();
+
         // Close modal when clicking outside
         window.onclick = function(event) {
             const modal = document.getElementById('logoutModal');
