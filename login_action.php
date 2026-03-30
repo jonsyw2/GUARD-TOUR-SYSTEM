@@ -16,6 +16,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
         
+        // Check Account Status
+        if (($user['status'] ?? 'active') === 'suspended' && $user['user_level'] === 'agency') {
+            echo "<script>alert('Your account has been suspended. Please contact the administrator.'); window.location.href='login.php';</script>";
+            exit();
+        }
+        
         if (password_verify($password, $user['password'])) {
             // Log Success
             $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'SUCCESS')");

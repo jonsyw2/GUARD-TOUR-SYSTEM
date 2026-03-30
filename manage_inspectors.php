@@ -27,6 +27,8 @@ $conn->query("CREATE TABLE IF NOT EXISTS inspector_assignments (
     FOREIGN KEY (agency_client_id) REFERENCES agency_clients(id) ON DELETE CASCADE
 )");
 
+$conn->query("ALTER TABLE inspectors ADD COLUMN IF NOT EXISTS contact_no VARCHAR(20) DEFAULT NULL");
+
 $message = '';
 $message_type = '';
 $show_key_modal = false;
@@ -59,9 +61,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
     
+    $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
+    
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
-    $assigned_clients = $_POST['assigned_clients'] ?? [];
+    // Single dropdown: assigned_client is one value or empty
+    $assigned_client = isset($_POST['assigned_client']) && $_POST['assigned_client'] !== '' ? (int)$_POST['assigned_client'] : null;
+    $assigned_clients = $assigned_client ? [$assigned_client] : [];
     $can_create = true;
     
     if (!empty($assigned_clients)) {
@@ -96,7 +102,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
         try {
             $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'inspector')");
             $user_id = $conn->insert_id;
-            $conn->query("INSERT INTO inspectors (user_id, agency_id, name) VALUES ($user_id, $agency_id, '$fullname')");
+            $conn->query("INSERT INTO inspectors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')");
             $new_inspector_id = $conn->insert_id;
             
             // Assign to Clients
@@ -230,7 +236,6 @@ $inspectors_res = $conn->query($inspectors_sql);
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link active">Manage Inspectors</a></li>
@@ -266,15 +271,17 @@ $inspectors_res = $conn->query($inspectors_sql);
                             <input type="text" name="middle_name" class="form-control" placeholder="e.g. Marie">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Assign to Client Sites</label>
-                            <div style="max-height: 150px; overflow-y: auto; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #f9fafb;">
+                            <label class="form-label">Contact No.</label>
+                            <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Assign to Client (Optional)</label>
+                            <select name="assigned_client" class="form-control">
+                                <option value="">-- No Direct Assignment --</option>
                                 <?php foreach ($all_clients as $client): ?>
-                                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 5px;">
-                                        <input type="checkbox" name="assigned_clients[]" value="<?php echo $client['id']; ?>" id="client_<?php echo $client['id']; ?>">
-                                        <label for="client_<?php echo $client['id']; ?>" style="font-size: 0.85rem; cursor: pointer;"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_username']); ?></label>
-                                    </div>
+                                    <option value="<?php echo $client['id']; ?>"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_username']); ?></option>
                                 <?php endforeach; ?>
-                            </div>
+                            </select>
                         </div>
                         <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 20px;">An access key will be automatically generated upon account creation.</p>
                         <button type="submit" name="create_inspector" class="btn btn-primary">Create Inspector Account</button>

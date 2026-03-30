@@ -131,7 +131,43 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         }
         $mapping_id = $conn->insert_id;
 
-        // 5. Handle Logo Upload
+        // 5. Handle Optional Supervisor Creation
+        if (isset($_POST['create_supervisor'])) {
+            $sup_name = $conn->real_escape_string($_POST['supervisor_name']);
+            $sup_username = $conn->real_escape_string($_POST['supervisor_username']);
+            $sup_password = password_hash($_POST['supervisor_password'], PASSWORD_DEFAULT);
+            $sup_contact = $conn->real_escape_string($_POST['supervisor_contact'] ?? '');
+
+            // Check supervisor username
+            $sup_check = $conn->query("SELECT id FROM users WHERE username = '$sup_username'");
+            if ($sup_check && $sup_check->num_rows > 0) {
+                throw new Exception("Supervisor username '$sup_username' is already taken.");
+            }
+
+            // Check client's supervisor limit
+            if ($supervisor_limit <= 0) {
+                throw new Exception("Cannot create supervisor: This client's supervisor limit is set to 0.");
+            }
+
+            // Create Supervisor User
+            if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$sup_username', '$sup_password', 'supervisor')")) {
+                throw new Exception("Error creating supervisor user: " . $conn->error);
+            }
+            $sup_user_id = $conn->insert_id;
+
+            // Create Supervisor Profile
+            if (!$conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($sup_user_id, $agency_id, '$sup_name', '$sup_contact')")) {
+                throw new Exception("Error creating supervisor profile: " . $conn->error);
+            }
+            $new_sup_id = $conn->insert_id;
+
+            // Link Supervisor to Client
+            if (!$conn->query("UPDATE agency_clients SET supervisor_id = $new_sup_id WHERE id = $mapping_id")) {
+                throw new Exception("Error linking supervisor to client: " . $conn->error);
+            }
+        }
+
+        // 6. Handle Logo Upload
         if (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] == 0) {
             $target_dir = "uploads/logos/";
             if (!file_exists($target_dir)) mkdir($target_dir, 0777, true);
@@ -317,7 +353,6 @@ if ($guards_res) {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link active">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
@@ -343,9 +378,6 @@ if ($guards_res) {
             <div class="card">
                 <div class="card-header">
                     <h3 style="margin: 0; border: none;"><?php echo $display_title; ?></h3>
-                    <?php if ($current_clients < $client_limit): ?>
-                        <button class="btn-sm btn-primary" onclick="openAddClientModal()">+ Add New Client</button>
-                    <?php endif; ?>
                 </div>
                     <table>
                         <thead>
@@ -353,7 +385,7 @@ if ($guards_res) {
                                 <th>#</th>
                                 <th>Client Account</th>
                                 <th>Company Details</th>
-                                <th>System Limits (QR/G/I/S)</th>
+                                <th>Client Limits (QR/G/I)</th>
                                 <th>Guards Assigned</th>
                                 <th style="text-align: right;">Actions</th>
                             </tr>
@@ -380,10 +412,19 @@ if ($guards_res) {
                                         </div>
                                     </td>
                                     <td>
-                                        <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 4px;">
-                                            <div>QR: <span style="font-weight:600;"><?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?></span></div>
-                                            <div>Guard: <span style="font-weight:600;"><?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?></span></div>
-                                            <div>Insp: <span style="font-weight:600;"><?php echo $row['inspector_limit']; ?></span> | Supr: <span style="font-weight:600;"><?php echo $row['supervisor_limit']; ?></span></div>
+                                        <div style="font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; color: #64748b; min-width: 120px;">
+                                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">
+                                                <span>QR Checkpoints</span>
+                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?></span>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">
+                                                <span>Security Guards</span>
+                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?></span>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between;">
+                                                <span>Inspectors</span>
+                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['inspector_limit']; ?></span>
+                                            </div>
                                         </div>
                                     </td>
                                     <td>
@@ -399,12 +440,9 @@ if ($guards_res) {
                                     </td>
                                 </tr>
                             <?php else: ?>
-                                <tr style="cursor: default; background: transparent;">
+                                <tr onclick="openAddClientModal()" style="cursor: pointer;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='transparent'">
                                     <td><?php echo $i; ?></td>
-                                    <td colspan="4" style="color: #94a3b8; font-style: italic;">Available Client slot</td>
-                                    <td style="text-align: right;">
-                                        <button class="btn-sm btn-link" style="color: #10b981; font-weight: 600; background: none; border: none; cursor: pointer; text-decoration: underline;" onclick="openAddClientModal()">Add Client</button>
-                                    </td>
+                                    <td colspan="5" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
                                 </tr>
                             <?php endif; ?>
                         <?php endfor; ?>
@@ -482,14 +520,43 @@ if ($guards_res) {
                             </div>
 
                             <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
-                                <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT SYSTEM LIMITS</label>
+                                <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT LIMITS</label>
                             </div>
 
-                            <div class="form-grid" style="grid-column: span 2; display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+                            <div class="form-grid" style="grid-column: span 2; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
                                 <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
                                 <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
                                 <div class="form-group"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
-                                <div class="form-group"><label class="form-label">Supervisor Limit</label><input type="number" name="supervisor_limit" class="form-control" value="0" min="0"></div>
+                                <input type="hidden" name="supervisor_limit" value="1">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+                                    <input type="checkbox" name="create_supervisor" id="create_supervisor_chk" style="width: 20px; height: 20px; cursor: pointer;" onchange="toggleSupervisorFields()">
+                                    <label for="create_supervisor_chk" style="font-weight: 700; color: #111827; cursor: pointer; margin-bottom: 0;">Create Supervisor Account for this Client?</label>
+                                </div>
+                                <p style="font-size: 0.8rem; color: #6b7280; padding-left: 32px;">Register a dedicated supervisor and auto-assign them to this client site.</p>
+                            </div>
+
+                            <div id="supervisor_fields" style="grid-column: span 2; display: none; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 8px;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label class="form-label">Supervisor Full Name</label>
+                                        <input type="text" name="supervisor_name" id="sup_fullname" class="form-control" placeholder="Complete Name">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Account Username</label>
+                                        <input type="text" name="supervisor_username" id="sup_username" class="form-control" placeholder="Unique username">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Account Password</label>
+                                        <input type="password" name="supervisor_password" id="sup_password" class="form-control" placeholder="••••••••">
+                                    </div>
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label class="form-label">Contact No (Optional)</label>
+                                        <input type="text" name="supervisor_contact" id="sup_contact" class="form-control" placeholder="Mobile phone">
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -619,7 +686,7 @@ if ($guards_res) {
                     </div>
 
                     <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
-                        <label class="form-label" style="font-weight: 700; color: var(--primary);">SYSTEM LIMITS</label>
+                        <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT LIMITS</label>
                     </div>
                     <div class="form-group">
                         <label class="form-label">QR Limit</label>
@@ -633,10 +700,7 @@ if ($guards_res) {
                         <label class="form-label">Inspector Limit</label>
                         <input type="number" name="inspector_limit" id="details_inspector_limit" class="form-control" min="0">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">Supervisor Limit</label>
-                        <input type="number" name="supervisor_limit" id="details_supervisor_limit" class="form-control" min="0">
-                    </div>
+                    <input type="hidden" name="supervisor_limit" id="details_supervisor_limit">
 
                     <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
                         <label class="form-label">Company Logo (Photo)</label>
@@ -753,6 +817,26 @@ if ($guards_res) {
 
         function closeModal(id) {
             document.getElementById(id).classList.remove('show');
+        }
+
+        function toggleSupervisorFields() {
+            const chk = document.getElementById('create_supervisor_chk');
+            const fields = document.getElementById('supervisor_fields');
+            const inputs = fields.querySelectorAll('input');
+            
+            if (chk.checked) {
+                fields.style.display = 'block';
+                inputs.forEach(input => {
+                    if (input.id !== 'sup_contact') { // Contact is optional
+                        input.required = true;
+                    }
+                });
+            } else {
+                fields.style.display = 'none';
+                inputs.forEach(input => {
+                    input.required = false;
+                });
+            }
         }
 
         window.onclick = function(event) {

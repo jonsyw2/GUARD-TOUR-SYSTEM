@@ -638,28 +638,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .cp-status-on-time { 
             background: linear-gradient(135deg, #10b981, #059669) !important; 
             color: white !important; 
-            animation: pulse-on-time 2s infinite;
         }
         .cp-status-late { 
             background: linear-gradient(135deg, #ef4444, #dc2626) !important; 
             color: white !important; 
-            animation: pulse-late 2s infinite;
         }
         .cp-status-none { 
             background: linear-gradient(135deg, #94a3b8, #64748b) !important; 
             color: white !important; 
         }
 
-        @keyframes pulse-on-time {
-            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        .path-status-on-time {
+            stroke: #10b981 !important;
+            animation: pulse-line-on-time 2s infinite;
         }
 
-        @keyframes pulse-late {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        .path-status-late {
+            stroke: #ef4444 !important;
+            animation: pulse-line-late 2s infinite;
+        }
+
+        @keyframes pulse-line-on-time {
+            0% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4)); opacity: 0.7; }
+            50% { filter: drop-shadow(0 0 8px rgba(16, 185, 129, 1)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4)); opacity: 0.7; }
+        }
+
+        @keyframes pulse-line-late {
+            0% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
+            50% { filter: drop-shadow(0 0 8px rgba(239, 68, 68, 1)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
         }
 
         .visual-svg {
@@ -723,7 +731,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link active">Patrol Management</a></li>
@@ -806,6 +813,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
+                                                    <label>Duration</label>
+                                                    <input type="number" name="durations[]" value="0" min="0">
+                                                    <label>min</label>
+                                                </div>
+                                                <div class="input-group">
                                                     <label>Shift Declare</label>
                                                     <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
                                                         <?php if (empty($client_shifts)): ?>
@@ -820,7 +832,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                         <?php endif; ?>
                                                     </select>
                                                 </div>
-                                                <input type="hidden" name="durations[]" value="0">
                                             </div>
                                             <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                         </div>
@@ -843,6 +854,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
+                                                    <label>Duration</label>
+                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0">
+                                                    <label>min</label>
+                                                </div>
+                                                <div class="input-group">
                                                     <label>Shift Declare</label>
                                                     <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
                                                         <?php if (empty($client_shifts)): ?>
@@ -857,9 +873,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                         <?php endif; ?>
                                                     </select>
                                                 </div>
-                                                <input type="hidden" name="durations[]" value="1">
                                             </div>
-                                            <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+                                            <button type="button" class="remove-btn" onclick="removeCheckpoint(this, '<?php echo $item['checkpoint_id']; ?>', '<?php echo addslashes($item['name']); ?>')">&times;</button>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
@@ -869,7 +884,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div style="display: flex; gap: 10px; margin-top: 20px;">
                                 <select id="checkpoint-select" class="form-control" style="flex: 1;">
                                     <option value="">-- Add Checkpoint to Pattern --</option>
-                                    <?php foreach ($available_checkpoints as $cp): ?>
+                                    <?php 
+                                    $assigned_ids = array_column($current_assignments, 'checkpoint_id');
+                                    foreach ($available_checkpoints as $cp): 
+                                        if (in_array($cp['id'], $assigned_ids)) continue;
+                                    ?>
                                         <option value="<?php echo $cp['id']; ?>"><?php echo htmlspecialchars($cp['name']); ?></option>
                                     <?php endforeach; ?>
                                 </select>
@@ -1322,16 +1341,35 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <label>min</label>
                     </div>
                     <div class="input-group">
+                        <label>Duration</label>
+                        <input type="number" name="durations[]" value="0" min="0">
+                        <label>min</label>
+                    </div>
+                    <div class="input-group">
                         <label>Shift Declare</label>
                         <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
                             ${shiftOptions}
                         </select>
                     </div>
-                    <input type="hidden" name="durations[]" value="1">
                 </div>
-                <button type="button" class="remove-btn" onclick="this.parentElement.remove()">&times;</button>
+                <button type="button" class="remove-btn" onclick="removeCheckpoint(this, '${id}', '${name.replace(/'/g, "\\'")}')">&times;</button>
             `;
             list.appendChild(item);
+            
+            // Remove the selected option from the dropdown
+            select.remove(select.selectedIndex);
+            select.value = '';
+        }
+
+        function removeCheckpoint(btn, id, name) {
+            btn.parentElement.remove();
+            
+            // Add back to the dropdown
+            const select = document.getElementById('checkpoint-select');
+            const option = document.createElement('option');
+            option.value = id;
+            option.text = name;
+            select.appendChild(option);
             select.value = '';
         }
 
@@ -1340,7 +1378,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             // Priority: Company Name, then Site Name, then Client Name
             const displayTitle = companyName || siteName || client;
             document.getElementById('printSiteName').textContent = displayTitle;
-            document.getElementById('codeLabel').textContent = "Checkpoint " + index;
+            document.getElementById('codeLabel').textContent = name;
             
             document.getElementById('qrcode').innerHTML = '';
             
@@ -1545,10 +1583,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 const d = `M ${edgeX1} ${edgeY1} L ${edgeX2} ${edgeY2}`;
 
+                // Check destination status for glowing line
+                const status = (endCp.latest_status || '').toLowerCase();
+                let pathStatusClass = '';
+                if (status === 'on-time' || status === 'on time') pathStatusClass = ' path-status-on-time';
+                else if (status === 'late') pathStatusClass = ' path-status-late';
+
                 // Create static path
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 path.setAttribute("d", d);
-                path.setAttribute("class", "visual-path");
+                path.setAttribute("class", "visual-path" + pathStatusClass);
                 svg.appendChild(path);
 
                 // Create midpoint static arrow (for PNG download)
@@ -1561,13 +1605,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 sArrow.setAttribute("class", "static-arrow");
                 sArrow.setAttribute("transform", `translate(${midX}, ${midY}) rotate(${deg})`);
                 svg.appendChild(sArrow);
-
-                // Create flowing arrow
-                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                arrow.setAttribute("points", "0,0 12,6 0,12");
-                arrow.setAttribute("class", "flowing-arrow");
-                arrow.style.offsetPath = `path('${d}')`;
-                svg.appendChild(arrow);
             }
         }
 

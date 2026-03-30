@@ -111,10 +111,8 @@ $recent_scans = $conn->query("
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link active">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
-            <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
@@ -167,13 +165,6 @@ $recent_scans = $conn->query("
                     <div class="stat-info">
                         <div class="label">Total Guards</div>
                         <div class="value"><?php echo $total_guards; ?></div>
-                    </div>
-                </a>
-                <a href="manage_supervisors.php" class="stat-card">
-                    <div class="stat-icon" style="background: #f0f9ff; color: #0369a1;">👥</div>
-                    <div class="stat-info">
-                        <div class="label">Supervisors</div>
-                        <div class="value"><?php echo $total_supervisors; ?></div>
                     </div>
                 </a>
                 <a href="agency_patrol_management.php" class="stat-card">
