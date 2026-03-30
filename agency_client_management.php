@@ -11,6 +11,7 @@ $message = '';
 $message_type = '';
 $show_status_modal = false;
 
+
 // Handle Company Details Update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $mapping_id = (int)$_POST['mapping_id'];
@@ -22,6 +23,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
     
     // Handle File Upload
     $logo_path = null;
@@ -55,7 +60,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
             website_link = '$website_link',
             contact_person = '$contact_person',
             contact_person_position = '$contact_person_position',
-            contact_person_no = '$contact_person_no'
+            contact_person_no = '$contact_person_no',
+            qr_limit = $qr_limit,
+            guard_limit = $guard_limit,
+            inspector_limit = $inspector_limit,
+            supervisor_limit = $supervisor_limit
             $update_logo_sql 
             WHERE id = $mapping_id AND agency_id = $agency_id";
     
@@ -82,6 +91,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
+    $qr_limit = (int)$_POST['qr_limit'];
+    $guard_limit = (int)$_POST['guard_limit'];
+    $inspector_limit = (int)$_POST['inspector_limit'];
+    $supervisor_limit = (int)$_POST['supervisor_limit'];
 
     $conn->begin_transaction();
     try {
@@ -98,7 +111,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
             $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
         }
 
-        $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+        $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
         $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
 
         if ($client_limit > 0 && $current_clients >= $client_limit) {
@@ -112,13 +125,49 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         $new_client_id = $conn->insert_id;
 
         // 4. Create Agency-Client Assignment and Profile
-        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no) 
-                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no')")) {
+        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no, qr_limit, guard_limit, inspector_limit, supervisor_limit) 
+                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit)")) {
             throw new Exception("Error creating client profile: " . $conn->error);
         }
         $mapping_id = $conn->insert_id;
 
-        // 5. Handle Logo Upload
+        // 5. Handle Optional Supervisor Creation
+        if (isset($_POST['create_supervisor'])) {
+            $sup_name = $conn->real_escape_string($_POST['supervisor_name']);
+            $sup_username = $conn->real_escape_string($_POST['supervisor_username']);
+            $sup_password = password_hash($_POST['supervisor_password'], PASSWORD_DEFAULT);
+            $sup_contact = $conn->real_escape_string($_POST['supervisor_contact'] ?? '');
+
+            // Check supervisor username
+            $sup_check = $conn->query("SELECT id FROM users WHERE username = '$sup_username'");
+            if ($sup_check && $sup_check->num_rows > 0) {
+                throw new Exception("Supervisor username '$sup_username' is already taken.");
+            }
+
+            // Check client's supervisor limit
+            if ($supervisor_limit <= 0) {
+                throw new Exception("Cannot create supervisor: This client's supervisor limit is set to 0.");
+            }
+
+            // Create Supervisor User
+            if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$sup_username', '$sup_password', 'supervisor')")) {
+                throw new Exception("Error creating supervisor user: " . $conn->error);
+            }
+            $sup_user_id = $conn->insert_id;
+
+            // Create Supervisor Profile
+            if (!$conn->query("INSERT INTO supervisors (user_id, agency_id, name, contact_no) VALUES ($sup_user_id, $agency_id, '$sup_name', '$sup_contact')")) {
+                throw new Exception("Error creating supervisor profile: " . $conn->error);
+            }
+            $new_sup_id = $conn->insert_id;
+
+            // Link Supervisor to Client
+            if (!$conn->query("UPDATE agency_clients SET supervisor_id = $new_sup_id WHERE id = $mapping_id")) {
+                throw new Exception("Error linking supervisor to client: " . $conn->error);
+            }
+        }
+
+        // 6. Handle Logo Upload
         if (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] == 0) {
             $target_dir = "uploads/logos/";
             if (!file_exists($target_dir)) mkdir($target_dir, 0777, true);
@@ -158,9 +207,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        // The user has moved guard limits to the Agency level. 
-        // Guards are already limit-checked during creation in manage_guards.php.
-        // We can now allow assignments without a per-site limit.
+    // Check Client's Guard Limit
+    $limit_sql = "
+        SELECT ac.guard_limit, 
+               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
+        FROM agency_clients ac 
+        WHERE ac.id = $mapping_id
+    ";
+    $limit_res = $conn->query($limit_sql);
+    $can_assign = true;
+    if ($limit_res && $row = $limit_res->fetch_assoc()) {
+        $max_guards = (int)$row['guard_limit'];
+        $current_guards = (int)$row['current_guards'];
+        
+        if ($max_guards > 0 && $current_guards >= $max_guards) {
+            $message = "Assignment failed: This client site has reached its limit of $max_guards guards.";
+            $message_type = "error";
+            $show_status_modal = true;
+            $can_assign = false;
+        }
+    }
+
+    if ($can_assign) {
         if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
             $message = "Guard assigned successfully!";
             $message_type = "success";
@@ -172,10 +240,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         }
     }
 }
+}
+
+// Fetch Client Limit and Current Count for Headers (after potential POST updates)
+$limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
+$client_limit = 0;
+if ($limit_res && $row = $limit_res->fetch_assoc()) {
+    $client_limit = (int)$row['client_limit'];
+}
+
+$count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+$current_clients = (int)$count_res->fetch_assoc()['current_clients'];
+
+$display_title = "Assigned Clients";
+$clients = [];
 
 // Fetch Assigned Clients
 $clients_sql = "
-    SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, a.guard_limit,
+    SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, 
+           ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit,
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
            (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
@@ -193,6 +276,11 @@ $clients_sql = "
     ORDER BY u.username ASC
 ";
 $clients_res = $conn->query($clients_sql);
+if ($clients_res) {
+    while($row = $clients_res->fetch_assoc()) {
+        $clients[] = $row;
+    }
+}
 
 // Fetch All Guards for this agency for the modals
 $guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY name ASC";
@@ -229,11 +317,6 @@ if ($guards_res) {
 
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
-        .tabs-header { display: flex; gap: 2px; margin-bottom: 24px; background: #e5e7eb; padding: 4px; border-radius: 12px; width: fit-content; }
-        .tab-btn { padding: 10px 24px; border: none; background: transparent; color: #6b7280; font-weight: 600; cursor: pointer; border-radius: 8px; transition: all 0.2s; font-size: 0.95rem; }
-        .tab-btn.active { background: white; color: #10b981; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-        .tab-content { display: none; margin-top: 20px; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: 500; }
@@ -241,7 +324,7 @@ if ($guards_res) {
         .alert-error { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
 
         .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
+        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
@@ -255,7 +338,7 @@ if ($guards_res) {
         .btn-outline:hover { background: #f9fafb; }
 
         .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); max-height: 90vh; overflow-y: auto; }
         .modal.show { display: flex; }
         
         .form-group { margin-bottom: 16px; }
@@ -270,7 +353,6 @@ if ($guards_res) {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link active">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
@@ -292,30 +374,30 @@ if ($guards_res) {
 
         <div class="content-area">
 
-            <div class="tabs-header">
-                <button class="tab-btn active" onclick="switchTab('tab-clients-list', this)">Assigned Clients</button>
-                <button class="tab-btn" onclick="switchTab('tab-add-client', this)">Add New Client</button>
-            </div>
-
-            <!-- Tab: Clients List -->
-            <div id="tab-clients-list" class="tab-content active">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 style="margin: 0; border: none;">Assigned Clients</h3>
-                    </div>
+            <!-- Registered Clients Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="margin: 0; border: none;"><?php echo $display_title; ?></h3>
+                </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Account Name</th>
+                                <th>#</th>
+                                <th>Client Account</th>
                                 <th>Company Details</th>
+                                <th>Client Limits (QR/G/I)</th>
                                 <th>Guards Assigned</th>
                                 <th style="text-align: right;">Actions</th>
                             </tr>
                         </thead>
                     <tbody>
-                         <?php if ($clients_res && $clients_res->num_rows > 0): ?>
-                            <?php while($row = $clients_res->fetch_assoc()): ?>
+                         <?php 
+                            for ($i = 1; $i <= $client_limit; $i++): 
+                                $row = isset($clients[$i-1]) ? $clients[$i-1] : null;
+                                if ($row):
+                         ?>
                                 <tr onclick="openSummaryModal('<?php echo addslashes($row['company_name'] ?: $row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>', '<?php echo addslashes($row['contact_person'] ?? ''); ?>', '<?php echo addslashes($row['contact_person_no'] ?? ''); ?>', '<?php echo addslashes($row['email_address'] ?? ''); ?>', '<?php echo addslashes($row['company_address'] ?? ''); ?>')">
+                                    <td><?php echo $i; ?></td>
                                     <td><strong><?php echo htmlspecialchars($row['client_username']); ?></strong></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -330,8 +412,24 @@ if ($guards_res) {
                                         </div>
                                     </td>
                                     <td>
+                                        <div style="font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; color: #64748b; min-width: 120px;">
+                                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">
+                                                <span>QR Checkpoints</span>
+                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?></span>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #f1f5f9; padding-bottom: 2px;">
+                                                <span>Security Guards</span>
+                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?></span>
+                                            </div>
+                                            <div style="display: flex; justify-content: space-between;">
+                                                <span>Inspectors</span>
+                                                <span style="font-weight:700; color: #1e293b;"><?php echo $row['inspector_limit']; ?></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
                                         <span style="font-weight: 600; color: <?php echo $row['current_guards'] >= $row['guard_limit'] ? '#ef4444' : '#10b981'; ?>">
-                                            <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
+                                            Active: <?php echo $row['current_guards']; ?>
                                         </span>
                                     </td>
                                      <td style="text-align: right;">
@@ -341,21 +439,26 @@ if ($guards_res) {
                                         </div>
                                     </td>
                                 </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr><td colspan="4" style="text-align:center; padding: 40px; color:#6b7280;">No clients assigned by admin yet.</td></tr>
-                        <?php endif; ?>
+                            <?php else: ?>
+                                <tr onclick="openAddClientModal()" style="cursor: pointer;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='transparent'">
+                                    <td><?php echo $i; ?></td>
+                                    <td colspan="5" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
+                                </tr>
+                            <?php endif; ?>
+                        <?php endfor; ?>
                     </tbody>
                 </table>
                 </div>
             </div>
+        </main>
 
-            <!-- Tab: Add New Client -->
-            <div id="tab-add-client" class="tab-content">
-                <div class="card">
-                    <div class="card-header">
-                        <h3 style="margin: 0; border: none;">Create New Client Account</h3>
-                    </div>
+    <!-- Modal: Add New Client -->
+    <div id="addClientModal" class="modal">
+        <div class="modal-content" style="max-width: 800px; text-align: left;">
+            <div class="card-header" style="padding-top: 0;">
+                <h3 style="margin: 0; border: none;">Create New Client Account</h3>
+                <button type="button" class="btn-sm btn-outline" onclick="closeModal('addClientModal')" style="border:none; font-size: 1.5rem; line-height: 1;">&times;</button>
+            </div>
                     <form action="agency_client_management.php" method="POST" enctype="multipart/form-data" autocomplete="off">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
                             <div class="form-group" style="grid-column: span 2;">
@@ -416,18 +519,54 @@ if ($guards_res) {
                                 <input type="text" name="contact_person_no" class="form-control" placeholder="Personal or Office Phone">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2; margin-top: 16px; border-top: 1px solid #f3f4f6; padding-top: 24px;">
-                                <label class="form-label">Company Logo (Photo)</label>
-                                <input type="file" name="company_logo" class="form-control" accept="image/*">
+                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                                <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT LIMITS</label>
+                            </div>
+
+                            <div class="form-grid" style="grid-column: span 2; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                                <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
+                                <div class="form-group"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
+                                <input type="hidden" name="supervisor_limit" value="1">
+                            </div>
+
+                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
+                                    <input type="checkbox" name="create_supervisor" id="create_supervisor_chk" style="width: 20px; height: 20px; cursor: pointer;" onchange="toggleSupervisorFields()">
+                                    <label for="create_supervisor_chk" style="font-weight: 700; color: #111827; cursor: pointer; margin-bottom: 0;">Create Supervisor Account for this Client?</label>
+                                </div>
+                                <p style="font-size: 0.8rem; color: #6b7280; padding-left: 32px;">Register a dedicated supervisor and auto-assign them to this client site.</p>
+                            </div>
+
+                            <div id="supervisor_fields" style="grid-column: span 2; display: none; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 8px;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label class="form-label">Supervisor Full Name</label>
+                                        <input type="text" name="supervisor_name" id="sup_fullname" class="form-control" placeholder="Complete Name">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Account Username</label>
+                                        <input type="text" name="supervisor_username" id="sup_username" class="form-control" placeholder="Unique username">
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label">Account Password</label>
+                                        <input type="password" name="supervisor_password" id="sup_password" class="form-control" placeholder="••••••••">
+                                    </div>
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label class="form-label">Contact No (Optional)</label>
+                                        <input type="text" name="supervisor_contact" id="sup_contact" class="form-control" placeholder="Mobile phone">
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <div style="margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 24px;">
-                            <button type="submit" name="add_client" class="btn-sm btn-primary" style="padding: 14px 40px; font-size: 1rem; border-radius: 8px;">Create & Register Client</button>
+                        <div style="margin-top: 40px; border-top: 1px solid #e5e7eb; padding-top: 24px; display: flex; gap: 12px; justify-content: flex-end;">
+                            <button type="button" class="btn-sm btn-outline" onclick="closeModal('addClientModal')" style="padding: 12px 24px;">Cancel</button>
+                            <button type="submit" name="add_client" class="btn-sm btn-primary" style="padding: 12px 40px; font-size: 1rem; border-radius: 8px;">Create & Register Client</button>
                         </div>
                     </form>
-                </div>
-            </div>
+        </div>
+    </div>
         </div>
     </main>
 
@@ -547,6 +686,23 @@ if ($guards_res) {
                     </div>
 
                     <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
+                        <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT LIMITS</label>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">QR Limit</label>
+                        <input type="number" name="qr_limit" id="details_qr_limit" class="form-control" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Guard Limit</label>
+                        <input type="number" name="guard_limit" id="details_guard_limit" class="form-control" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Inspector Limit</label>
+                        <input type="number" name="inspector_limit" id="details_inspector_limit" class="form-control" min="0">
+                    </div>
+                    <input type="hidden" name="supervisor_limit" id="details_supervisor_limit">
+
+                    <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
                         <label class="form-label">Company Logo (Photo)</label>
                         <input type="file" name="company_logo" id="details_company_logo" class="form-control" accept="image/*">
                         <small style="color: #6b7280; font-size: 0.75rem;">Upload a photo of the client logo.</small>
@@ -609,12 +765,6 @@ if ($guards_res) {
     </div>
 
     <script>
-        function switchTab(tabId, btn) {
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById(tabId).classList.add('active');
-            btn.classList.add('active');
-        }
 
         function openSummaryModal(clientName, qrCount, guardNames, contactPerson, contactNo, email, address) {
             document.getElementById('summary_title').innerText = "Site Summary: " + clientName;
@@ -647,8 +797,16 @@ if ($guards_res) {
             document.getElementById('details_contact_person').value = data.contact_person || '';
             document.getElementById('details_contact_person_position').value = data.contact_person_position || '';
             document.getElementById('details_contact_person_no').value = data.contact_person_no || '';
+            document.getElementById('details_qr_limit').value = data.qr_limit || 0;
+            document.getElementById('details_guard_limit').value = data.guard_limit || 0;
+            document.getElementById('details_inspector_limit').value = data.inspector_limit || 0;
+            document.getElementById('details_supervisor_limit').value = data.supervisor_limit || 0;
             
             document.getElementById('detailsModal').classList.add('show');
+        }
+
+        function openAddClientModal() {
+            document.getElementById('addClientModal').classList.add('show');
         }
 
         function openGuardModal(id, clientUname) {
@@ -659,6 +817,26 @@ if ($guards_res) {
 
         function closeModal(id) {
             document.getElementById(id).classList.remove('show');
+        }
+
+        function toggleSupervisorFields() {
+            const chk = document.getElementById('create_supervisor_chk');
+            const fields = document.getElementById('supervisor_fields');
+            const inputs = fields.querySelectorAll('input');
+            
+            if (chk.checked) {
+                fields.style.display = 'block';
+                inputs.forEach(input => {
+                    if (input.id !== 'sup_contact') { // Contact is optional
+                        input.required = true;
+                    }
+                });
+            } else {
+                fields.style.display = 'none';
+                inputs.forEach(input => {
+                    input.required = false;
+                });
+            }
         }
 
         window.onclick = function(event) {

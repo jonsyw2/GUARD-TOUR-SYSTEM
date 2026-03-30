@@ -23,11 +23,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         <li>
-            <a href="manage_limits.php" class="nav-link <?php echo $current_page == 'manage_limits.php' ? 'active' : ''; ?>">
-                <span>⚙️</span> QR Limits
-            </a>
-        </li>
-        <li>
             <a href="login_logs_view.php" class="nav-link <?php echo $current_page == 'login_logs_view.php' ? 'active' : ''; ?>">
                 <span>📋</span> Login Logs
             </a>

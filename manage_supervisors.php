@@ -48,23 +48,30 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
     } else {
         $hashed_password = password_hash($password, PASSWORD_DEFAULT);
     
-        // Check Agency Supervisor Limit
-        $limit_check = $conn->query("SELECT supervisor_limit FROM users WHERE id = $agency_id");
-        $current_count_check = $conn->query("SELECT COUNT(*) as count FROM supervisors WHERE agency_id = $agency_id");
+        $assigned_clients = $_POST['assigned_clients'] ?? [];
+        $can_create = true;
         
-        $max_supervisors = 0;
-        $current_supervisors = 0;
-        
-        if ($limit_check && $current_count_check) {
-            $max_supervisors = (int)$limit_check->fetch_assoc()['supervisor_limit'];
-            $current_supervisors = (int)$current_count_check->fetch_assoc()['count'];
+        if (!empty($assigned_clients)) {
+            foreach ($assigned_clients as $client_id) {
+                $client_id = (int)$client_id;
+                // A client can only have ONE supervisor assigned (supervisor_id column in agency_clients)
+                $limit_sql = "SELECT supervisor_limit, supervisor_id FROM agency_clients WHERE agency_id = $agency_id AND client_id = $client_id";
+                $res = $conn->query($limit_sql);
+                if ($res && $row = $res->fetch_assoc()) {
+                    $max = (int)$row['supervisor_limit'];
+                    $is_assigned = !empty($row['supervisor_id']);
+                    if ($max > 0 && $is_assigned) {
+                        $message = "Creation failed: One or more selected clients already have an assigned supervisor.";
+                        $message_type = "error";
+                        $show_limit_modal = true;
+                        $can_create = false;
+                        break;
+                    }
+                }
+            }
         }
 
-        if ($max_supervisors > 0 && $current_supervisors >= $max_supervisors) {
-            $message = "Creation failed: Your agency has reached its maximum limit of $max_supervisors supervisors.";
-            $message_type = "error";
-            $show_limit_modal = true;
-        } else {
+        if ($can_create) {
             $conn->begin_transaction();
             try {
                 // 1. Create User
@@ -75,7 +82,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
                 $new_supervisor_id = $conn->insert_id;
 
                 // 3. Assign to Clients
-                $assigned_clients = $_POST['assigned_clients'] ?? [];
                 if (!empty($assigned_clients)) {
                     foreach ($assigned_clients as $client_id) {
                         $client_id = (int)$client_id;
@@ -227,7 +233,6 @@ if (isset($_SESSION['supervisor_created_key'])) {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link active">Manage Supervisors</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
@@ -303,15 +308,12 @@ if (isset($_SESSION['supervisor_created_key'])) {
                             <tbody>
                                 <?php if ($supervisors_res && $supervisors_res->num_rows > 0): ?>
                                     <?php while($row = $supervisors_res->fetch_assoc()): ?>
-                                        <tr>
+                                        <tr onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['contact_no']); ?>', '<?php echo addslashes($row['username']); ?>')" style="cursor: pointer;">
                                             <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
                                             <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
                                             <td><?php echo htmlspecialchars($row['contact_no'] ?: '---'); ?></td>
                                             <td>
-                                                <div style="display: flex; gap: 8px;">
-                                                    <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['contact_no']); ?>', '<?php echo addslashes($row['username']); ?>')" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Edit</button>
-                                                    <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Delete</button>
-                                                </div>
+                                                <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Delete</button>
                                             </td>
                                         </tr>
                                     <?php endwhile; ?>

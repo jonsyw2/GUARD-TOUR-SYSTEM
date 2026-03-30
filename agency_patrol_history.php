@@ -95,10 +95,13 @@ $history_sql = "
     LIMIT 200
 ";
 
-$history_res = $conn->query($history_sql);
+$history_res = null;
+if (!empty($filter_client)) {
+    $history_res = $conn->query($history_sql);
+}
 
 // Handle Download
-if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
+if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filter_client)) {
     // Re-run query WITHOUT the limit for full export
     $csv_sql = str_replace("LIMIT 200", "", $history_sql);
     $csv_res = $conn->query($csv_sql);
@@ -320,7 +323,6 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
@@ -362,7 +364,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                     <div class="form-group">
                         <label class="form-label" for="mapping_id">Client Site</label>
                         <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
-                            <option value="">-- All Clients --</option>
+                            <option value="">-- Select A Client --</option>
                             <?php if ($clients_res && $clients_res->num_rows > 0): ?>
                                 <?php mysqli_data_seek($clients_res, 0); ?>
                                 <?php while($c = $clients_res->fetch_assoc()): ?>
@@ -413,7 +415,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
 
             <div class="card">
                 <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-                    <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if ($history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if ($history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download</button>
+                    <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if (!$history_res || $history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if (!$history_res || $history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download</button>
                 </div>
 
                 <div class="table-container">
@@ -430,7 +432,11 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($history_res && $history_res->num_rows > 0): ?>
+                            <?php if (empty($filter_client)): ?>
+                                <tr>
+                                    <td colspan="7" class="empty-state">Please select a Client Site to view patrol history.</td>
+                                </tr>
+                            <?php elseif ($history_res && $history_res->num_rows > 0): ?>
                                 <?php while($row = $history_res->fetch_assoc()): ?>
                                     <tr>
                                         <td><strong><?php echo date('M d, Y h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
@@ -480,7 +486,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                                 <?php endwhile; ?>
                             <?php else: ?>
                                 <tr>
-                                    <td colspan="6" class="empty-state">No patrol activity found for the selected criteria.</td>
+                                    <td colspan="7" class="empty-state">No patrol activity found for the selected criteria.</td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>

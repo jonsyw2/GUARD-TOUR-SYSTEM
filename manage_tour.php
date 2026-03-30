@@ -305,11 +305,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
         else {
             // Check Per-Site QR Limit (excludes starting point)
             $limit_check = $conn->query("
-                SELECT u.qr_limit, 
+                SELECT ac.qr_limit, 
                 (SELECT COUNT(*) FROM checkpoints cp 
                  WHERE cp.agency_client_id = ac.id AND cp.is_zero_checkpoint = 0) as total_site_qrs
                 FROM agency_clients ac
-                JOIN users u ON ac.agency_id = u.id
                 WHERE ac.id = $mapping_id_qr
             ");
 
@@ -377,7 +376,7 @@ $limits_sql = "
         ac.id as mapping_id, 
         u.username as agency_name,
         ac.site_name,
-        u.qr_limit, 
+        ac.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
         (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_site_qrs,

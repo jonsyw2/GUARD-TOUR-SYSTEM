@@ -8,7 +8,7 @@ if ($_SESSION['user_level'] !== 'agency') {
 
 $agency_id = $_SESSION['user_id'] ?? null;
 
-// Ensure inspectors table exists
+// Ensure inspectors and assignments table exists
 $conn->query("CREATE TABLE IF NOT EXISTS inspectors (
     id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
@@ -17,6 +17,17 @@ $conn->query("CREATE TABLE IF NOT EXISTS inspectors (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 )");
+
+$conn->query("CREATE TABLE IF NOT EXISTS inspector_assignments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    inspector_id INT NOT NULL,
+    agency_client_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (inspector_id) REFERENCES inspectors(id) ON DELETE CASCADE,
+    FOREIGN KEY (agency_client_id) REFERENCES agency_clients(id) ON DELETE CASCADE
+)");
+
+$conn->query("ALTER TABLE inspectors ADD COLUMN IF NOT EXISTS contact_no VARCHAR(20) DEFAULT NULL");
 
 $message = '';
 $message_type = '';
@@ -50,40 +61,65 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
     $middle_name = $conn->real_escape_string($_POST['middle_name']);
     $last_name = $conn->real_escape_string($_POST['last_name']);
     
+    $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
+    
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
-    // Check Agency Inspector Limit
-    $limit_check = $conn->query("SELECT inspector_limit FROM users WHERE id = $agency_id");
-    $current_count_check = $conn->query("SELECT COUNT(*) as count FROM inspectors WHERE agency_id = $agency_id");
+    // Single dropdown: assigned_client is one value or empty
+    $assigned_client = isset($_POST['assigned_client']) && $_POST['assigned_client'] !== '' ? (int)$_POST['assigned_client'] : null;
+    $assigned_clients = $assigned_client ? [$assigned_client] : [];
+    $can_create = true;
     
-    if ($limit_check && $current_count_check) {
-        $max_inspectors = $limit_check->fetch_assoc()['inspector_limit'];
-        $current_inspectors = $current_count_check->fetch_assoc()['count'];
-        
-        if ($max_inspectors > 0 && $current_inspectors >= $max_inspectors) {
-            $message = "Creation failed: Your agency has reached its maximum limit of $max_inspectors inspectors.";
-            $message_type = "error";
-            $show_limit_modal = true;
-        } else {
-            $unique_key = generateUniqueInspectorKey($conn);
-            $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
-            
-            $conn->begin_transaction();
-            try {
-                $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'inspector')");
-                $user_id = $conn->insert_id;
-                $conn->query("INSERT INTO inspectors (user_id, agency_id, name) VALUES ($user_id, $agency_id, '$fullname')");
-                
-                $conn->commit();
-                $_SESSION['inspector_created_key'] = $unique_key;
-                header("Location: manage_inspectors.php");
-                exit();
-            } catch (Exception $e) {
-                $conn->rollback();
-                $message = "Error creating inspector: " . $e->getMessage();
-                $message_type = "error";
-                $show_status_modal = true;
+    if (!empty($assigned_clients)) {
+        foreach ($assigned_clients as $client_id) {
+            $client_id = (int)$client_id;
+            $limit_sql = "
+                SELECT ac.inspector_limit, 
+                       (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors
+                FROM agency_clients ac 
+                WHERE ac.id = $client_id
+            ";
+            $res = $conn->query($limit_sql);
+            if ($res && $row = $res->fetch_assoc()) {
+                $max = (int)$row['inspector_limit'];
+                $current = (int)$row['current_inspectors'];
+                if ($max > 0 && $current >= $max) {
+                    $message = "Creation failed: One or more selected clients have reached their inspector limit.";
+                    $message_type = "error";
+                    $show_limit_modal = true;
+                    $can_create = false;
+                    break;
+                }
             }
+        }
+    }
+
+    if ($can_create) {
+        $unique_key = generateUniqueInspectorKey($conn);
+        $hashed_password = password_hash($unique_key, PASSWORD_DEFAULT);
+        
+        $conn->begin_transaction();
+        try {
+            $conn->query("INSERT INTO users (username, password, user_level) VALUES ('$unique_key', '$hashed_password', 'inspector')");
+            $user_id = $conn->insert_id;
+            $conn->query("INSERT INTO inspectors (user_id, agency_id, name, contact_no) VALUES ($user_id, $agency_id, '$fullname', '$contact_no')");
+            $new_inspector_id = $conn->insert_id;
+            
+            // Assign to Clients
+            foreach ($assigned_clients as $client_id) {
+                $client_id = (int)$client_id;
+                $conn->query("INSERT INTO inspector_assignments (inspector_id, agency_client_id) VALUES ($new_inspector_id, $client_id)");
+            }
+
+            $conn->commit();
+            $_SESSION['inspector_created_key'] = $unique_key;
+            header("Location: manage_inspectors.php");
+            exit();
+        } catch (Exception $e) {
+            $conn->rollback();
+            $message = "Error creating inspector: " . $e->getMessage();
+            $message_type = "error";
+            $show_status_modal = true;
         }
     }
 }
@@ -131,8 +167,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_inspector'])) {
     }
 }
 
-// Fetch Inspectors created by this agency
-$inspectors_sql = "SELECT i.id, i.name, u.username, i.created_at FROM inspectors i JOIN users u ON i.user_id = u.id WHERE i.agency_id = $agency_id ORDER BY i.created_at DESC";
+// Fetch Agency Clients for assignment
+$clients_res = $conn->query("SELECT id, company_name, (SELECT username FROM users WHERE id = client_id) as client_username FROM agency_clients WHERE agency_id = $agency_id ORDER BY company_name ASC");
+$all_clients = [];
+if ($clients_res) {
+    while($c = $clients_res->fetch_assoc()) $all_clients[] = $c;
+}
+
+// Fetch Inspectors created by this agency with assigned clients
+$inspectors_sql = "
+    SELECT i.id, i.name, u.username, i.created_at,
+           GROUP_CONCAT(COALESCE(ac.company_name, cu.username) SEPARATOR ', ') as assigned_clients
+    FROM inspectors i 
+    JOIN users u ON i.user_id = u.id 
+    LEFT JOIN inspector_assignments ia ON i.id = ia.inspector_id
+    LEFT JOIN agency_clients ac ON ia.agency_client_id = ac.id
+    LEFT JOIN users cu ON ac.client_id = cu.id
+    WHERE i.agency_id = $agency_id 
+    GROUP BY i.id
+    ORDER BY i.created_at DESC
+";
 $inspectors_res = $conn->query($inspectors_sql);
 ?>
 <!DOCTYPE html>
@@ -182,7 +236,6 @@ $inspectors_res = $conn->query($inspectors_sql);
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link active">Manage Inspectors</a></li>
@@ -217,6 +270,19 @@ $inspectors_res = $conn->query($inspectors_sql);
                             <label class="form-label">Middle Name (Optional)</label>
                             <input type="text" name="middle_name" class="form-control" placeholder="e.g. Marie">
                         </div>
+                        <div class="form-group">
+                            <label class="form-label">Contact No.</label>
+                            <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Assign to Client (Optional)</label>
+                            <select name="assigned_client" class="form-control">
+                                <option value="">-- No Direct Assignment --</option>
+                                <?php foreach ($all_clients as $client): ?>
+                                    <option value="<?php echo $client['id']; ?>"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_username']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                         <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 20px;">An access key will be automatically generated upon account creation.</p>
                         <button type="submit" name="create_inspector" class="btn btn-primary">Create Inspector Account</button>
                     </form>
@@ -228,6 +294,7 @@ $inspectors_res = $conn->query($inspectors_sql);
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Assigned Clients</th>
                                 <th>Access Key</th>
                                 <th>Actions</th>
                             </tr>
@@ -243,12 +310,18 @@ $inspectors_res = $conn->query($inspectors_sql);
                                     unset($first_parts[0]);
                                     $middle = trim(implode(' ', $first_parts));
                                 ?>
-                                    <tr>
+                                    <tr onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>')" style="cursor: pointer;">
                                         <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                        <td>
+                                            <?php if ($row['assigned_clients']): ?>
+                                                <div style="font-size: 0.8rem; color: #4b5563;"><?php echo htmlspecialchars($row['assigned_clients']); ?></div>
+                                            <?php else: ?>
+                                                <span style="font-size: 0.8rem; color: #9ca3af; font-style: italic;">No clients assigned</span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
                                         <td>
-                                            <button onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #6366f1; color: white;">Edit</button>
-                                            <button onclick="openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; color: white;">Delete</button>
+                                            <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; color: white;">Delete</button>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
