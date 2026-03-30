@@ -113,11 +113,11 @@ $recent_scans = $conn->query("
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
+            <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
