@@ -24,14 +24,23 @@ $conn->query("
         id INT AUTO_INCREMENT PRIMARY KEY,
         inspector_id INT NOT NULL,
         agency_client_id INT NOT NULL,
+        checkpoint_id INT DEFAULT 0,
         scan_time DATETIME NOT NULL,
         status VARCHAR(50) DEFAULT 'Routine',
         remarks TEXT,
+        photo_path VARCHAR(255) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX (inspector_id),
         INDEX (agency_client_id)
     ) ENGINE=InnoDB
 ");
+
+// Schema update for existing tables
+$conn->query("ALTER TABLE inspector_scans ADD COLUMN IF NOT EXISTS checkpoint_id INT DEFAULT 0 AFTER agency_client_id");
+$conn->query("ALTER TABLE inspector_scans ADD COLUMN IF NOT EXISTS photo_path VARCHAR(255) DEFAULT NULL AFTER remarks");
+
+// Data repair: Fix invalid scan_time (0000-00-00) by using created_at
+$conn->query("UPDATE inspector_scans SET scan_time = created_at WHERE scan_time = '0000-00-00 00:00:00' OR scan_time IS NULL");
 
 // Get all agency_client mapping IDs for this client
 $maps_sql = "SELECT id, agency_id FROM agency_clients WHERE client_id = $client_id";
@@ -88,7 +97,8 @@ $history_sql = "
         ac.site_name,
         i.name as inspector_name,
         iscn.status,
-        iscn.remarks
+        iscn.remarks,
+        iscn.photo_path
     FROM inspector_scans iscn
     JOIN agency_clients ac ON iscn.agency_client_id = ac.id
     JOIN inspectors i ON iscn.inspector_id = i.id
@@ -210,6 +220,37 @@ $history_res = $conn->query($history_sql);
         .btn-cancel:hover { background: #e5e7eb; }
         .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
         .btn-confirm:hover { background: #be123c; }
+
+        /* Photo View Styles */
+        .btn-view-photo {
+            padding: 6px 12px;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-view-photo:hover { background-color: #2563eb; }
+        
+        .photo-modal-content { max-width: 800px !important; }
+        .modal-image-container { 
+            position: relative; 
+            width: 100%; 
+            background: #f3f4f6; 
+            border-radius: 8px; 
+            margin: 20px 0; 
+            max-height: 65vh;
+            overflow: auto;
+        }
+        #modalImage { 
+            max-width: 100%; 
+            display: block; 
+            border-radius: 8px; 
+            margin: 0 auto;
+        }
     </style>
 </head>
 <body>
@@ -286,6 +327,7 @@ $history_res = $conn->query($history_sql);
                                 <th>Inspector Name</th>
                                 <th>Status</th>
                                 <th>Remarks</th>
+                                <th>Photo</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -303,6 +345,13 @@ $history_res = $conn->query($history_sql);
                                         <td style="font-size: 0.85rem; color: #4b5563; font-style: italic;">
                                             <?php echo htmlspecialchars($row['remarks'] ?? '---'); ?>
                                         </td>
+                                        <td>
+                                            <?php if (!empty($row['photo_path'])): ?>
+                                                <button class="btn-view-photo" onclick="viewPhoto('<?php echo htmlspecialchars($row['photo_path']); ?>', 'Inspector Report - <?php echo htmlspecialchars($row['inspector_name']); ?>')">View Photo</button>
+                                            <?php else: ?>
+                                                <span style="color: #9ca3af; font-size: 0.75rem;">No Photo</span>
+                                            <?php endif; ?>
+                                        </td>
                                     </tr>
                                 <?php endwhile; ?>
                             <?php else: ?>
@@ -317,6 +366,20 @@ $history_res = $conn->query($history_sql);
 
         </div>
     </main>
+
+    <!-- Photo Modal -->
+    <div class="modal-overlay" id="photoModal">
+        <div class="modal-content photo-modal-content">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
+            <h3 class="modal-title" id="photoModalTitle">Inspector Photo</h3>
+            <div class="modal-image-container">
+                <img id="modalImage" src="" alt="Inspection Photo">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" onclick="closeAllModals()" style="width: 100%;">Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
@@ -335,11 +398,29 @@ $history_res = $conn->query($history_sql);
     </div>
 
     <script>
+        function viewPhoto(url, title) {
+            const modal = document.getElementById('photoModal');
+            const modalImg = document.getElementById('modalImage');
+            const modalTitle = document.getElementById('photoModalTitle');
+            
+            modalTitle.innerText = title;
+            modalImg.src = url;
+            
+            modal.classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
+        }
+
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
+            if (event.target.classList.contains('modal-overlay')) {
+                closeAllModals();
             }
         }
     </script>

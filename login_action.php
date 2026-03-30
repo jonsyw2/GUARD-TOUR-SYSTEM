@@ -10,12 +10,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $ip_address = $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN';
     $user_agent = $conn->real_escape_string($_SERVER['HTTP_USER_AGENT'] ?? 'UNKNOWN');
 
+    $login_type = $_POST['login_type'] ?? 'staff';
+
     $sql = "SELECT * FROM users WHERE username = '$username'";
     $result = $conn->query($sql);
 
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
         
+        // Handle Inspector/Guard Login with Access Key
+        if ($login_type === 'inspector' || $login_type === 'guard') {
+            $password = $username; // Use the access key as password
+            if ($user['user_level'] !== $login_type) {
+                echo "<script>alert('Invalid access key for " . ucfirst($login_type) . " login!'); window.location.href='login.php';</script>";
+                exit();
+            }
+        }
+
         // Check Account Status
         if (($user['status'] ?? 'active') === 'suspended' && $user['user_level'] === 'agency') {
             echo "<script>alert('Your account has been suspended. Please contact the administrator.'); window.location.href='login.php';</script>";

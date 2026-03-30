@@ -8,6 +8,9 @@ if ($_SESSION['user_level'] !== 'client') {
 
 $client_id = $_SESSION['user_id'];
 
+// Data repair: Fix invalid scan_time (0000-00-00) in patrol scans
+$conn->query("UPDATE scans SET scan_time = CURRENT_TIMESTAMP WHERE scan_time = '0000-00-00 00:00:00' OR scan_time IS NULL");
+
 // Get all agency_client mapping IDs for this client
 $maps_sql = "SELECT id, site_name, agency_id FROM agency_clients WHERE client_id = $client_id";
 $maps_res = $conn->query($maps_sql);
@@ -75,7 +78,9 @@ $where_sql = implode(" AND ", $where_clauses);
 // Fetch history
 $history_sql = "
     SELECT 
+        DATE(s.scan_time) as scan_date,
         s.scan_time,
+        s.tour_session_id,
         c.name as checkpoint_name,
         g.name as guard_name,
         s.status,
@@ -87,7 +92,7 @@ $history_sql = "
     JOIN checkpoints c ON s.checkpoint_id = c.id
     JOIN guards g ON s.guard_id = g.id
     WHERE $where_sql
-    ORDER BY s.scan_time DESC
+    ORDER BY DATE(s.scan_time) DESC, COALESCE(s.tour_session_id, '') DESC, s.scan_time ASC
     LIMIT 200
 ";
 
@@ -130,10 +135,24 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
             <tbody>';
     
     if ($csv_res && $csv_res->num_rows > 0) {
+        $current_csv_session = '';
         while ($row = $csv_res->fetch_assoc()) {
+            $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . '|' . $row['guard_name']);
+            if ($current_csv_session !== $session_id) {
+                $current_csv_session = $session_id;
+                
+                // Robust date parsing to avoid 1970
+                $raw_time = $row['tour_session_id'] ?: $row['scan_time'];
+                $ts = strtotime($raw_time);
+                $display_time = ($ts && $ts > 0) ? date('M d, Y h:i A', $ts) : date('M d, Y h:i A'); // Fallback to current time if invalid
+                
+                $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
+                $display_guard = htmlspecialchars($row['guard_name']);
+                echo '<tr style="background-color: #f1f5f9;"><td colspan="6" style="font-weight: bold; text-align: left; padding: 10px; border: 1px solid #cbd5e1;">TOUR CYCLE: ' . $display_time . ' | ' . $display_shift . ' Shift | Guard: ' . $display_guard . '</td></tr>';
+            }
             $status_class = 'status-' . strtolower($row['status']);
             echo '<tr>';
-            echo '<td class="text-center">' . date('M d, Y h:i:s A', strtotime($row['scan_time'])) . '</td>';
+            echo '<td class="text-center">' . date('h:i:s A', strtotime($row['scan_time'])) . '</td>';
             echo '<td class="text-center">' . htmlspecialchars($row['shift'] ?? '---') . '</td>';
             echo '<td>' . htmlspecialchars($row['checkpoint_name']) . '</td>';
             echo '<td>' . htmlspecialchars($row['guard_name']) . '</td>';
@@ -417,9 +436,39 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                         </thead>
                         <tbody>
                             <?php if ($history_res && $history_res->num_rows > 0): ?>
-                                <?php while($row = $history_res->fetch_assoc()): ?>
+                                <?php 
+                                $current_session = ''; 
+                                while($row = $history_res->fetch_assoc()): 
+                                    $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . '|' . $row['guard_name']);
+                                    if ($current_session !== $session_id):
+                                        $current_session = $session_id;
+                                        
+                                        // Robust date parsing to avoid 1970
+                                        $raw_cycle = $row['tour_session_id'] ?: $row['scan_time'];
+                                        $cycle_ts = strtotime($raw_cycle);
+                                        $cycle_time = ($cycle_ts && $cycle_ts > 0) ? date('M d, Y h:i A', $cycle_ts) : date('M d, Y h:i A');
+
+                                        $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
+                                        $display_guard = htmlspecialchars($row['guard_name']);
+                                ?>
+                                    <tr style="background-color: #f8fafc; border-top: 2px solid #e2e8f0; border-bottom: 2px solid #e2e8f0;">
+                                        <td colspan="7" style="font-weight: 700; color: #334155; padding: 14px 16px; font-size: 0.9rem; background: linear-gradient(to right, #f8fafc, #ffffff);">
+                                            <div style="display: flex; align-items: center; gap: 10px;">
+                                                <div style="background: #e2e8f0; padding: 6px; border-radius: 8px; color: #64748b;">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
+                                                </div>
+                                                <span style="text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-size: 0.75rem;">Tour Cycle:</span>
+                                                <span style="color: #1e293b;"><?php echo $cycle_time; ?></span>
+                                                <span style="color: #cbd5e1;">&bull;</span>
+                                                <span style="color: #64748b;"><?php echo $display_shift; ?> Shift</span>
+                                                <span style="color: #cbd5e1;">&bull;</span>
+                                                <span style="color: #64748b;">Guard: <strong style="color: #1e293b;"><?php echo $display_guard; ?></strong></span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endif; ?>
                                     <tr>
-                                        <td><strong><?php echo date('M d, Y h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
+                                        <td><strong><?php echo date('h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
                                         <td><?php echo htmlspecialchars($row['shift'] ?? '---'); ?></td>
                                         <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                         <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
