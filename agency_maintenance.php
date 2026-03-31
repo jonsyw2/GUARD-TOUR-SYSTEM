@@ -1269,9 +1269,6 @@ include 'admin_layout/sidebar.php';
                 data.forEach(item => {
                     const isSuspended = item.status === 'suspended';
                     const statusTag = isSuspended ? `<span style="color:#ef4444; font-size: 0.7rem; font-weight:700;">[SUSPENDED]</span>` : '';
-                    const suspendAction = isSuspended 
-                        ? `<button onclick="toggleClientStatus(${item.user_id}, 'active')" class="btn-sm" style="background:#10b981; color:white; border:none; padding:4px 12px; width:auto; font-weight:600;">Restore</button>` 
-                        : `<button onclick="toggleClientStatus(${item.user_id}, 'suspended')" class="btn-sm" style="background:#f59e0b; color:white; border:none; padding:4px 12px; width:auto; font-weight:600;">Suspend</button>`;
 
                     html += `
                         <li class="ql-data-item" style="flex-direction: column; align-items: stretch; gap: 4px;">
@@ -1282,8 +1279,6 @@ include 'admin_layout/sidebar.php';
                                 </div>
                                 <div style="display:flex; align-items:center; gap: 4px;">
                                     <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Add Limits +</button>
-                                    ${suspendAction}
-                                    <button onclick="deleteClientFull(${item.user_id})" class="btn-sm" style="background:#ef4444; color:white; border:none; padding:4px 12px; width:auto; font-weight:600;">Delete</button>
                                 </div>
                             </div>
                             <div id="adj_form_${item.id}" class="ql-adj-container">
