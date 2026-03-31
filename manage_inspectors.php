@@ -197,7 +197,7 @@ $inspectors_sql = "
     LEFT JOIN users cu ON ac.client_id = cu.id
     WHERE i.agency_id = $agency_id 
     GROUP BY i.id
-    ORDER BY i.created_at DESC
+    ORDER BY i.id ASC
 ";
 $inspectors_res = $conn->query($inspectors_sql);
 ?>

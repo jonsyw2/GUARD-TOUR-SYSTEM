@@ -301,7 +301,7 @@ $clients_sql = "
     JOIN users u ON ac.client_id = u.id 
     JOIN users ag_u ON ac.agency_id = ag_u.id
     WHERE ac.agency_id = $agency_id 
-    ORDER BY u.username ASC";
+    ORDER BY COALESCE(ac.company_name, u.username) ASC";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 while ($row = $clients_res->fetch_assoc()) {
@@ -773,7 +773,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <option value="">-- Choose a Client Site --</option>
                                 <?php foreach ($clients_data as $client): ?>
                                     <option value="<?php echo $client['mapping_id']; ?>" <?php echo $selected_mapping_id == $client['mapping_id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($client['client_name']); ?> <?php echo $client['site_name'] ? "(".htmlspecialchars($client['site_name']).")" : ""; ?>
+                                        <?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?> <?php echo $client['site_name'] ? "(".htmlspecialchars($client['site_name']).")" : ""; ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -966,7 +966,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         <option value="" disabled selected>-- Choose Client --</option>
                                         <?php foreach($clients_data as $client): ?>
                                             <option value="<?php echo $client['mapping_id']; ?>">
-                                                <?php echo htmlspecialchars($client['client_name']); ?>
+                                                <?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?>
                                             </option>
                                         <?php endforeach; ?>
                                     </select>
@@ -1019,7 +1019,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <div class="client-status-card">
                                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                                         <strong style="color: #111827;">
-                                            <?php echo htmlspecialchars($client['client_name']); ?>
+                                            <?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?>
                                             <?php if ($client['site_name']): ?>
                                                 <span style="font-weight: normal; color: #6b7280; font-size: 0.85rem;"> - <?php echo htmlspecialchars($client['site_name']); ?></span>
                                             <?php endif; ?>
@@ -1655,12 +1655,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                         circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
                         circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
-                        let typeLabel = index;
-                        if (cp.isStart) typeLabel = 'S';
-                        else if (cp.isEnd) typeLabel = 'E';
-
+                        const nameTrim = (cp.name || '').trim();
+                        const isNumeric = /^\d+$/.test(nameTrim);
+                        let innerText = isNumeric ? nameTrim : (nameTrim ? nameTrim.charAt(0).toUpperCase() : '');
+                        
                         circle.innerHTML = `
-                            <div class="label">${cp.name}</div>
+                            <span>${innerText}</span>
+                            ${isNumeric ? '' : `<div class="label">${cp.name}</div>`}
                         `;
                         
                         let x = parseInt(cp.visual_pos_x) || 0;

@@ -17,7 +17,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $user = $result->fetch_assoc();
         
         // Check Account Status
-        if (($user['status'] ?? 'active') === 'suspended' && $user['user_level'] === 'agency') {
+        if (($user['status'] ?? 'active') === 'suspended') {
             echo "<script>alert('Your account has been suspended. Please contact the administrator.'); window.location.href='login.php';</script>";
             exit();
         }

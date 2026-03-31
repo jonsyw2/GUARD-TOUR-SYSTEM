@@ -17,8 +17,8 @@ $clients_count_result = $conn->query("SELECT COUNT(*) as count FROM users WHERE 
 $clients_count = $clients_count_result ? $clients_count_result->fetch_assoc()['count'] : 0;
 
 // Fetch lists
-$agencies_list = $conn->query("SELECT id, username FROM users WHERE user_level = 'agency' ORDER BY username ASC LIMIT 10");
-$clients_list = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC LIMIT 10");
+$agencies_list = $conn->query("SELECT id, username FROM users WHERE user_level = 'agency' ORDER BY id DESC LIMIT 10");
+$clients_list = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY id DESC LIMIT 10");
 
 // Fetch 5 most recent login logs
 $recent_logins = $conn->query("SELECT username, ip_address, status, timestamp FROM login_logs ORDER BY timestamp DESC LIMIT 5");

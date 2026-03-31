@@ -11,6 +11,68 @@ $message = '';
 $message_type = '';
 $show_status_modal = false;
 
+// Handle Suspend Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['suspend_client'])) {
+    $user_id = (int)$_POST['user_id'];
+    if ($conn->query("UPDATE users SET status = 'suspended' WHERE id = $user_id")) {
+        $message = "Client suspended successfully.";
+        $message_type = "success";
+        $show_status_modal = true;
+    } else {
+        $message = "Error suspending client: " . $conn->error;
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
+// Handle Restore Client
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['restore_client'])) {
+    $user_id = (int)$_POST['user_id'];
+    if ($conn->query("UPDATE users SET status = 'active' WHERE id = $user_id")) {
+        $message = "Client restored successfully.";
+        $message_type = "success";
+        $show_status_modal = true;
+    } else {
+        $message = "Error restoring client: " . $conn->error;
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
+// Handle Remove Client Entirely
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['remove_client_full'])) {
+    $user_id = (int)$_POST['user_id'];
+    $conn->begin_transaction();
+    try {
+        $mapping_res = $conn->query("SELECT id FROM agency_clients WHERE client_id = $user_id AND agency_id = $agency_id");
+        $mapping_ids = [];
+        if ($mapping_res) {
+            while ($m = $mapping_res->fetch_assoc()) $mapping_ids[] = $m['id'];
+        }
+        if (!empty($mapping_ids)) {
+            $m_in = implode(',', $mapping_ids);
+            $conn->query("DELETE FROM guard_assignments WHERE agency_client_id IN ($m_in)");
+            $conn->query("DELETE FROM inspector_assignments WHERE agency_client_id IN ($m_in)");
+            $conn->query("DELETE FROM tour_assignments WHERE agency_client_id IN ($m_in)");
+            $conn->query("DELETE FROM shifts WHERE agency_client_id IN ($m_in)");
+            $conn->query("DELETE FROM checkpoints WHERE agency_client_id IN ($m_in)");
+            $conn->query("DELETE FROM agency_clients WHERE id IN ($m_in)");
+        }
+        if (!$conn->query("DELETE FROM users WHERE id = $user_id")) {
+            throw new Exception("Error deleting user: " . $conn->error);
+        }
+        $conn->commit();
+        $message = "Client permanently removed. Assigned limits/guards are now freed.";
+        $message_type = "success";
+        $show_status_modal = true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = "Error removing client: " . $e->getMessage();
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 
 // Handle Company Details Update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
@@ -23,10 +85,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
-    $qr_limit = (int)$_POST['qr_limit'];
-    $guard_limit = (int)$_POST['guard_limit'];
-    $inspector_limit = (int)$_POST['inspector_limit'];
-    $supervisor_limit = (int)$_POST['supervisor_limit'];
+    $qr_limit = 0;
+    $guard_limit = 0;
+    $inspector_limit = 0;
+    $supervisor_limit = 0;
     
     // Handle File Upload
     $logo_path = null;
@@ -91,10 +153,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
-    $qr_limit = (int)$_POST['qr_limit'];
-    $guard_limit = (int)$_POST['guard_limit'];
-    $inspector_limit = (int)$_POST['inspector_limit'];
-    $supervisor_limit = (int)$_POST['supervisor_limit'];
+    $qr_limit = 0;
+    $guard_limit = 0;
+    $inspector_limit = 0;
+    $supervisor_limit = 0;
 
     $conn->begin_transaction();
     try {
@@ -257,7 +319,7 @@ $clients = [];
 
 // Fetch Assigned Clients
 $clients_sql = "
-    SELECT ac.id as mapping_id, u.username as client_username, ac.company_name, ac.company_logo, 
+    SELECT ac.id as mapping_id, u.id as user_id, u.status, u.username as client_username, ac.company_name, ac.company_logo, 
            ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit,
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
@@ -274,7 +336,7 @@ $clients_sql = "
     JOIN users u ON ac.client_id = u.id
     JOIN users a ON ac.agency_id = a.id
     WHERE ac.agency_id = $agency_id
-    ORDER BY u.username ASC
+    ORDER BY ac.id ASC
 ";
 $clients_res = $conn->query($clients_sql);
 if ($clients_res) {
@@ -379,12 +441,24 @@ if ($guards_res) {
             <div class="card">
                 <div class="card-header">
                     <h3 style="margin: 0; border: none;"><?php echo $display_title; ?></h3>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <?php
+                            $limit_color = ($client_limit > 0 && $current_clients >= $client_limit) ? '#ef4444' : '#10b981';
+                            $limit_display = $client_limit > 0 ? $client_limit : '∞';
+                        ?>
+                        <div style="display: flex; align-items: center; gap: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 6px 14px; border-radius: 99px;">
+                            <span style="font-size: 0.75rem; color: #6b7280; font-weight: 500;">Client Slots:</span>
+                            <span style="font-size: 0.95rem; font-weight: 700; color: <?php echo $limit_color; ?>;">
+                                <?php echo $current_clients; ?> / <?php echo $limit_display; ?>
+                            </span>
+                        </div>
+                        <button class="btn-sm btn-primary" onclick="openAddClientModal()" style="padding: 8px 16px;">+ Add Client</button>
+                    </div>
                 </div>
                     <table>
                         <thead>
                             <tr>
                                 <th>#</th>
-                                <th>Client Account</th>
                                 <th>Company Details</th>
                                 <th>QR Checkpoints</th>
                                 <th>Guards Assigned</th>
@@ -400,7 +474,6 @@ if ($guards_res) {
                          ?>
                                 <tr onclick="openSummaryModal('<?php echo addslashes($row['company_name'] ?: $row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>', '<?php echo addslashes($row['contact_person'] ?? ''); ?>', '<?php echo addslashes($row['contact_person_no'] ?? ''); ?>', '<?php echo addslashes($row['email_address'] ?? ''); ?>', '<?php echo addslashes($row['company_address'] ?? ''); ?>')">
                                     <td><?php echo $i; ?></td>
-                                    <td><strong><?php echo htmlspecialchars($row['client_username']); ?></strong></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
                                             <?php if ($row['company_logo']): ?>
@@ -409,36 +482,57 @@ if ($guards_res) {
                                                 <div style="width: 40px; height: 40px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: #9ca3af; font-size: 0.75rem;">No Logo</div>
                                             <?php endif; ?>
                                             <div>
-                                                <div style="font-size: 0.9rem; font-weight: 600;"><?php echo $row['company_name'] ?: '<span style="color:#9ca3af; font-weight:400; font-style:italic;">No company name set</span>'; ?></div>
+                                                <div style="font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                                    <?php echo $row['company_name'] ?: '<span style="color:#9ca3af; font-weight:400; font-style:italic;">No company name set</span>'; ?>
+                                                    <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
+                                                        <span style="font-size: 0.65rem; background: #fee2e2; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">Suspended</span>
+                                                    <?php endif; ?>
+                                                </div>
+                                                <div style="font-size: 0.75rem; color: #6b7280; margin-top: 2px;">Account: <strong><?php echo htmlspecialchars($row['client_username']); ?></strong></div>
                                             </div>
                                         </div>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: <?php echo $row['qr_count'] >= $row['qr_limit'] ? '#ef4444' : '#10b981'; ?>">
-                                            Active: <?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?>
+                                        <span style="font-weight: 600; color: #10b981;">
+                                            Active: <?php echo $row['qr_count']; ?>
                                         </span>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: <?php echo $row['current_guards'] >= $row['guard_limit'] ? '#ef4444' : '#10b981'; ?>">
-                                            Active: <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
+                                        <span style="font-weight: 600; color: #10b981;">
+                                            Active: <?php echo $row['current_guards']; ?>
                                         </span>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: <?php echo $row['current_inspectors'] >= $row['inspector_limit'] ? '#ef4444' : '#10b981'; ?>">
-                                            Active: <?php echo $row['current_inspectors']; ?> / <?php echo $row['inspector_limit']; ?>
+                                        <span style="font-weight: 600; color: #10b981;">
+                                            Active: <?php echo $row['current_inspectors']; ?>
                                         </span>
                                     </td>
                                      <td>
                                         <div style="display: flex; gap: 8px; justify-content: flex-start;" onclick="event.stopPropagation()">
                                              <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">Edit Details</button>
                                             <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
+                                            <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
+                                                <form method="POST" action="" onsubmit="return confirm('Restore this client\'s access?');" style="margin:0;">
+                                                    <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
+                                                    <button type="submit" name="restore_client" class="btn-sm" style="background: #10b981; color: white; border: none; cursor: pointer;">Restore</button>
+                                                </form>
+                                            <?php else: ?>
+                                                <form method="POST" action="" onsubmit="return confirm('Suspend this client\'s access?');" style="margin:0;">
+                                                    <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
+                                                    <button type="submit" name="suspend_client" class="btn-sm" style="background: #f59e0b; color: white; border: none; cursor: pointer;">Suspend</button>
+                                                </form>
+                                            <?php endif; ?>
+                                            <form method="POST" action="" onsubmit="return confirm('Are you completely sure? This will permanently delete the client and free up all their assigned slots. This cannot be undone.');" style="margin:0;">
+                                                <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
+                                                <button type="submit" name="remove_client_full" class="btn-sm" style="background: #ef4444; color: white; border: none; cursor: pointer;">Remove</button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>
                             <?php else: ?>
                                 <tr onclick="openAddClientModal()" style="cursor: pointer;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='transparent'">
                                     <td><?php echo $i; ?></td>
-                                    <td colspan="6" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
+                                    <td colspan="5" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
                                 </tr>
                             <?php endif; ?>
                         <?php endfor; ?>
@@ -515,16 +609,7 @@ if ($guards_res) {
                                 <input type="text" name="contact_person_no" class="form-control" placeholder="Personal or Office Phone">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
-                                <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT LIMITS</label>
-                            </div>
 
-                            <div class="form-grid" style="grid-column: span 2; display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
-                                <div class="form-group"><label class="form-label">QR Limit</label><input type="number" name="qr_limit" class="form-control" value="0" min="0"></div>
-                                <div class="form-group"><label class="form-label">Guard Limit</label><input type="number" name="guard_limit" class="form-control" value="0" min="0"></div>
-                                <div class="form-group"><label class="form-label">Inspector Limit</label><input type="number" name="inspector_limit" class="form-control" value="0" min="0"></div>
-                                <input type="hidden" name="supervisor_limit" value="1">
-                            </div>
 
                             <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
                                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
@@ -681,22 +766,7 @@ if ($guards_res) {
                         <input type="text" name="contact_person_no" id="details_contact_person_no" class="form-control" placeholder="Personal or Office Phone">
                     </div>
 
-                    <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
-                        <label class="form-label" style="font-weight: 700; color: var(--primary);">CLIENT LIMITS</label>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">QR Limit</label>
-                        <input type="number" name="qr_limit" id="details_qr_limit" class="form-control" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Guard Limit</label>
-                        <input type="number" name="guard_limit" id="details_guard_limit" class="form-control" min="0">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Inspector Limit</label>
-                        <input type="number" name="inspector_limit" id="details_inspector_limit" class="form-control" min="0">
-                    </div>
-                    <input type="hidden" name="supervisor_limit" id="details_supervisor_limit">
+
 
                     <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
                         <label class="form-label">Company Logo (Photo)</label>
@@ -793,10 +863,7 @@ if ($guards_res) {
             document.getElementById('details_contact_person').value = data.contact_person || '';
             document.getElementById('details_contact_person_position').value = data.contact_person_position || '';
             document.getElementById('details_contact_person_no').value = data.contact_person_no || '';
-            document.getElementById('details_qr_limit').value = data.qr_limit || 0;
-            document.getElementById('details_guard_limit').value = data.guard_limit || 0;
-            document.getElementById('details_inspector_limit').value = data.inspector_limit || 0;
-            document.getElementById('details_supervisor_limit').value = data.supervisor_limit || 0;
+
             
             document.getElementById('detailsModal').classList.add('show');
         }

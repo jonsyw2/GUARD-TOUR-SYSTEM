@@ -111,7 +111,7 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
         }
 
         $assign_res = $conn->query("
-            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint,
+            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint, cp.is_end_checkpoint,
             (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
             FROM tour_assignments ta 
             JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
@@ -127,6 +127,7 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
                 continue;
 
             $row['isStart'] = (bool)($row['is_zero_checkpoint'] ?? false);
+            $row['isEnd'] = (bool)($row['is_end_checkpoint'] ?? false);
             $checkpoints[] = $row;
         }
 
@@ -407,14 +408,14 @@ $qrs_sql = "
     LEFT JOIN scans s ON c.id = s.checkpoint_id
     WHERE c.agency_client_id IN ($mapping_ids_str)
     GROUP BY c.id
-    ORDER BY c.is_zero_checkpoint DESC, c.name ASC
+    ORDER BY c.is_zero_checkpoint DESC, c.id ASC
 ";
 $qrs_result = $conn->query($qrs_sql);
 
 // Fetch available checkpoints for Tour Setup tab (exclude zero and end)
 $available_checkpoints = [];
 if ($mapping_id) {
-    $checkpoints_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0 ORDER BY name ASC");
+    $checkpoints_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0 ORDER BY id ASC");
     while ($row = $checkpoints_res->fetch_assoc()) {
         $available_checkpoints[] = $row;
     }
@@ -780,6 +781,18 @@ if ($mapping_id) {
             to { offset-distance: 100%; }
         }
         
+        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
+        .btn-cancel { background: #f3f4f6; color: #374151; }
+        .btn-cancel:hover { background: #e5e7eb; }
+        .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
+        .btn-confirm:hover { background: #be123c; }
+
+        /* Logout Specific Modal Icons */
+        .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
+        .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
+        .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
+        .modal-actions { display: flex; gap: 12px; margin-top: 20px; }
+
         .modal-content.large { max-width: 900px; }
         #visual-canvas { cursor: crosshair; }
     </style>
@@ -1127,13 +1140,19 @@ endif; ?>
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
         <div class="modal-content">
-            <h3 style="margin-bottom: 20px;">Ready to Leave?</h3>
-            <div style="display: flex; gap: 12px;">
-                <button class="btn" style="background:#f3f4f6; color:#374151; flex:1;" onclick="closeModal('logoutModal')">Cancel</button>
-                <a href="logout.php" style="flex:1; padding:12px; background:#ef4444; color:white; text-decoration:none; border-radius:8px; font-weight:600; font-size:1rem; display:block; box-sizing:border-box;">Log Out</a>
+            <div class="modal-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </div>
+            <h3 class="modal-title">Ready to Leave?</h3>
+            <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
+                <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
             </div>
         </div>
     </div>
+
+
 
     <!-- Create Checkpoint Modal -->
     <div class="modal-overlay" id="createQRModal">
@@ -1588,8 +1607,13 @@ endforeach; ?>
                         circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
                         circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
                         
+                        const nameTrim = (cp.name || '').trim();
+                        const isNumeric = /^\d+$/.test(nameTrim);
+                        let innerText = isNumeric ? nameTrim : (nameTrim ? nameTrim.charAt(0).toUpperCase() : '');
+                        
                         circle.innerHTML = `
-                            <div class="label">${cp.name}</div>
+                            <span>${innerText}</span>
+                            ${isNumeric ? '' : `<div class="label">${cp.name}</div>`}
                         `;
                         
                         let x = parseInt(cp.visual_pos_x) || 0;

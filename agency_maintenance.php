@@ -8,9 +8,44 @@ if (isset($_GET['ajax_agency_data'])) {
     $response = [];
 
     if ($type === 'clients') {
-        $sql = "SELECT ac.id, c.username as name, ac.client_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY c.username ASC";
+        $sql = "SELECT ac.id, c.id as user_id, c.username as name, c.status, ac.client_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
         $res = $conn->query($sql);
         while ($r = $res->fetch_assoc()) $response[] = $r;
+    } elseif ($type === 'toggle_client_status') {
+        $user_id = (int)($_GET['user_id'] ?? 0);
+        $new_status = $_GET['new_status'] === 'suspended' ? 'suspended' : 'active';
+        if ($conn->query("UPDATE users SET status = '$new_status' WHERE id = $user_id")) {
+            $response = ['success' => true];
+        } else {
+            $response = ['success' => false, 'message' => $conn->error];
+        }
+    } elseif ($type === 'delete_client_full') {
+        $user_id = (int)($_GET['user_id'] ?? 0);
+        $conn->begin_transaction();
+        try {
+            $mapping_res = $conn->query("SELECT id FROM agency_clients WHERE client_id = $user_id");
+            $mapping_ids = [];
+            if ($mapping_res) {
+                while ($m = $mapping_res->fetch_assoc()) $mapping_ids[] = $m['id'];
+            }
+            if (!empty($mapping_ids)) {
+                $m_in = implode(',', $mapping_ids);
+                $conn->query("DELETE FROM guard_assignments WHERE agency_client_id IN ($m_in)");
+                $conn->query("DELETE FROM inspector_assignments WHERE agency_client_id IN ($m_in)");
+                $conn->query("DELETE FROM tour_assignments WHERE agency_client_id IN ($m_in)");
+                $conn->query("DELETE FROM shifts WHERE agency_client_id IN ($m_in)");
+                $conn->query("DELETE FROM checkpoints WHERE agency_client_id IN ($m_in)");
+                $conn->query("DELETE FROM agency_clients WHERE id IN ($m_in)");
+            }
+            if (!$conn->query("DELETE FROM users WHERE id = $user_id")) {
+                throw new Exception("Error deleting user: " . $conn->error);
+            }
+            $conn->commit();
+            $response = ['success' => true];
+        } catch (Exception $e) {
+            $conn->rollback();
+            $response = ['success' => false, 'message' => $e->getMessage()];
+        }
     } elseif ($type === 'update_client_limits') {
         $mapping_id = (int)$_GET['mapping_id'];
         $add_client = (int)($_GET['add_client'] ?? 0);
@@ -52,15 +87,15 @@ if (isset($_GET['ajax_agency_data'])) {
             $response = ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
         }
     } elseif ($type === 'qr') {
-        $sql = "SELECT ac.site_name, c.username as client_name, (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as qr_count FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY c.username ASC";
+        $sql = "SELECT ac.site_name, c.username as client_name, (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as qr_count FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
         $res = $conn->query($sql);
         while ($r = $res->fetch_assoc()) $response[] = $r;
     } elseif ($type === 'guards') {
-        $sql = "SELECT g.name, GROUP_CONCAT(c.username SEPARATOR ', ') as assigned_clients FROM guards g LEFT JOIN guard_assignments ga ON g.id = ga.guard_id LEFT JOIN agency_clients ac ON ga.agency_client_id = ac.id LEFT JOIN users c ON ac.client_id = c.id WHERE g.agency_id = $agency_id GROUP BY g.id ORDER BY g.name ASC";
+        $sql = "SELECT g.name, GROUP_CONCAT(c.username SEPARATOR ', ') as assigned_clients FROM guards g LEFT JOIN guard_assignments ga ON g.id = ga.guard_id LEFT JOIN agency_clients ac ON ga.agency_client_id = ac.id LEFT JOIN users c ON ac.client_id = c.id WHERE g.agency_id = $agency_id GROUP BY g.id ORDER BY g.id ASC";
         $res = $conn->query($sql);
         while ($r = $res->fetch_assoc()) $response[] = $r;
     } elseif ($type === 'inspectors') {
-        $sql = "SELECT id, name FROM inspectors WHERE agency_id = $agency_id ORDER BY name ASC";
+        $sql = "SELECT id, name FROM inspectors WHERE agency_id = $agency_id ORDER BY id ASC";
         $res = $conn->query($sql);
         while ($r = $res->fetch_assoc()) $response[] = $r;
     } elseif ($type === 'inspector_info') {
@@ -148,7 +183,10 @@ $conn->query("CREATE TABLE IF NOT EXISTS inspector_assignments (
     INDEX (agency_client_id)
 ) ENGINE=InnoDB");
 
-// Limits columns handled by ALTER TABLE ... IF NOT EXISTS
+// Ensure agency-level pool limit columns exist in users table
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_qr_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_guard_limit INT DEFAULT 0");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_inspector_limit INT DEFAULT 0");
 
 // Removed generateUniqueSupervisorKeyAdmin function as it is no longer used.
 
@@ -165,6 +203,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_details'
     $contact_no = $conn->real_escape_string($_POST['contact_no']);
     $status = $conn->real_escape_string($_POST['status'] ?? 'active');
     $client_limit = (int)($_POST['client_limit'] ?? 0);
+    $agency_qr_limit = (int)($_POST['agency_qr_limit'] ?? 0);
+    $agency_guard_limit = (int)($_POST['agency_guard_limit'] ?? 0);
+    $agency_inspector_limit = (int)($_POST['agency_inspector_limit'] ?? 0);
 
     $sql = "UPDATE users SET 
             agency_name = '$agency_name',
@@ -172,7 +213,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_details'
             contact_person = '$contact_person',
             contact_no = '$contact_no',
             status = '$status',
-            client_limit = $client_limit
+            client_limit = $client_limit,
+            agency_qr_limit = $agency_qr_limit,
+            agency_guard_limit = $agency_guard_limit,
+            agency_inspector_limit = $agency_inspector_limit
             WHERE id = $agency_id";
 
     if ($conn->query($sql)) {
@@ -194,6 +238,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $username = $conn->real_escape_string($_POST['agency_username']);
     $password = password_hash($_POST['agency_password'], PASSWORD_DEFAULT);
     $client_limit = (int)$_POST['client_limit'];
+    $agency_qr_limit = (int)($_POST['agency_qr_limit'] ?? 0);
+    $agency_guard_limit = (int)($_POST['agency_guard_limit'] ?? 0);
+    $agency_inspector_limit = (int)($_POST['agency_inspector_limit'] ?? 0);
     $address = $conn->real_escape_string($_POST['address']);
     $contact_person = $conn->real_escape_string($_POST['contact_person'] ?? '');
     $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
@@ -207,8 +254,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, address, contact_person, contact_no) 
-                VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, '$address', '$contact_person', '$contact_no')";
+        $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, agency_qr_limit, agency_guard_limit, agency_inspector_limit, address, contact_person, contact_no) 
+                VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, $agency_qr_limit, $agency_guard_limit, $agency_inspector_limit, '$address', '$contact_person', '$contact_no')";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
@@ -461,7 +508,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor_acti
 }
 
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username, agency_name, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit, address, contact_person, contact_no, status FROM users WHERE user_level = 'agency' ORDER BY agency_name ASC, username ASC");
+$agencies_result = $conn->query("SELECT id, username, agency_name, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
 
 // Fetch all clients
 $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
@@ -481,7 +528,7 @@ $supervisors_sql = "
     LEFT JOIN agency_clients ac ON s.id = ac.supervisor_id
     LEFT JOIN users c ON ac.client_id = c.id
     GROUP BY s.id
-    ORDER BY s.name ASC
+    ORDER BY s.id ASC
 ";
 $supervisors_result = $conn->query($supervisors_sql);
 
@@ -577,7 +624,7 @@ include 'admin_layout/sidebar.php';
                                 <tr>
                                     <th>ID</th>
                                     <th>Agency Name</th>
-                                    <th>Account Username</th>
+                                    <th>Total Clients</th>
                                     <th>Status</th>
                                     <th>Control</th>
                                 </tr>
@@ -592,10 +639,14 @@ include 'admin_layout/sidebar.php';
                                             <td>
                                                 <strong><?php echo htmlspecialchars($row['agency_name'] ?: $row['username']); ?></strong>
                                                 <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
-                                                    Client Limit: <?php echo $row['client_limit']; ?>
+                                                    @<?php echo htmlspecialchars($row['username']); ?>
                                                 </div>
                                             </td>
-                                            <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
+                                            <td>
+                                                <div style="font-weight: 600; font-size: 1rem; color: var(--primary);">
+                                                    <?php echo $row['current_clients']; ?> / <?php echo $row['client_limit']; ?>
+                                                </div>
+                                            </td>
                                             <td>
                                                 <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
                                                     <span style="color: #ef4444; font-weight: 600;">● Suspended</span>
@@ -750,7 +801,24 @@ include 'admin_layout/sidebar.php';
                 </div>
                 <div class="form-group">
                     <label class="form-label">Client Account Limit</label>
-                    <input type="number" name="client_limit" class="form-control" value="0" min="0">
+                    <input type="number" name="client_limit" class="form-control" value="0" min="0" placeholder="0 = unlimited">
+                </div>
+                <div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 4px;">
+                    <label class="form-label" style="font-weight: 700; color: #374151; margin-bottom: 12px; display: block;">Agency Resource Pool Limits <span style="font-weight: 400; color: #9ca3af; font-size: 0.8rem;">(0 = unlimited)</span></label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">QR Checkpoints</label>
+                            <input type="number" name="agency_qr_limit" class="form-control" value="0" min="0">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">Guards</label>
+                            <input type="number" name="agency_guard_limit" class="form-control" value="0" min="0">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label class="form-label">Inspectors</label>
+                            <input type="number" name="agency_inspector_limit" class="form-control" value="0" min="0">
+                        </div>
+                    </div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" onclick="closeModal('addAgencyModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
@@ -882,6 +950,23 @@ include 'admin_layout/sidebar.php';
                     <label class="form-label">Client Limit</label>
                     <input type="number" name="client_limit" id="edit_agency_client_limit" class="form-control" min="0" placeholder="0 = unlimited">
                 </div>
+                <div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-bottom: 16px; text-align: left;">
+                    <label class="form-label" style="font-weight: 700; color: #374151; margin-bottom: 12px; display: block;">Agency Resource Pool Limits <span style="font-weight: 400; color: #9ca3af; font-size: 0.8rem;">(0 = unlimited)</span></label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                        <div class="form-group" style="margin-bottom: 0; text-align: left;">
+                            <label class="form-label">QR Checkpoints</label>
+                            <input type="number" name="agency_qr_limit" id="edit_agency_qr_limit" class="form-control" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; text-align: left;">
+                            <label class="form-label">Guards</label>
+                            <input type="number" name="agency_guard_limit" id="edit_agency_guard_limit" class="form-control" min="0" placeholder="0">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0; text-align: left;">
+                            <label class="form-label">Inspectors</label>
+                            <input type="number" name="agency_inspector_limit" id="edit_agency_inspector_limit" class="form-control" min="0" placeholder="0">
+                        </div>
+                    </div>
+                </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Account Status</label>
                     <select name="status" id="edit_agency_status" class="form-control">
@@ -998,6 +1083,9 @@ include 'admin_layout/sidebar.php';
             document.getElementById('edit_agency_contact_no').value = agency.contact_no;
             document.getElementById('edit_agency_status').value = agency.status;
             document.getElementById('edit_agency_client_limit').value = agency.client_limit || 0;
+            document.getElementById('edit_agency_qr_limit').value = agency.agency_qr_limit || 0;
+            document.getElementById('edit_agency_guard_limit').value = agency.agency_guard_limit || 0;
+            document.getElementById('edit_agency_inspector_limit').value = agency.agency_inspector_limit || 0;
             document.getElementById('editAgencyModal').classList.add('show');
         }
 
@@ -1179,11 +1267,24 @@ include 'admin_layout/sidebar.php';
             let html = '<ul class="ql-data-list">';
             if (type === 'clients') {
                 data.forEach(item => {
+                    const isSuspended = item.status === 'suspended';
+                    const statusTag = isSuspended ? `<span style="color:#ef4444; font-size: 0.7rem; font-weight:700;">[SUSPENDED]</span>` : '';
+                    const suspendAction = isSuspended 
+                        ? `<button onclick="toggleClientStatus(${item.user_id}, 'active')" class="btn-sm" style="background:#10b981; color:white; border:none; padding:4px 12px; width:auto; font-weight:600;">Restore</button>` 
+                        : `<button onclick="toggleClientStatus(${item.user_id}, 'suspended')" class="btn-sm" style="background:#f59e0b; color:white; border:none; padding:4px 12px; width:auto; font-weight:600;">Suspend</button>`;
+
                     html += `
                         <li class="ql-data-item" style="flex-direction: column; align-items: stretch; gap: 4px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                                <span class="ql-label">${item.name}</span>
-                                <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Add Limits +</button>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span class="ql-label">${item.name}</span>
+                                    ${statusTag}
+                                </div>
+                                <div style="display:flex; align-items:center; gap: 4px;">
+                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Add Limits +</button>
+                                    ${suspendAction}
+                                    <button onclick="deleteClientFull(${item.user_id})" class="btn-sm" style="background:#ef4444; color:white; border:none; padding:4px 12px; width:auto; font-weight:600;">Delete</button>
+                                </div>
                             </div>
                             <div id="adj_form_${item.id}" class="ql-adj-container">
                                 <p style="font-size: 0.7rem; color: #94a3b8; margin: 0 0 10px 0; font-weight:600; text-transform:uppercase;">Adjust Incremental Limits</p>
@@ -1316,6 +1417,37 @@ include 'admin_layout/sidebar.php';
                     loadQuickLinkTab('clients'); 
                 } else {
                     alert('Error: ' + data.message);
+                }
+            } catch (err) {
+                alert('An unexpected error occurred.');
+            }
+        }
+
+        async function toggleClientStatus(userId, newStatus) {
+            try {
+                const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&type=toggle_client_status&user_id=${userId}&new_status=${newStatus}`);
+                const data = await response.json();
+                if (data.success) {
+                    loadQuickLinkTab('clients');
+                } else {
+                    alert('Error updating status: ' + data.message);
+                }
+            } catch (err) {
+                alert('An unexpected error occurred.');
+            }
+        }
+
+        async function deleteClientFull(userId) {
+            if (!confirm('Are you completely sure? This will permanently delete the client and free up all their assigned guards. This cannot be undone.')) {
+                return;
+            }
+            try {
+                const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&type=delete_client_full&user_id=${userId}`);
+                const data = await response.json();
+                if (data.success) {
+                    loadQuickLinkTab('clients');
+                } else {
+                    alert('Error deleting client: ' + data.message);
                 }
             } catch (err) {
                 alert('An unexpected error occurred.');

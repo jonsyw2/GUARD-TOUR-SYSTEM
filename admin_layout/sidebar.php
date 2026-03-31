@@ -23,6 +23,11 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         <li>
+            <a href="admin_clients.php" class="nav-link <?php echo $current_page == 'admin_clients.php' ? 'active' : ''; ?>">
+                <span>👥</span> Client Management
+            </a>
+        </li>
+        <li>
             <a href="login_logs_view.php" class="nav-link <?php echo $current_page == 'login_logs_view.php' ? 'active' : ''; ?>">
                 <span>📋</span> Login Logs
             </a>

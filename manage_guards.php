@@ -311,7 +311,7 @@ $guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_n
                LEFT JOIN users cu ON ac.client_id = cu.id
                WHERE g.agency_id = $agency_id 
                GROUP BY g.id
-               ORDER BY g.created_at DESC";
+               ORDER BY g.id ASC";
 $guards_res = $conn->query($guards_sql);
 
 // Fetch assigned clients for the dropdown
