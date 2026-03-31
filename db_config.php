@@ -16,6 +16,9 @@ if ($is_local) {
     $password = 'YOUR_DB_PASSWORD_HERE'; // ← change to your cPanel DB password
 }
 
+// Set default timezone (e.g., Asia/Manila for UTC+8)
+date_default_timezone_set('Asia/Manila');
+
 // Create connection
 $conn = new mysqli($host, $username, $password, $dbname);
 
@@ -23,6 +26,9 @@ $conn = new mysqli($host, $username, $password, $dbname);
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
+
+// Ensure MySQL session also matches the PHP timezone
+$conn->query("SET time_zone = '+08:00'");
 
 // Secret key for JWT signing.
 define('JWT_SECRET_KEY', 'guard_tour_super_secret_key_2026!');

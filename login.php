@@ -55,6 +55,34 @@ if (isset($_COOKIE['jwt_token'])) {
             --error: #ef4444;
         }
 
+        .role-selector {
+            display: flex;
+            background: #f1f5f9;
+            padding: 4px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border-color);
+        }
+
+        .role-btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: transparent;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .role-btn.active {
+            background: var(--white);
+            color: var(--brand-green);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -339,12 +367,19 @@ if (isset($_COOKIE['jwt_token'])) {
                     <img src="assets/logo.png" alt="Sentinel Tour Logo">
                 </div>
 
+                <div class="role-selector">
+                    <button type="button" id="role_staff" class="role-btn active" onclick="setRole('staff')">Management</button>
+                    <button type="button" id="role_inspector" class="role-btn" onclick="setRole('inspector')">Inspector</button>
+                    <button type="button" id="role_guard" class="role-btn" onclick="setRole('guard')">Guard</button>
+                </div>
+
                 <div class="form-header">
-                    <h2>Welcome</h2>
-                    <p>Please enter your details to login</p>
+                    <h2 id="login-title">Welcome</h2>
+                    <p id="login-subtitle">Please enter your details to login</p>
                 </div>
 
                 <form action="login_action.php" method="POST" autocomplete="off">
+                    <input type="hidden" name="login_type" id="login_type" value="staff">
                     <div class="form-group">
                         <label for="username">Username</label>
                         <div class="input-wrapper">
@@ -375,5 +410,50 @@ if (isset($_COOKIE['jwt_token'])) {
             </div>
         </div>
     </div>
+    <script>
+        function setRole(role) {
+            const usernameLabel = document.querySelector('label[for="username"]');
+            const usernameInput = document.getElementById('username');
+            const passwordField = document.getElementById('password').closest('.form-group');
+            const roleStaff = document.getElementById('role_staff');
+            const roleInspector = document.getElementById('role_inspector');
+            const roleGuard = document.getElementById('role_guard');
+            const loginTypeInput = document.getElementById('login_type');
+            const loginTitle = document.getElementById('login-title');
+            const loginSubtitle = document.getElementById('login-subtitle');
+
+            // Reset all buttons
+            [roleStaff, roleInspector, roleGuard].forEach(btn => btn.classList.remove('active'));
+            
+            if (role === 'staff') {
+                usernameLabel.innerText = 'Username';
+                usernameInput.placeholder = 'Enter your username';
+                passwordField.style.display = 'block';
+                document.getElementById('password').required = true;
+                roleStaff.classList.add('active');
+                loginTypeInput.value = 'staff';
+                loginTitle.innerText = 'Management Login';
+                loginSubtitle.innerText = 'Admin, Agency, or Client access';
+            } else if (role === 'inspector') {
+                usernameLabel.innerText = 'Access Key';
+                usernameInput.placeholder = 'Enter your access key';
+                passwordField.style.display = 'none';
+                document.getElementById('password').required = false;
+                roleInspector.classList.add('active');
+                loginTypeInput.value = 'inspector';
+                loginTitle.innerText = 'Inspector Access';
+                loginSubtitle.innerText = 'Enter your unique access key to continue';
+            } else if (role === 'guard') {
+                usernameLabel.innerText = 'Guard ID / Key';
+                usernameInput.placeholder = 'Enter your guard access key';
+                passwordField.style.display = 'none';
+                document.getElementById('password').required = false;
+                roleGuard.classList.add('active');
+                loginTypeInput.value = 'guard';
+                loginTitle.innerText = 'Guard Access';
+                loginSubtitle.innerText = 'Secure login for duty guards';
+            }
+        }
+    </script>
 </body>
 </html>

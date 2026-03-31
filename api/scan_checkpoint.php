@@ -51,6 +51,7 @@ if (
     $photo_path = !empty($data->photo_path) ? "'" . $conn->real_escape_string($data->photo_path) . "'" : "NULL";
     $justification_photo_path = !empty($data->justification_photo_path) ? "'" . $conn->real_escape_string($data->justification_photo_path) . "'" : "NULL";
     $shift = !empty($data->shift) ? "'" . $conn->real_escape_string($data->shift) . "'" : "NULL";
+    $tour_session_id = !empty($data->tour_session_id) ? "'" . $conn->real_escape_string($data->tour_session_id) . "'" : "NULL";
 
     // Validate the checkpoint code exists
     $cp_sql = "SELECT id, agency_client_id FROM checkpoints WHERE checkpoint_code = '$code_value'";
@@ -67,8 +68,8 @@ if (
         if ($assign_res && $assign_res->num_rows > 0) {
             
             // Insert scan record
-            $insert_sql = "INSERT INTO scans (checkpoint_id, guard_id, scan_time, status, justification, photo_path, justification_photo_path, shift) 
-                          VALUES ($checkpoint_id, $guard_id, NOW(), '$status', $justification, $photo_path, $justification_photo_path, $shift)";
+            $insert_sql = "INSERT INTO scans (checkpoint_id, guard_id, scan_time, status, justification, photo_path, justification_photo_path, shift, tour_session_id) 
+                          VALUES ($checkpoint_id, $guard_id, NOW(), '$status', $justification, $photo_path, $justification_photo_path, $shift, $tour_session_id)";
             
             if ($conn->query($insert_sql)) {
                 http_response_code(201); // Created
