@@ -483,7 +483,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor_acti
         
         // Check Account Status
         if (($user['status'] ?? 'active') === 'suspended' && $user['user_level'] === 'agency') {
-            echo "<script>alert('Your account has been suspended. Please contact the administrator.'); window.location.href='login.php';</script>";
+            $_SESSION['auth_error'] = 'Your account has been suspended. Please contact the administrator.';
+            header("Location: login.php");
             exit();
         }
         $user_id = $user['user_id'];
@@ -1408,13 +1409,13 @@ include 'admin_layout/sidebar.php';
                 const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&type=update_client_limits&mapping_id=${id}&add_client=${addClient}&add_qr=${addQr}&add_guards=${addGuard}&add_inspectors=${addInsp}`);
                 const data = await response.json();
                 if (data.success) {
-                    alert('Limits updated successfully!');
+                    CustomModal.alert('Limits updated successfully!', 'Success', 'success');
                     loadQuickLinkTab('clients'); 
                 } else {
-                    alert('Error: ' + data.message);
+                    CustomModal.alert('Error: ' + data.message, 'Update Error', 'error');
                 }
             } catch (err) {
-                alert('An unexpected error occurred.');
+                CustomModal.alert('An unexpected error occurred.', 'Error', 'error');
             }
         }
 
@@ -1425,15 +1426,16 @@ include 'admin_layout/sidebar.php';
                 if (data.success) {
                     loadQuickLinkTab('clients');
                 } else {
-                    alert('Error updating status: ' + data.message);
+                    CustomModal.alert('Error updating status: ' + data.message, 'Update Error', 'error');
                 }
             } catch (err) {
-                alert('An unexpected error occurred.');
+                CustomModal.alert('An unexpected error occurred.', 'Error', 'error');
             }
         }
 
         async function deleteClientFull(userId) {
-            if (!confirm('Are you completely sure? This will permanently delete the client and free up all their assigned guards. This cannot be undone.')) {
+            const confirmed = await CustomModal.confirm('Are you completely sure? This will permanently delete the client and free up all their assigned guards. This cannot be undone.');
+            if (!confirmed) {
                 return;
             }
             try {
@@ -1442,10 +1444,10 @@ include 'admin_layout/sidebar.php';
                 if (data.success) {
                     loadQuickLinkTab('clients');
                 } else {
-                    alert('Error deleting client: ' + data.message);
+                    CustomModal.alert('Error deleting client: ' + data.message, 'Error', 'error');
                 }
             } catch (err) {
-                alert('An unexpected error occurred.');
+                CustomModal.alert('An unexpected error occurred.', 'Error', 'error');
             }
         }
 

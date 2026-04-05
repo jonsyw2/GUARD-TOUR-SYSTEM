@@ -227,13 +227,13 @@ include 'admin_layout/sidebar.php';
                                                 <button type="submit" name="toggle_status" style="padding: 5px 12px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Restore</button>
                                             </form>
                                         <?php else: ?>
-                                            <form method="POST" onsubmit="return confirm('Suspend this client?')" style="margin:0;">
+                                            <form method="POST" onsubmit="CustomModal.confirmForm(event, 'Suspend this client?')" style="margin:0;">
                                                 <input type="hidden" name="user_id" value="<?php echo $c['user_id']; ?>">
                                                 <input type="hidden" name="new_status" value="suspended">
                                                 <button type="submit" name="toggle_status" style="padding: 5px 12px; background: #f59e0b; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Suspend</button>
                                             </form>
                                         <?php endif; ?>
-                                        <form method="POST" onsubmit="return confirm('Permanently delete this client and all their data? This cannot be undone.')" style="margin:0;">
+                                        <form method="POST" onsubmit="CustomModal.confirmForm(event, 'Permanently delete this client and all their data? This cannot be undone.')" style="margin:0;">
                                             <input type="hidden" name="user_id" value="<?php echo $c['user_id']; ?>">
                                             <button type="submit" name="delete_client" style="padding: 5px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Delete</button>
                                         </form>

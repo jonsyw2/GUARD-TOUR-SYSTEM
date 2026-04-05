@@ -1,4 +1,5 @@
 <?php
+session_start();
 include 'db_config.php';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -16,12 +17,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $result = $conn->query($checkSql);
 
     if ($result->num_rows > 0) {
-        echo "<script>alert('Username already exists!'); window.location.href='register.php';</script>";
+        $_SESSION['auth_error'] = 'Username already exists!';
+        header("Location: register.php");
+        exit();
     } else {
         $sql = "INSERT INTO users (username, password, user_level) VALUES ('$username', '$password', '$user_level')";
         
         if ($conn->query($sql) === TRUE) {
-            echo "<script>alert('Registration successful!'); window.location.href='login.php';</script>";
+            $_SESSION['auth_success'] = 'Registration successful! You can now login.';
+            header("Location: login.php");
+            exit();
         } else {
             echo "Error: " . $sql . "<br>" . $conn->error;
         }

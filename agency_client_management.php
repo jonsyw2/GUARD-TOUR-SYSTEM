@@ -359,8 +359,8 @@ if ($guards_res) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Client Management - Agency Portal</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="js/modal_system.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
@@ -512,17 +512,17 @@ if ($guards_res) {
                                              <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">Edit Details</button>
                                             <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
                                             <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
-                                                <form method="POST" action="" onsubmit="return confirm('Restore this client\'s access?');" style="margin:0;">
+                                                <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Restore this client\'s access?');" style="margin:0;">
                                                     <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
                                                     <button type="submit" name="restore_client" class="btn-sm" style="background: #10b981; color: white; border: none; cursor: pointer;">Restore</button>
                                                 </form>
                                             <?php else: ?>
-                                                <form method="POST" action="" onsubmit="return confirm('Suspend this client\'s access?');" style="margin:0;">
+                                                <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Suspend this client\'s access?');" style="margin:0;">
                                                     <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
                                                     <button type="submit" name="suspend_client" class="btn-sm" style="background: #f59e0b; color: white; border: none; cursor: pointer;">Suspend</button>
                                                 </form>
                                             <?php endif; ?>
-                                            <form method="POST" action="" onsubmit="return confirm('Are you completely sure? This will permanently delete the client and free up all their assigned slots. This cannot be undone.');" style="margin:0;">
+                                            <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Are you completely sure? This will permanently delete the client and free up all their assigned slots. This cannot be undone.');" style="margin:0;">
                                                 <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
                                                 <button type="submit" name="remove_client_full" class="btn-sm" style="background: #ef4444; color: white; border: none; cursor: pointer;">Remove</button>
                                             </form>
@@ -908,5 +908,6 @@ if ($guards_res) {
             }
         }
     </script>
+    <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>

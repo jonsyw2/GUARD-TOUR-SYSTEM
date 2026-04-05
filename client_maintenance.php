@@ -146,7 +146,7 @@ include 'admin_layout/sidebar.php';
                                             </td>
                                             <td>
                                                 <?php if($row['id'] != ($_SESSION['user_id'] ?? null) && $row['username'] != $_SESSION['username']): ?>
-                                                    <form action="client_maintenance.php" method="POST" onsubmit="return confirm('Permanently delete this client?');">
+                                                    <form action="client_maintenance.php" method="POST" onsubmit="CustomModal.confirmForm(event, 'Permanently delete this client?');">
                                                         <input type="hidden" name="delete_id" value="<?php echo $row['id']; ?>">
                                                         <button type="submit" name="delete_client" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem;">Delete</button>
                                                     </form>

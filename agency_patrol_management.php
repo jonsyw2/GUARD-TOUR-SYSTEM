@@ -37,11 +37,16 @@ if (!function_exists('addColumnSafely')) {
 addColumnSafely($conn, 'agency_clients', 'site_name', 'VARCHAR(255)', 'client_id');
 addColumnSafely($conn, 'agency_clients', 'is_patrol_locked', 'TINYINT(1) DEFAULT 0', 'site_name');
 addColumnSafely($conn, 'agency_clients', 'shift_type', "VARCHAR(50) DEFAULT 'Day Shift'", 'is_patrol_locked');
+addColumnSafely($conn, 'agency_clients', 'is_visual_locked', 'TINYINT(1) DEFAULT 0', 'shift_type');
 
 $conn->query("ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS visual_pos_x INT DEFAULT 0, ADD COLUMN IF NOT EXISTS visual_pos_y INT DEFAULT 0");
 addColumnSafely($conn, 'checkpoints', 'is_zero_checkpoint', 'TINYINT(1) DEFAULT 0');
 addColumnSafely($conn, 'checkpoints', 'checkpoint_code', 'VARCHAR(50)', 'name');
 addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes');
+
+// Scans Table Migrations
+addColumnSafely($conn, 'scans', 'tour_session_id', 'VARCHAR(100)', 'justification_photo_path');
+addColumnSafely($conn, 'scans', 'shift', "VARCHAR(50) DEFAULT 'Day Shift'", 'tour_session_id');
 
 $conn->query("CREATE TABLE IF NOT EXISTS shifts (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -90,8 +95,15 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
         }
     }
     
+    // Check if visual is locked
+    $lock_res = $conn->query("SELECT is_visual_locked FROM agency_clients WHERE id = $mapping_id LIMIT 1");
+    $is_visual_locked = 0;
+    if ($lock_res && $row = $lock_res->fetch_assoc()) {
+        $is_visual_locked = (int)$row['is_visual_locked'];
+    }
+    
     header('Content-Type: application/json');
-    echo json_encode(['checkpoints' => $checkpoints, 'shifts' => $shifts]);
+    echo json_encode(['checkpoints' => $checkpoints, 'shifts' => $shifts, 'is_visual_locked' => $is_visual_locked]);
     exit();
 }
 
@@ -109,6 +121,19 @@ if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
         WHERE cp.id = ? AND ac.agency_id = ?
     ");
     $stmt->bind_param("iiii", $x, $y, $cp_id, $agency_id);
+    $stmt->execute();
+    
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true]);
+    exit();
+}
+
+// AJAX Handler for locking visual map
+if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+    
+    $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1 WHERE id = ? AND agency_id = ?");
+    $stmt->bind_param("ii", $mapping_id, $agency_id);
     $stmt->execute();
     
     header('Content-Type: application/json');
@@ -395,8 +420,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="js/modal_system.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
@@ -1119,6 +1145,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     </svg>
                 </div>
                 <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+                    <button id="saveVisualBtn" class="btn-modal btn-success" style="max-width: 200px;" onclick="saveVisualLayout()">Save Layout</button>
                     <button class="btn-modal" style="background: #0ea5e9; color: white; max-width: 200px;" onclick="downloadVisualMap()">Download Map (PDF)</button>
                     <button class="btn-modal btn-cancel" style="max-width: 200px;" onclick="closeVisualDesigner()">Close View</button>
                 </div>
@@ -1279,7 +1306,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         async function removeCheckpoint(btn, id, isDirectTableDelete = false) {
             if (id && id !== '') {
-                if (!confirm("Are you sure you want to delete this checkpoint and all its data? This cannot be undone.")) {
+                const confirmed = await CustomModal.confirm("Are you sure you want to delete this checkpoint and all its data? This cannot be undone.");
+                if (!confirmed) {
                     return;
                 }
                 
@@ -1463,10 +1491,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             document.getElementById(modalId).classList.remove('show');
         }
 
-        function showAlert(message, elementToFocus = null) {
-            document.getElementById('alertModalText').textContent = message;
-            document.getElementById('alertModal').classList.add('show');
-            elementToFocusAfterAlert = elementToFocus;
+        function showAlert(message, type = 'info') {
+            CustomModal.alert(message, 'Notice', type);
         }
 
         function closeAlertModal() {
@@ -1496,8 +1522,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         // Visual Designer Logic
         const selectedMappingId = '<?php echo $selected_mapping_id; ?>';
         let visualCheckpoints = [];
+        let isVisualLocked = false;
+
         function closeVisualDesigner() {
             document.getElementById('visualDesignerModal').classList.remove('show');
+        }
+
+        async function saveVisualLayout() {
+            if (!selectedMappingId) return;
+            const confirmed = await CustomModal.confirm("Are you sure you want to save and lock the current layout? Once saved, you will need to ask admin permission to move checkpoint locations again.");
+            if (!confirmed) return;
+
+            const formData = new FormData();
+            formData.append('ajax_lock_visual', '1');
+            formData.append('mapping_id', selectedMappingId);
+
+            try {
+                const response = await fetch('agency_patrol_management.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.success) {
+                    isVisualLocked = true;
+                    const saveBtn = document.getElementById('saveVisualBtn');
+                    if (saveBtn) saveBtn.style.display = 'none';
+                    showAlert("Visual layout saved and locked successfully.");
+                }
+            } catch (err) {
+                console.error(err);
+                showAlert("Error locking layout. Please try again.");
+            }
         }
 
         function downloadVisualMap() {
@@ -1546,7 +1601,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 canvas.classList.remove('download-mode');
                 btn.textContent = originalText;
                 btn.disabled = false;
-                alert('Failed to generate PDF. Please try again.');
+                showAlert('Failed to generate PDF. Please try again.', 'error');
             });
         }
 
@@ -1633,6 +1688,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     if (loader) loader.remove();
                     
                     visualCheckpoints = data.checkpoints || [];
+                    isVisualLocked = !!data.is_visual_locked;
+
+                    const saveBtn = document.getElementById('saveVisualBtn');
+                    if (saveBtn) {
+                        saveBtn.style.display = isVisualLocked ? 'none' : 'block';
+                    }
 
                     if (visualCheckpoints.length === 0) {
                         const emptyDiv = document.createElement('div');
@@ -1680,6 +1741,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         circle.style.top = y + 'px';
                         
                         const startDrag = (e) => {
+                            if (isVisualLocked) {
+                                showAlert("The map layout is already saved and locked. Please ask admin for permission to move the locations.");
+                                return;
+                            }
                             const isTouch = e.type === 'touchstart';
                             const clientX = isTouch ? e.touches[0].clientX : e.clientX;
                             const clientY = isTouch ? e.touches[0].clientY : e.clientY;
@@ -1750,5 +1815,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 });
         }
     </script>
+    <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>

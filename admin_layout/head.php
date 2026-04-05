@@ -104,9 +104,8 @@
 
         /* Helper Utilities */
         .text-muted { color: var(--text-muted); }
-        .mb-4 { margin-bottom: 1rem; }
-        .d-flex { display: flex; }
         .gap-2 { gap: 0.5rem; }
     </style>
+    <script src="js/modal_system.js"></script>
 </head>
 <body>

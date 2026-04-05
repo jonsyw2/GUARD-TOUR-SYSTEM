@@ -144,7 +144,9 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
     if ($csv_res && $csv_res->num_rows > 0) {
         $current_csv_session = '';
         while ($row = $csv_res->fetch_assoc()) {
-            $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . '|' . $row['guard_name']);
+            // Unify session ID: exclude guard if no specific guard is filtered
+            $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . (empty($filter_guard) ? '' : '|' . $row['guard_name']));
+            
             if ($current_csv_session !== $session_id) {
                 $current_csv_session = $session_id;
                 
@@ -155,7 +157,9 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                 
                 $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
                 $display_guard = htmlspecialchars($row['guard_name']);
-                echo '<tr style="background-color: #f1f5f9;"><td colspan="6" style="font-weight: bold; text-align: left; padding: 10px; border: 1px solid #cbd5e1;">TOUR CYCLE: ' . $display_time . ' | ' . $display_shift . ' Shift | Guard: ' . $display_guard . '</td></tr>';
+                
+                $header_guard_info = empty($filter_guard) ? "Participating Guards" : "Guard: " . $display_guard;
+                echo '<tr style="background-color: #f1f5f9;"><td colspan="6" style="font-weight: bold; text-align: left; padding: 10px; border: 1px solid #cbd5e1;">TOUR CYCLE: ' . $display_time . ' | ' . $display_shift . ' Shift | ' . $header_guard_info . '</td></tr>';
             }
             $status_class = 'status-' . strtolower($row['status']);
             echo '<tr>';
@@ -459,7 +463,9 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                                 <?php 
                                 $current_session = ''; 
                                 while($row = $history_res->fetch_assoc()): 
-                                    $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . '|' . $row['guard_name']);
+                                    // Unify session ID: exclude guard if no specific guard is filtered to avoid creating separate reports
+                                    $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . (empty($filter_guard) ? '' : '|' . $row['guard_name']));
+
                                     if ($current_session !== $session_id):
                                         $current_session = $session_id;
                                         
@@ -470,6 +476,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
 
                                         $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
                                         $display_guard = htmlspecialchars($row['guard_name']);
+                                        $header_guard_info = empty($filter_guard) ? "Participating Guards" : "Guard: <strong style='color: #1e293b;'>" . $display_guard . "</strong>";
                                 ?>
                                     <tr style="background-color: #f8fafc; border-top: 2px solid #e2e8f0; border-bottom: 2px solid #e2e8f0;">
                                         <td colspan="7" style="font-weight: 700; color: #334155; padding: 14px 16px; font-size: 0.9rem; background: linear-gradient(to right, #f8fafc, #ffffff);">
@@ -482,7 +489,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                                                 <span style="color: #cbd5e1;">&bull;</span>
                                                 <span style="color: #64748b;"><?php echo $display_shift; ?> Shift</span>
                                                 <span style="color: #cbd5e1;">&bull;</span>
-                                                <span style="color: #64748b;">Guard: <strong style="color: #1e293b;"><?php echo $display_guard; ?></strong></span>
+                                                <span style="color: #64748b;"><?php echo $header_guard_info; ?></span>
                                             </div>
                                         </td>
                                     </tr>
