@@ -16,11 +16,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     $new_limit = (int)$_POST['qr_limit'];
     $override = isset($_POST['qr_override']) ? 1 : 0;
     $disabled = isset($_POST['is_disabled']) ? 1 : 0;
+    $patrol_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
+    $visual_locked = isset($_POST['is_visual_locked']) ? 1 : 0;
 
-    $update_sql = "UPDATE agency_clients SET qr_limit = $new_limit, qr_override = $override, is_disabled = $disabled WHERE id = $mapping_id";
+    $update_sql = "UPDATE agency_clients SET 
+                   qr_limit = $new_limit, 
+                   qr_override = $override, 
+                   is_disabled = $disabled,
+                   is_patrol_locked = $patrol_locked,
+                   is_visual_locked = $visual_locked
+                   WHERE id = $mapping_id";
     
     if ($conn->query($update_sql) === TRUE) {
-        $message = "QR Configuration updated successfully.";
+        $message = "Configuration updated successfully.";
         $message_type = "success";
         $show_status_modal = true;
     } else {
@@ -39,6 +47,8 @@ $mapping_sql = "
         ac.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
+        ac.is_patrol_locked,
+        ac.is_visual_locked,
         (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)) as current_qrs
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
@@ -122,11 +132,20 @@ include 'admin_layout/sidebar.php';
                                                     </div>
                                                     
                                                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);">
+                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);" title="Allow exceeding current QR limit">
                                                             <input type="checkbox" name="qr_override" <?php echo $row['qr_override'] ? 'checked' : ''; ?> style="accent-color: var(--primary);"> Override
                                                         </label>
-                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);">
+                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);" title="Disable QR scanning activities for this site">
                                                             <input type="checkbox" name="is_disabled" <?php echo $row['is_disabled'] ? 'checked' : ''; ?> style="accent-color: var(--primary);"> Disable
+                                                        </label>
+                                                    </div>
+
+                                                    <div style="display: flex; flex-direction: column; gap: 4px; border-left: 1px solid #e2e8f0; padding-left: 12px;">
+                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);" title="Lock/Unlock Patrol Pattern sequences">
+                                                            <input type="checkbox" name="is_patrol_locked" <?php echo $row['is_patrol_locked'] ? 'checked' : ''; ?> style="accent-color: #f59e0b;"> Patrol Lock
+                                                        </label>
+                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);" title="Lock/Unlock Checkpoint Map locations">
+                                                            <input type="checkbox" name="is_visual_locked" <?php echo $row['is_visual_locked'] ? 'checked' : ''; ?> style="accent-color: #f59e0b;"> Visual Lock
                                                         </label>
                                                     </div>
 
