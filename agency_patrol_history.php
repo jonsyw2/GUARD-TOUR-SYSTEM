@@ -100,10 +100,7 @@ $history_sql = "
     LIMIT 200
 ";
 
-$history_res = null;
-if (!empty($filter_client)) {
-    $history_res = $conn->query($history_sql);
-}
+$history_res = $conn->query($history_sql);
 
 // Handle Download
 if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filter_client)) {
@@ -630,5 +627,6 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             }
         }
     </script>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

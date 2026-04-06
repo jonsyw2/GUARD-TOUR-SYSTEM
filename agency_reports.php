@@ -102,5 +102,6 @@ if ($_SESSION['user_level'] !== 'agency') {
             }
         }
     </script>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

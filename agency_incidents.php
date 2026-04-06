@@ -450,5 +450,6 @@ $incidents_res = $conn->query($incidents_sql);
             }
         }
     </script>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

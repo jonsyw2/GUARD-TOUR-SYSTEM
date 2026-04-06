@@ -1817,5 +1817,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         }
     </script>
     <?php include_once 'includes/common_modals.php'; ?>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

@@ -457,5 +457,6 @@ $inspectors_res = $conn->query($inspectors_sql);
             if (e.target.classList.contains('modal')) e.target.classList.remove('show');
         }
     </script>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

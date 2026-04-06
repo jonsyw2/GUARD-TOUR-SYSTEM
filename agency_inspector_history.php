@@ -330,5 +330,6 @@ $history_res = $conn->query($history_sql);
             }
         }
     </script>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

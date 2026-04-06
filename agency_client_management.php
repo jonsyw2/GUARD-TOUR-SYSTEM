@@ -947,5 +947,6 @@ if ($guards_res) {
         }
     </script>
     <?php include_once 'includes/common_modals.php'; ?>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

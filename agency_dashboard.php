@@ -12,6 +12,11 @@ $agency_id = $_SESSION['user_id'];
 $total_clients = $conn->query("SELECT COUNT(*) as count FROM agency_clients WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 $total_guards = $conn->query("SELECT COUNT(*) as count FROM guards WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 $total_supervisors = $conn->query("SELECT COUNT(*) as count FROM supervisors WHERE agency_id = $agency_id")->fetch_assoc()['count'];
+$total_inspector_visits = $conn->query("
+    SELECT COUNT(*) as count FROM inspector_scans iscn 
+    JOIN agency_clients ac ON iscn.agency_client_id = ac.id 
+    WHERE ac.agency_id = $agency_id
+")->fetch_assoc()['count'];
 
 // Get mapping IDs for this agency to filter checkpoints/scans
 $mapping_ids_res = $conn->query("SELECT id FROM agency_clients WHERE agency_id = $agency_id");
@@ -55,7 +60,8 @@ $checkpoints = [];
 if ($selected_mapping_id) {
     $cp_res = $conn->query("
         SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint,
-        (SELECT scan_time FROM scans WHERE checkpoint_id = cp.id AND DATE(scan_time) = CURDATE() ORDER BY scan_time DESC LIMIT 1) as last_scan_today
+        (SELECT scan_time FROM scans WHERE checkpoint_id = cp.id AND DATE(scan_time) = CURDATE() ORDER BY scan_time DESC LIMIT 1) as last_scan_today,
+        (SELECT ta.sort_order FROM tour_assignments ta WHERE ta.checkpoint_id = cp.id AND ta.agency_client_id = $selected_mapping_id LIMIT 1) as sort_order
         FROM checkpoints cp
         WHERE cp.agency_client_id = $selected_mapping_id
         ORDER BY cp.is_zero_checkpoint DESC, (SELECT ta.sort_order FROM tour_assignments ta WHERE ta.checkpoint_id = cp.id AND ta.agency_client_id = $selected_mapping_id LIMIT 1) ASC
@@ -162,16 +168,19 @@ if ($selected_mapping_id) {
         .checkpoint-pin > span { transform: rotate(45deg); display: block; }
         .pin-label {
             position: absolute;
-            bottom: -35px;
+            bottom: -38px;
             white-space: nowrap;
             font-size: 0.75rem;
             font-weight: 600;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 2px 6px;
+            background: rgba(255, 255, 255, 0.95);
+            color: #111827 !important;
+            padding: 3px 8px;
             border-radius: 4px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid #cbd5e1;
             transform: rotate(45deg);
             pointer-events: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            text-align: center;
         }
 
         /* Status Colors */
@@ -275,6 +284,13 @@ if ($selected_mapping_id) {
                         <div class="value"><?php echo $scans_today; ?></div>
                     </div>
                 </a>
+                <a href="agency_inspector_history.php" class="stat-card">
+                    <div class="stat-icon" style="background: #e0f2fe; color: #0369a1;">🕵️</div>
+                    <div class="stat-info">
+                        <div class="label">Inspector Visits</div>
+                        <div class="value"><?php echo $total_inspector_visits; ?></div>
+                    </div>
+                </a>
             </div>
 
             <div class="list-layout">
@@ -296,6 +312,9 @@ if ($selected_mapping_id) {
                             <?php endif; ?>
                         </div>
                         <div style="display: flex; gap: 12px; align-items: center;">
+                            <div id="liveStatusIndicator" style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 700; background: #f1f5f9; padding: 4px 10px; border-radius: 20px; color: #64748b;">
+                                <div style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;"></div> IDLE
+                            </div>
                             <div style="display: flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 600;">
                                 <div style="width: 10px; height: 10px; border-radius: 50%; background: #10b981;"></div> Scanned
                             </div>
@@ -362,13 +381,52 @@ if ($selected_mapping_id) {
 
     <script>
         const checkpoints = <?php echo json_encode($checkpoints); ?>;
+        const mappingId = <?php echo $selected_mapping_id ?? 0; ?>;
         const container = document.getElementById('visualContainer');
         const svg = document.getElementById('visualSvg');
 
-        function renderMap() {
+        async function pollTourStatus() {
+            if (mappingId === 0 || !checkpoints || !checkpoints.length) {
+                renderMap(null);
+                return;
+            }
+            try {
+                // Ensure we call the gtapp API correctly
+                const response = await fetch(`../gtapp/api/get_active_tour.php?mapping_id=${mappingId}`);
+                if (!response.ok) throw new Error('Network response was not ok');
+                const data = await response.json();
+                renderMap(data);
+            } catch (error) {
+                console.error("Error polling active tour:", error);
+                // Fallback to static render if active tour fetch fails
+                if (!document.querySelector('.flowing-arrow')) {
+                    renderMap(null);
+                }
+            }
+        }
+
+        function renderMap(activeData) {
             if (!checkpoints || !checkpoints.length) {
                 container.innerHTML = '<div style="height:100%; display:flex; align-items:center; justify-content:center; color:#6b7280; font-style:italic;">No checkpoints configured for this site.</div>';
                 return;
+            }
+
+            const isActive = activeData && activeData.active === true;
+            const lastSortOrder = isActive ? parseInt(activeData.last_sort_order) : 0;
+            const isFinalPhase = isActive ? activeData.is_final_phase : false;
+            
+            // Update Live Status Indicator
+            const statusInd = document.getElementById('liveStatusIndicator');
+            if (statusInd) {
+                if (isActive) {
+                    statusInd.style.background = '#dcfce7';
+                    statusInd.style.color = '#166534';
+                    statusInd.innerHTML = '<div style="width: 8px; height: 8px; border-radius: 50%; background: #10b981; animation: pulse-green 1.5s infinite;"></div> LIVE TOUR';
+                } else {
+                    statusInd.style.background = '#f1f5f9';
+                    statusInd.style.color = '#64748b';
+                    statusInd.innerHTML = '<div style="width: 8px; height: 8px; border-radius: 50%; background: #94a3b8;"></div> IDLE';
+                }
             }
 
             // Clear previous map objects (keep SVG)
@@ -376,46 +434,139 @@ if ($selected_mapping_id) {
             pins.forEach(p => p.remove());
             svg.innerHTML = '';
 
-            let pathD = '';
+            // Draw Lines Segment by Segment
+            for (let i = 0; i < checkpoints.length; i++) {
+                const cp1 = checkpoints[i];
+                const nextIndex = (i === checkpoints.length - 1) ? 0 : i + 1;
+                
+                if (checkpoints.length <= 1) continue;
+                
+                const cp2 = checkpoints[nextIndex];
+                
+                const x1 = parseFloat(cp1.visual_pos_x || (50 + i * 60)) + 18;
+                const y1 = parseFloat(cp1.visual_pos_y || (50 + i * 40)) + 18;
+                const x2 = parseFloat(cp2.visual_pos_x || (50 + nextIndex * 60)) + 18;
+                const y2 = parseFloat(cp2.visual_pos_y || (50 + nextIndex * 40)) + 18;
 
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", x1);
+                line.setAttribute("y1", y1);
+                line.setAttribute("x2", x2);
+                line.setAttribute("y2", y2);
+                line.setAttribute("stroke-width", "3");
+                line.setAttribute("stroke-linecap", "round");
+                line.setAttribute("stroke-dasharray", "8 5");
+                line.style.transition = "stroke 0.5s ease";
+
+                let segmentColor = "#cbd5e1"; // Gray dashed pending
+                let isCurrentSegment = false;
+                
+                const o1 = parseInt(cp1.sort_order) || 1;
+                const o2 = parseInt(cp2.sort_order) || 1;
+
+                if (isActive) {
+                    if (isFinalPhase) {
+                        if (i === checkpoints.length - 1) {
+                            segmentColor = "#3b82f6"; // Blue pulsing
+                            isCurrentSegment = true;
+                        } else {
+                            segmentColor = "#10b981"; // Green completed
+                            line.removeAttribute("stroke-dasharray");
+                        }
+                    } else {
+                        if (o1 < lastSortOrder && o2 <= lastSortOrder) {
+                            segmentColor = "#10b981"; // Green completed
+                            line.removeAttribute("stroke-dasharray");
+                        } else if (o1 === lastSortOrder && i !== checkpoints.length - 1) {
+                            segmentColor = "#3b82f6"; // Blue pulsing active
+                            isCurrentSegment = true;
+                        }
+                    }
+                }
+
+                line.setAttribute("stroke", segmentColor);
+                svg.appendChild(line);
+
+                // Animated Flow Arrow
+                if (isActive && isCurrentSegment) {
+                    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                    arrow.setAttribute("points", "0,-6 10,0 0,6");
+                    arrow.setAttribute("fill", "#4f46e5");
+                    arrow.setAttribute("class", "flowing-arrow");
+                    const pathD = `M ${x1} ${y1} L ${x2} ${y2}`;
+                    arrow.style.offsetPath = `path('${pathD}')`;
+                    arrow.style.animation = "flow 3s linear infinite";
+                    svg.appendChild(arrow);
+                }
+            }
+
+            // Draw Pins
             checkpoints.forEach((cp, index) => {
-                const x = cp.visual_pos_x || (50 + index * 60);
-                const y = cp.visual_pos_y || (50 + index * 40);
+                const x = parseFloat(cp.visual_pos_x || (50 + index * 60));
+                const y = parseFloat(cp.visual_pos_y || (50 + index * 40));
+                const o1 = parseInt(cp.sort_order) || 1;
 
-                // Create Pin
+                let pinClass = "status-pending"; // always gray by default
+                let isPulse = false;
+
+                if (isActive) {
+                    if (o1 <= lastSortOrder) {
+                        pinClass = "status-scanned";
+                    } else if (!isFinalPhase && o1 === (lastSortOrder + 1)) {
+                        pinClass = "status-start"; // Blue pending
+                        isPulse = true;
+                    } else if (isFinalPhase && o1 === 1) {
+                        pinClass = "status-start";
+                        isPulse = true;
+                    }
+                } else {
+                    if (index === 0) pinClass = "status-start"; // Always highlight starting point lightly in idle
+                }
+
                 const pin = document.createElement('div');
-                pin.className = 'checkpoint-pin ' + (cp.is_zero_checkpoint == 1 ? 'status-start' : (cp.last_scan_today ? 'status-scanned' : 'status-pending'));
+                pin.className = 'checkpoint-pin ' + pinClass;
+                if (isPulse) {
+                    pin.style.boxShadow = "0 0 0 0 rgba(59, 130, 246, 0.7)";
+                    pin.style.animation = "pulse-blue 2s infinite";
+                }
+                
                 pin.style.left = x + 'px';
                 pin.style.top = y + 'px';
-                pin.innerHTML = `<span>${index + 1}</span><div class="pin-label">${cp.name} ${cp.last_scan_today ? '<br><small>✅ ' + new Date(cp.last_scan_today).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</small>' : ''}</div>`;
-                container.appendChild(pin);
-
-                // Build Path
-                if (index === 0) {
-                    pathD = `M ${x + 18} ${y + 18}`;
+                
+                let labelExtra = '';
+                if (isActive) {
+                    if (isPulse) {
+                        labelExtra = `<br><small style="color:#2563eb; font-weight:700;">🎯 Target</small>`;
+                    } else if (o1 === lastSortOrder && o1 !== 1) {
+                        labelExtra = `<br><small style="color:#10b981; font-weight:700;">📍 Last Scanned</small>`;
+                    } else if (o1 < lastSortOrder) {
+                        labelExtra = `<br><small style="color:#10b981;">✅ Checked</small>`;
+                    }
                 } else {
-                    pathD += ` L ${x + 18} ${y + 18}`;
+                    // IDLE: You can show last scan if you want, or just leave it clean. Let's leave it clean for clarity.
                 }
+
+                pin.innerHTML = `<span>${index + 1}</span><div class="pin-label">${cp.name} ${labelExtra}</div>`;
+                container.appendChild(pin);
             });
-
-            // Draw Path Line
-            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            path.setAttribute("d", pathD);
-            path.setAttribute("class", "visual-path");
-            path.id = "mainPath";
-            svg.appendChild(path);
-
-            // Flowing Arrow
-            if (checkpoints.length > 1) {
-                const arrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                arrow.setAttribute("points", "0,-6 10,0 0,6");
-                arrow.setAttribute("class", "flowing-arrow");
-                arrow.style.offsetPath = `path('${pathD}')`;
-                svg.appendChild(arrow);
-            }
         }
 
-        renderMap();
+        // Dynamically add keyframes for pulse-blue if not already present
+        if (!document.getElementById('blue-pulse-style')) {
+            const styleSheet = document.createElement("style");
+            styleSheet.id = 'blue-pulse-style';
+            styleSheet.innerText = `
+                @keyframes pulse-blue {
+                    0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+                    70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+                }
+            `;
+            document.head.appendChild(styleSheet);
+        }
+
+        pollTourStatus();
+        setInterval(pollTourStatus, 3000);
 
         // Close modal when clicking outside
         window.onclick = function(event) {
@@ -425,5 +576,6 @@ if ($selected_mapping_id) {
             }
         }
     </script>
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

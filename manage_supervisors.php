@@ -237,6 +237,7 @@ if (isset($_SESSION['supervisor_created_key'])) {
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
 
@@ -432,6 +433,11 @@ if (isset($_SESSION['supervisor_created_key'])) {
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
         }
+    </script>
+    <!-- VERSION: 2.1 -->
+</body>
+</html>
+
     </script>
 </body>
 </html>

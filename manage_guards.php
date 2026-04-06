@@ -851,6 +851,6 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             </form>
         </div>
     </div>
-
+    <!-- VERSION: 2.1 -->
 </body>
 </html>

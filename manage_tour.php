@@ -8,43 +8,58 @@ if ($_SESSION['user_level'] !== 'client') {
 
 $client_id = $_SESSION['user_id'] ?? null;
 
-// Initialize template variables to prevent undefined warnings
-$available_checkpoints = [];
-$starting_point = null;
-$ending_point = null;
-$current_assignments = [];
-$client_shifts = [];
-
-// Ensure columns exist (MySQL-compatible check)
-$check_duration = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'duration_minutes'");
-if ($check_duration && $check_duration->num_rows == 0) {
-    $conn->query("ALTER TABLE tour_assignments ADD COLUMN duration_minutes INT DEFAULT 0");
-}
-$check_shift = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'shift_name'");
-if ($check_shift && $check_shift->num_rows == 0) {
-    $conn->query("ALTER TABLE tour_assignments ADD COLUMN shift_name VARCHAR(50)");
-}
-$check_end = $conn->query("SHOW COLUMNS FROM checkpoints LIKE 'is_end_checkpoint'");
-if ($check_end && $check_end->num_rows == 0) {
-    $conn->query("ALTER TABLE checkpoints ADD COLUMN is_end_checkpoint TINYINT(1) DEFAULT 0");
-}
-
-// Fetch mapping info for this client
-$maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled, is_sequence_fixed, sequence_change_request FROM agency_clients WHERE client_id = $client_id";
-$maps_res = $conn->query($maps_sql);
-$all_mappings = [];
-$mapping_ids = [];
-$mapping_status = [];
-
-if ($maps_res && $maps_res->num_rows > 0) {
-    while ($r = $maps_res->fetch_assoc()) {
-        $all_mappings[] = $r;
-        $mapping_ids[] = (int)$r['id'];
-        $mapping_status[(int)$r['id']] = (int)$r['is_disabled'];
+// Ensure columns exist (MySQL & MariaDB Compatible)
+try {
+    $check_duration = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'duration_minutes'");
+    if ($check_duration && $check_duration->num_rows == 0) {
+        $conn->query("ALTER TABLE tour_assignments ADD COLUMN duration_minutes INT DEFAULT 0");
     }
+
+    $check_shift = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'shift_name'");
+    if ($check_shift && $check_shift->num_rows == 0) {
+        $conn->query("ALTER TABLE tour_assignments ADD COLUMN shift_name VARCHAR(50)");
+    }
+
+    $check_end = $conn->query("SHOW COLUMNS FROM checkpoints LIKE 'is_end_checkpoint'");
+    if ($check_end && $check_end->num_rows == 0) {
+        $conn->query("ALTER TABLE checkpoints ADD COLUMN is_end_checkpoint TINYINT(1) DEFAULT 0");
+    }
+} catch (Exception $e) {
+    // Silently continue if columns already exist or if there's a minor DB issue
 }
 
-$no_mappings = empty($all_mappings);
+$no_mappings = true;
+$debug_info = "DEBUG: Mapping check started. ";
+
+if ($client_id) {
+    $client_id_int = (int)$client_id;
+    $debug_info .= "User ID = $client_id_int. ";
+    try {
+        $maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled, is_sequence_fixed, sequence_change_request FROM agency_clients WHERE client_id = $client_id_int";
+        $maps_res = $conn->query($maps_sql);
+
+        if ($maps_res) {
+            $count = $maps_res->num_rows;
+            $debug_info .= "Query successful. Rows found = $count. ";
+            if ($count > 0) {
+                while ($r = $maps_res->fetch_assoc()) {
+                    $all_mappings[] = $r;
+                    $mapping_ids[] = (int)$r['id'];
+                    $mapping_status[(int)$r['id']] = (int)$r['is_disabled'];
+                }
+                $no_mappings = false;
+            } else {
+                $debug_info .= "No records in `agency_clients` matched client_id $client_id_int. ";
+            }
+        } else {
+            $debug_info .= "Query failed: " . $conn->error . " ";
+        }
+    } catch (Exception $e) {
+        $debug_info .= "Exception: " . $e->getMessage() . " ";
+    }
+} else {
+    $debug_info .= "No client_id found in session. ";
+}
 $mapping_id = null;
 $qr_limit = 0;
 $qr_override = 0;
@@ -466,30 +481,37 @@ $qrs_sql = "
 ";
 $qrs_result = $conn->query($qrs_sql);
 
+// Helper for session alerts in manage_tour if needed would go here if not using AJAX?
 // But manage_tour uses it during POST processing.
 
+// Fetch available checkpoints for Tour Setup tab (exclude zero and end)
+$available_checkpoints = [];
 if ($mapping_id) {
-    // Fetch available checkpoints for Tour Setup tab (exclude zero and end)
     $checkpoints_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0 ORDER BY id ASC");
-    if ($checkpoints_res) {
-        while ($row = $checkpoints_res->fetch_assoc()) {
-            $available_checkpoints[] = $row;
-        }
+    while ($row = $checkpoints_res->fetch_assoc()) {
+        $available_checkpoints[] = $row;
     }
+}
 
-    // Fetch starting point
+$starting_point = null;
+if ($mapping_id) {
     $start_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
     if ($start_res && $start_res->num_rows > 0) {
         $starting_point = $start_res->fetch_assoc();
     }
+}
 
-    // Fetch ending point
+$ending_point = null;
+if ($mapping_id) {
     $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
     if ($end_res && $end_res->num_rows > 0) {
         $ending_point = $end_res->fetch_assoc();
     }
+}
 
-    // Fetch current assignments for Tour Setup Tab
+// Fetch current assignments for Tour Setup Tab
+$current_assignments = [];
+if ($mapping_id) {
     $assignments_res = $conn->query("
         SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name, cp.is_zero_checkpoint, cp.is_end_checkpoint
         FROM tour_assignments ta 
@@ -497,13 +519,14 @@ if ($mapping_id) {
         WHERE ta.agency_client_id = $mapping_id 
         ORDER BY ta.sort_order ASC
     ");
-    if ($assignments_res) {
-        while ($row = $assignments_res->fetch_assoc()) {
-            $current_assignments[] = $row;
-        }
+    while ($row = $assignments_res->fetch_assoc()) {
+        $current_assignments[] = $row;
     }
+}
 
-    // Fetch site shifts
+// Fetch site shifts
+$client_shifts = [];
+if ($mapping_id) {
     $shift_res = $conn->query("SELECT shift_name FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
     if ($shift_res) {
         while ($s_row = $shift_res->fetch_assoc()) {
@@ -511,6 +534,7 @@ if ($mapping_id) {
         }
     }
 }
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -522,6 +546,7 @@ if ($mapping_id) {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="js/modal_system.js"></script>
     <style>
@@ -1364,14 +1389,16 @@ endforeach; ?>
         }
 
         function updateCount() {
+            if (!tourList) return;
             const count = tourList.children.length;
             const countDisplay = document.getElementById('current-count');
-            countDisplay.innerText = count;
-            
-            if (count > qrLimit && !qrOverride) {
-                countDisplay.classList.add('danger');
-            } else {
-                countDisplay.classList.remove('danger');
+            if (countDisplay) {
+                countDisplay.innerText = count;
+                if (count > qrLimit && !qrOverride) {
+                    countDisplay.classList.add('danger');
+                } else {
+                    countDisplay.classList.remove('danger');
+                }
             }
         }
 
