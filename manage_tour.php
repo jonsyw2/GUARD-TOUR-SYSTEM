@@ -132,9 +132,39 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
         }
 
         header('Content-Type: application/json');
-        echo json_encode($checkpoints);
+        
+        // Check if visual is locked
+        $lock_res = $conn->query("SELECT is_visual_locked FROM agency_clients WHERE id = $m_id LIMIT 1");
+        $is_visual_locked = 0;
+        if ($lock_res && $row = $lock_res->fetch_assoc()) {
+            $is_visual_locked = (int)$row['is_visual_locked'];
+        }
+
+        echo json_encode(['checkpoints' => $checkpoints, 'is_visual_locked' => $is_visual_locked]);
     }
     else {
+        header('HTTP/1.1 403 Forbidden');
+        echo json_encode(['error' => 'Unauthorized']);
+    }
+    exit();
+}
+
+// AJAX Handler for locking visual map (Client version)
+if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
+    $m_id = (int)$_POST['mapping_id'];
+
+    // Security: Check if mapping_id belongs to this client
+    $verify_sql = "SELECT id FROM agency_clients WHERE id = $m_id AND client_id = $client_id";
+    $verify_res = $conn->query($verify_sql);
+
+    if ($verify_res && $verify_res->num_rows > 0) {
+        $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1 WHERE id = ?");
+        $stmt->bind_param("i", $m_id);
+        $stmt->execute();
+        
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true]);
+    } else {
         header('HTTP/1.1 403 Forbidden');
         echo json_encode(['error' => 'Unauthorized']);
     }
@@ -412,9 +442,7 @@ $qrs_sql = "
 ";
 $qrs_result = $conn->query($qrs_sql);
 
-// Helper for session alerts in manage_tour if needed would go here if not using AJAX?
-// But manage_tour uses it during POST processing.
-?>
+
 // Fetch available checkpoints for Tour Setup tab (exclude zero and end)
 $available_checkpoints = [];
 if ($mapping_id) {
@@ -683,7 +711,12 @@ if ($mapping_id) {
             display: block;
         }
         .checkpoint-circle.start {
-            background: linear-gradient(135deg, #2563eb, #111827);
+            background: linear-gradient(135deg, #10b981, #111827);
+            color: white;
+            z-index: 10;
+        }
+        .checkpoint-circle.end {
+            background: linear-gradient(135deg, #ea580c, #111827);
             color: white;
             z-index: 10;
         }
@@ -713,28 +746,36 @@ if ($mapping_id) {
         .cp-status-on-time { 
             background: linear-gradient(135deg, #10b981, #059669) !important; 
             color: white !important; 
-            animation: pulse-on-time 2s infinite;
         }
         .cp-status-late { 
             background: linear-gradient(135deg, #ef4444, #dc2626) !important; 
             color: white !important; 
-            animation: pulse-late 2s infinite;
         }
         .cp-status-none { 
             background: linear-gradient(135deg, #94a3b8, #64748b) !important; 
             color: white !important; 
         }
 
-        @keyframes pulse-on-time {
-            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        .path-status-on-time {
+            stroke: #10b981 !important;
+            animation: pulse-line-on-time 2s infinite;
         }
 
-        @keyframes pulse-late {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        .path-status-late {
+            stroke: #ef4444 !important;
+            animation: pulse-line-late 2s infinite;
+        }
+
+        @keyframes pulse-line-on-time {
+            0% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4)); opacity: 0.7; }
+            50% { filter: drop-shadow(0 0 8px rgba(16, 185, 129, 1)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4)); opacity: 0.7; }
+        }
+
+        @keyframes pulse-line-late {
+            0% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
+            50% { filter: drop-shadow(0 0 8px rgba(239, 68, 68, 1)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
         }
 
         .visual-svg {
@@ -1237,11 +1278,11 @@ endforeach; ?>
     <div id="visualDesignerModal" class="modal-overlay">
         <div class="modal-content large">
             <div class="card-header" style="border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="margin: 0; font-size: 1.25rem;">Visual Patrol Map</h3>
-                <button type="button" style="background:none; border:none; font-size:1.5rem; cursor:pointer; color:#6b7280;" onclick="closeVisualDesigner()">&times;</button>
+                <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700;">Visual Patrol Map</h3>
+                <button type="button" class="modal-close" onclick="closeVisualDesigner()">&times;</button>
             </div>
             <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px; text-align: left;">
-                Draggable overview of checkpoints. <strong>Blue (S)</strong> is Start, and <strong>White</strong> are checkpoints.
+                Draggable overview of checkpoints. <strong>Green (S)</strong> is Start, <strong>Orange (E)</strong> is End, and <strong>White</strong> are checkpoints.
             </p>
             <div id="visual-canvas" class="visual-container">
                 <svg id="visual-svg" class="visual-svg">
@@ -1252,10 +1293,11 @@ endforeach; ?>
                     </defs>
                 </svg>
             </div>
-                <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
-                    <button class="btn-modal" style="background: #0ea5e9; color: white; max-width: 200px;" onclick="downloadVisualMap()">Download Map (PDF)</button>
-                    <button class="btn-modal btn-cancel" style="max-width: 200px;" onclick="closeVisualDesigner()">Close View</button>
-                </div>
+            <div class="modal-actions" style="margin-top: 24px; display: flex; gap: 12px; justify-content: flex-end;">
+                <button id="saveVisualBtn" class="btn" style="background: #10b981; color: white; max-width: 180px; font-weight: 700;" onclick="saveVisualLayout()">Save Layout</button>
+                <button class="btn" style="background: #0ea5e9; color: white; max-width: 210px; font-weight: 700;" onclick="downloadVisualMap()">Download Map (PDF)</button>
+                <button class="btn" style="background: #f3f4f6; color: #3b4151; max-width: 140px; font-weight: 700;" onclick="closeVisualDesigner()">Close View</button>
+            </div>
         </div>
     </div>
 
@@ -1504,10 +1546,38 @@ endforeach; ?>
 
         // --- Visual Patrol Map Logic ---
         let visualCheckpoints = [];
+        let isVisualLocked = false;
         const mappingId = <?php echo (int)$mapping_id; ?>;
 
         function closeVisualDesigner() {
             document.getElementById('visualDesignerModal').classList.remove('show');
+        }
+
+        async function saveVisualLayout() {
+            if (!mappingId) return;
+            const confirmed = await CustomModal.confirm("Are you sure you want to save and lock the current layout? Once saved, you will need to ask admin permission to move checkpoint locations again.");
+            if (!confirmed) return;
+
+            const formData = new FormData();
+            formData.append('ajax_lock_visual', '1');
+            formData.append('mapping_id', mappingId);
+
+            try {
+                const response = await fetch('manage_tour.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.success) {
+                    isVisualLocked = true;
+                    const saveBtn = document.getElementById('saveVisualBtn');
+                    if (saveBtn) saveBtn.style.display = 'none';
+                    CustomModal.alert("Visual layout saved and locked successfully.", "Success", "success");
+                }
+            } catch (err) {
+                console.error(err);
+                CustomModal.alert("Error locking layout. Please try again.", "Error", "error");
+            }
         }
 
         function drawArrows() {
@@ -1588,7 +1658,13 @@ endforeach; ?>
                     const loader = document.getElementById('visual-loading');
                     if (loader) loader.remove();
                     
-                    visualCheckpoints = data;
+                    visualCheckpoints = data.checkpoints || [];
+                    isVisualLocked = !!data.is_visual_locked;
+
+                    const saveBtn = document.getElementById('saveVisualBtn');
+                    if (saveBtn) {
+                        saveBtn.style.display = isVisualLocked ? 'none' : 'block';
+                    }
 
                     if (visualCheckpoints.length === 0) {
                         const emptyDiv = document.createElement('div');
@@ -1633,6 +1709,10 @@ endforeach; ?>
                         circle.style.top = y + 'px';
                         
                         const startDrag = (e) => {
+                            if (isVisualLocked) {
+                                CustomModal.alert("The map layout is already saved and locked. Please ask admin for permission to move the locations.", "Locked", "info");
+                                return;
+                            }
                             const isTouch = e.type === 'touchstart';
                             const clientX = isTouch ? e.touches[0].clientX : e.clientX;
                             const clientY = isTouch ? e.touches[0].clientY : e.clientY;

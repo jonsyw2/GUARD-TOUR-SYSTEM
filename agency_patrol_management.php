@@ -70,7 +70,7 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     
     // Checkpoints (Including visual position and latest status)
     $cp_res = $conn->query("
-        SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint,
+        SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint, cp.is_end_checkpoint,
         (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
         FROM checkpoints cp 
         LEFT JOIN tour_assignments ta ON cp.id = ta.checkpoint_id AND ta.agency_client_id = $mapping_id
@@ -82,6 +82,7 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     if ($cp_res) {
         while ($row = $cp_res->fetch_assoc()) {
             $row['isStart'] = (bool)$row['is_zero_checkpoint'];
+            $row['isEnd'] = (bool)$row['is_end_checkpoint'];
             $checkpoints[] = $row;
         }
     }
@@ -629,7 +630,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             display: block;
         }
         .checkpoint-circle.start {
-            background: linear-gradient(135deg, #2563eb, #111827);
+            background: linear-gradient(135deg, #10b981, #111827);
             color: white;
             z-index: 10;
         }
@@ -1133,7 +1134,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     <button type="button" class="close-modal-btn" onclick="closeVisualDesigner()">&times;</button>
                 </div>
                 <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px; text-align: left;">
-                    Draggable overview of checkpoints. <strong>Blue (S)</strong> is Start, <strong>Orange (E)</strong> is End, and <strong>White</strong> are checkpoints.
+                    Draggable overview of checkpoints. <strong>Green (S)</strong> is Start, <strong>Orange (E)</strong> is End, and <strong>White</strong> are checkpoints.
                 </p>
                 <div id="visual-canvas" class="visual-container">
                     <svg id="visual-svg" class="visual-svg">
