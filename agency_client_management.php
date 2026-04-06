@@ -323,6 +323,7 @@ $clients_sql = "
            ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit,
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
+           ac.is_sequence_fixed, ac.sequence_change_request,
            (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
            (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors,
            (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count,
@@ -421,6 +422,7 @@ if ($guards_res) {
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
 
@@ -461,8 +463,8 @@ if ($guards_res) {
                                 <th>#</th>
                                 <th>Company Details</th>
                                 <th>QR Checkpoints</th>
-                                <th>Guards Assigned</th>
-                                <th>Inspectors</th>
+                                <th>Personnel</th>
+                                <th>Sequence Status</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -498,14 +500,22 @@ if ($guards_res) {
                                         </span>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['current_guards']; ?>
-                                        </span>
+                                        <div style="font-size: 0.8rem; margin-bottom: 4px;">Guards: <strong><?php echo $row['current_guards']; ?></strong></div>
+                                        <div style="font-size: 0.8rem;">Inspectors: <strong><?php echo $row['current_inspectors']; ?></strong></div>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['current_inspectors']; ?>
-                                        </span>
+                                        <?php if ($row['is_sequence_fixed']): ?>
+                                            <div style="font-size: 0.85rem; font-weight: 700; color: #64748b; margin-bottom: 4px;">🔒 FIXED</div>
+                                            <?php if ($row['sequence_change_request'] === 'pending'): ?>
+                                                <span style="font-size: 0.7rem; background: #eff6ff; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 600;">⏳ Requested</span>
+                                            <?php elseif ($row['sequence_change_request'] === 'approved'): ?>
+                                                <span style="font-size: 0.7rem; background: #f0fdf4; color: #166534; padding: 2px 6px; border-radius: 4px; font-weight: 600;">✅ Unlocked</span>
+                                            <?php else: ?>
+                                                <button class="btn-sm btn-outline" style="font-size: 0.65rem; padding: 2px 6px;" onclick="requestAdminPermission(<?php echo $row['mapping_id']; ?>); event.stopPropagation();">Request Unlock</button>
+                                            <?php endif; ?>
+                                        <?php else: ?>
+                                            <span style="font-size: 0.85rem; font-weight: 600; color: #10b981;">🔓 Flexible</span>
+                                        <?php endif; ?>
                                     </td>
                                      <td>
                                         <div style="display: flex; gap: 8px; justify-content: flex-start;" onclick="event.stopPropagation()">
@@ -787,7 +797,35 @@ if ($guards_res) {
     <div id="guardModal" class="modal">
         <div class="modal-content">
             <h3 style="margin-bottom: 10px;">Assign Guard</h3>
-            <p id="guard_client_name" style="color: #6b7280; font-size: 0.9rem; margin-bottom: 20px;"></p>
+            <h4 id="guard_client_name" style="margin-bottom: 24px; font-size: 1.1rem; color: #1e293b;"></h4>
+            
+            <script>
+                function requestAdminPermission(mappingId) {
+                    if (!confirm('Request permission from the system administrator to change the sequence for this client?')) return;
+                    
+                    const formData = new FormData();
+                    formData.append('ajax_request_change', '1');
+                    formData.append('mapping_id', mappingId);
+
+                    fetch('manage_tour.php', { // Reusing the endpoint in manage_tour.php as it's already there
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Request sent to admin successfully.');
+                            location.reload();
+                        } else {
+                            alert('Error: ' + (data.error || 'Failed to send request.'));
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Request failed:', err);
+                        alert('An error occurred.');
+                    });
+                }
+            </script>
             <form action="agency_client_management.php" method="POST">
                 <input type="hidden" name="mapping_id" id="guard_mapping_id">
                 <div class="form-group">

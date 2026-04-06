@@ -301,7 +301,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 }
 
 // Fetch Guards created by this agency with current assignment info
-$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, 
+$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo,
                       GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
                       GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
                FROM guards g 
@@ -416,6 +416,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
 
@@ -472,7 +473,24 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                                     $middle = $fm_parts[1] ?? '';
                                 ?>
                                     <tr onclick="openViewClientModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['client_names'] ?? ''); ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" style="cursor: pointer;">
-                                        <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                        <td>
+                                            <div style="display: flex; align-items: center; gap: 12px;">
+                                                <?php
+                                                $photo_url = $row['profile_photo'] ?? '';
+                                                if ($photo_url && strpos($photo_url, 'http') !== 0) {
+                                                    $photo_url = 'https://guardtour.ccbisphils.com/' . $photo_url;
+                                                }
+                                                if ($photo_url): ?>
+                                                    <img src="<?php echo htmlspecialchars($photo_url); ?>" alt="Profile" style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;">
+                                                <?php else:
+                                                    $initials = strtoupper(implode('', array_map(fn($w) => $w[0] ?? '', explode(' ', trim($row['name'])))));
+                                                    $initials = substr($initials, 0, 2);
+                                                ?>
+                                                    <div style="width: 40px; height: 40px; border-radius: 50%; background: #dbeafe; color: #3b82f6; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.9rem;"><?php echo htmlspecialchars($initials); ?></div>
+                                                <?php endif; ?>
+                                                <strong><?php echo htmlspecialchars($row['name']); ?></strong>
+                                            </div>
+                                        </td>
                                         <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
                                         <td>
                                             <?php if ($row['client_names']): ?>

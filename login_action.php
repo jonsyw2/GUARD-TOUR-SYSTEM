@@ -18,13 +18,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
         
-        // Handle Inspector/Guard Login with Access Key
-        if ($login_type === 'inspector' || $login_type === 'guard') {
-            $password = $username; // Use the access key as password
-            if ($user['user_level'] !== $login_type) {
-                echo "<script>alert('Invalid access key for " . ucfirst($login_type) . " login!'); window.location.href='login.php';</script>";
-                exit();
-            }
+        // Check unauthorized roles
+        $allowed_roles = ['admin', 'agency', 'client'];
+        if (!in_array($user['user_level'], $allowed_roles)) {
+            echo "<script>alert('Only management roles can access this portal.'); window.location.href='login.php';</script>";
+            exit();
         }
 
         // Check Account Status
@@ -32,7 +30,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             echo "<script>alert('Your account has been suspended. Please contact the administrator.'); window.location.href='login.php';</script>";
             exit();
         }
-        
+
         if (password_verify($password, $user['password'])) {
             // Log Success
             $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'SUCCESS')");
@@ -63,15 +61,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     break;
                 case 'client':
                     header("Location: client_dashboard.php");
-                    break;
-                case 'guard':
-                    header("Location: guard_dashboard.php");
-                    break;
-                case 'inspector':
-                    header("Location: inspector_dashboard.php");
-                    break;
-                case 'supervisor':
-                    header("Location: supervisor_dashboard.php");
                     break;
                 default:
                     echo "<script>alert('Invalid user level!'); window.location.href='login.php';</script>";

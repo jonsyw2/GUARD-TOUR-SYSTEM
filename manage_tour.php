@@ -14,7 +14,7 @@ $conn->query("ALTER TABLE tour_assignments ADD COLUMN IF NOT EXISTS shift_name V
 $conn->query("ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS is_end_checkpoint TINYINT(1) DEFAULT 0");
 
 // Fetch mapping info for this client
-$maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled FROM agency_clients WHERE client_id = $client_id";
+$maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled, is_sequence_fixed, sequence_change_request FROM agency_clients WHERE client_id = $client_id";
 $maps_res = $conn->query($maps_sql);
 $all_mappings = [];
 $mapping_ids = [];
@@ -33,6 +33,8 @@ $mapping_id = null;
 $qr_limit = 0;
 $qr_override = 0;
 $is_patrol_locked = 0;
+$is_sequence_fixed = 0;
+$sequence_change_request = 'none';
 $selected_site_name = "No Site Selected";
 
 if (!$no_mappings) {
@@ -58,6 +60,8 @@ if (!$no_mappings) {
     $qr_limit = (int)($current_mapping['qr_limit'] ?? 0);
     $qr_override = (int)($current_mapping['qr_override'] ?? 0);
     $is_patrol_locked = (int)($current_mapping['is_patrol_locked'] ?? 0);
+    $is_sequence_fixed = (int)($current_mapping['is_sequence_fixed'] ?? 0);
+    $sequence_change_request = $current_mapping['sequence_change_request'] ?? 'none';
     $selected_site_name = $current_mapping['site_name'] ?: "Site #" . $mapping_id;
 }
 
@@ -162,10 +166,43 @@ if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
     exit();
 }
 
+// AJAX Handler for requesting sequence change
+if (isset($_POST['ajax_request_change']) && isset($_POST['mapping_id'])) {
+    $m_id = (int)$_POST['mapping_id'];
+    $u_id = (int)$_SESSION['user_id'];
+    $u_level = $_SESSION['user_level'] ?? 'client';
+
+    $is_authorized = false;
+    if ($u_level === 'client') {
+        $verify_sql = "SELECT id FROM agency_clients WHERE id = $m_id AND client_id = $u_id";
+        if ($conn->query($verify_sql)->num_rows > 0) $is_authorized = true;
+    } else if ($u_level === 'agency') {
+        $verify_sql = "SELECT id FROM agency_clients WHERE id = $m_id AND agency_id = $u_id";
+        if ($conn->query($verify_sql)->num_rows > 0) $is_authorized = true;
+    } else if ($u_level === 'admin') {
+        $is_authorized = true;
+    }
+
+    if ($is_authorized) {
+        $conn->query("UPDATE agency_clients SET sequence_change_request = 'pending' WHERE id = $m_id");
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true]);
+    } else {
+        header('HTTP/1.1 403 Forbidden');
+        echo json_encode(['error' => 'Unauthorized']);
+    }
+    exit();
+}
+
 // Handle Save
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
     if ($is_patrol_locked) {
         $message = "Error: Patrol configuration is locked by your agency and cannot be modified.";
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+    else if ($is_sequence_fixed && $sequence_change_request !== 'approved') {
+        $message = "Error: Sequence is fixed and cannot be changed without admin permission.";
         $message_type = "error";
         $show_status_modal = true;
     }
@@ -259,8 +296,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
                     $stmt->bind_param("iiiiis", $mapping_id, $cp_id, $order, $interval, $duration, $shift);
                     $stmt->execute();
                 }
+                $conn->query("UPDATE agency_clients SET is_sequence_fixed = 1, sequence_change_request = 'none' WHERE id = $mapping_id");
                 $conn->commit();
-                $message = "Tour sequence saved successfully!";
+                $message = "Tour sequence saved successfully! Your sequence is now fixed.";
                 $message_type = "success";
                 $show_status_modal = true;
             }
@@ -844,6 +882,23 @@ if ($mapping_id) {
                 <div style="background: #fff7ed; color: #9a3412; padding: 10px 20px; border-radius: 8px; border: 1px solid #fed7aa; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
                     <span>🔒 Patrol sequence is managed and locked by your agency.</span>
                 </div>
+            <?php elseif ($is_sequence_fixed): ?>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="background: #f1f5f9; color: #475569; padding: 10px 20px; border-radius: 8px; border: 1px solid #e2e8f0; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                        <span>🔒 Sequence is Fixed</span>
+                    </div>
+                    <?php if ($sequence_change_request === 'pending'): ?>
+                        <div style="background: #eff6ff; color: #1e40af; padding: 10px 20px; border-radius: 8px; border: 1px solid #bfdbfe; font-weight: 600; font-size: 0.9rem;">
+                            ⏳ Permission Request Pending...
+                        </div>
+                    <?php elseif ($sequence_change_request === 'approved'): ?>
+                        <div style="background: #f0fdf4; color: #166534; padding: 10px 20px; border-radius: 8px; border: 1px solid #bbf7d0; font-weight: 600; font-size: 0.9rem;">
+                            ✅ Permission Granted! You can now edit.
+                        </div>
+                    <?php else: ?>
+                        <button type="button" class="btn" style="width: auto; padding: 10px 20px; font-size: 0.85rem; background: #3b82f6;" onclick="requestSequenceChange()">Request Permission to Edit</button>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
         </header>
 
@@ -888,17 +943,17 @@ if ($mapping_id) {
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="0" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="0" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                     <?php if (empty($client_shifts)): ?>
                                                         <option value="Day Shift" <?php echo $start_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
                                                         <option value="Night Shift" <?php echo $start_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
@@ -932,17 +987,17 @@ endif; ?>
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                     <?php if (empty($client_shifts)): ?>
                                                         <option value="Day Shift" <?php echo($item['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
                                                         <option value="Night Shift" <?php echo($item['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
@@ -959,7 +1014,7 @@ endif; ?>
                                                 </select>
                                             </div>
                                         </div>
-                                        <?php if (!$is_patrol_locked): ?>
+                                        <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved')): ?>
                                             <button type="button" class="remove-btn" onclick="removeItem(this)">
                                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                             </button>
@@ -1023,7 +1078,7 @@ endforeach; ?>
 endif; ?>
                         </div>
 
-                        <?php if (!$is_patrol_locked): ?>
+                        <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved')): ?>
                             <div class="add-area">
                                 <select id="checkpoint-select" class="form-control">
                                     <option value="">-- Add Checkpoint to Sequence --</option>
@@ -1264,11 +1319,37 @@ endforeach; ?>
         const currentShifts = <?php echo json_encode($client_shifts); ?>;
 
         // Initialize Sortable
-        if (tourList && !<?php echo $is_patrol_locked; ?>) {
+        if (tourList && !<?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? '1' : '0'; ?>) {
             new Sortable(tourList, {
                 handle: '.handle',
                 animation: 150,
                 onEnd: updateCount
+            });
+        }
+
+        function requestSequenceChange() {
+            if (!confirm('Are you sure you want to request permission to change the patrol sequence? This request will be sent to the system administrator.')) return;
+            
+            const formData = new FormData();
+            formData.append('ajax_request_change', '1');
+            formData.append('mapping_id', '<?php echo $mapping_id; ?>');
+
+            fetch('manage_tour.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Request sent successfully. Please wait for admin approval.');
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to send request.'));
+                }
+            })
+            .catch(err => {
+                console.error('Request failed:', err);
+                alert('An error occurred. Please try again.');
             });
         }
 
