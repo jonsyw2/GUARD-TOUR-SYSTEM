@@ -452,7 +452,7 @@ $qrs_result = $conn->query($qrs_sql);
 
 // Helper for session alerts in manage_tour if needed would go here if not using AJAX?
 // But manage_tour uses it during POST processing.
-?>
+
 // Fetch available checkpoints for Tour Setup tab (exclude zero and end)
 $available_checkpoints = [];
 if ($mapping_id) {
