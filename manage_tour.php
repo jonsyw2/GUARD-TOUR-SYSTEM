@@ -8,10 +8,26 @@ if ($_SESSION['user_level'] !== 'client') {
 
 $client_id = $_SESSION['user_id'] ?? null;
 
-// Ensure columns exist
-$conn->query("ALTER TABLE tour_assignments ADD COLUMN IF NOT EXISTS duration_minutes INT DEFAULT 0");
-$conn->query("ALTER TABLE tour_assignments ADD COLUMN IF NOT EXISTS shift_name VARCHAR(50)");
-$conn->query("ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS is_end_checkpoint TINYINT(1) DEFAULT 0");
+// Initialize template variables to prevent undefined warnings
+$available_checkpoints = [];
+$starting_point = null;
+$ending_point = null;
+$current_assignments = [];
+$client_shifts = [];
+
+// Ensure columns exist (MySQL-compatible check)
+$check_duration = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'duration_minutes'");
+if ($check_duration && $check_duration->num_rows == 0) {
+    $conn->query("ALTER TABLE tour_assignments ADD COLUMN duration_minutes INT DEFAULT 0");
+}
+$check_shift = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'shift_name'");
+if ($check_shift && $check_shift->num_rows == 0) {
+    $conn->query("ALTER TABLE tour_assignments ADD COLUMN shift_name VARCHAR(50)");
+}
+$check_end = $conn->query("SHOW COLUMNS FROM checkpoints LIKE 'is_end_checkpoint'");
+if ($check_end && $check_end->num_rows == 0) {
+    $conn->query("ALTER TABLE checkpoints ADD COLUMN is_end_checkpoint TINYINT(1) DEFAULT 0");
+}
 
 // Fetch mapping info for this client
 $maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled, is_sequence_fixed, sequence_change_request FROM agency_clients WHERE client_id = $client_id";
@@ -450,37 +466,30 @@ $qrs_sql = "
 ";
 $qrs_result = $conn->query($qrs_sql);
 
-// Helper for session alerts in manage_tour if needed would go here if not using AJAX?
 // But manage_tour uses it during POST processing.
 
-// Fetch available checkpoints for Tour Setup tab (exclude zero and end)
-$available_checkpoints = [];
 if ($mapping_id) {
+    // Fetch available checkpoints for Tour Setup tab (exclude zero and end)
     $checkpoints_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 0 AND is_end_checkpoint = 0 ORDER BY id ASC");
-    while ($row = $checkpoints_res->fetch_assoc()) {
-        $available_checkpoints[] = $row;
+    if ($checkpoints_res) {
+        while ($row = $checkpoints_res->fetch_assoc()) {
+            $available_checkpoints[] = $row;
+        }
     }
-}
 
-$starting_point = null;
-if ($mapping_id) {
+    // Fetch starting point
     $start_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
     if ($start_res && $start_res->num_rows > 0) {
         $starting_point = $start_res->fetch_assoc();
     }
-}
 
-$ending_point = null;
-if ($mapping_id) {
+    // Fetch ending point
     $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
     if ($end_res && $end_res->num_rows > 0) {
         $ending_point = $end_res->fetch_assoc();
     }
-}
 
-// Fetch current assignments for Tour Setup Tab
-$current_assignments = [];
-if ($mapping_id) {
+    // Fetch current assignments for Tour Setup Tab
     $assignments_res = $conn->query("
         SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name, cp.is_zero_checkpoint, cp.is_end_checkpoint
         FROM tour_assignments ta 
@@ -488,14 +497,13 @@ if ($mapping_id) {
         WHERE ta.agency_client_id = $mapping_id 
         ORDER BY ta.sort_order ASC
     ");
-    while ($row = $assignments_res->fetch_assoc()) {
-        $current_assignments[] = $row;
+    if ($assignments_res) {
+        while ($row = $assignments_res->fetch_assoc()) {
+            $current_assignments[] = $row;
+        }
     }
-}
 
-// Fetch site shifts
-$client_shifts = [];
-if ($mapping_id) {
+    // Fetch site shifts
     $shift_res = $conn->query("SELECT shift_name FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
     if ($shift_res) {
         while ($s_row = $shift_res->fetch_assoc()) {
@@ -503,7 +511,6 @@ if ($mapping_id) {
         }
     }
 }
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
