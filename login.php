@@ -10,24 +10,26 @@ if (isset($_COOKIE['jwt_token'])) {
 
     if ($decoded_payload !== false) {
         $level = $decoded_payload['user_level'];
-        switch ($level) {
-            case 'admin':
-                header("Location: admin_dashboard.php");
-                break;
-            case 'agency':
-                header("Location: agency_dashboard.php");
-                break;
-            case 'client':
-                header("Location: client_dashboard.php");
-                break;
-            case 'guard':
-                header("Location: guard_dashboard.php");
-                break;
-            default:
-                // Optionally handle unknown user levels or do nothing
-                break;
+        $allowed_roles = ['admin', 'agency', 'client'];
+        if (in_array($level, $allowed_roles)) {
+            switch ($level) {
+                case 'admin':
+                    header("Location: admin_dashboard.php");
+                    break;
+                case 'agency':
+                    header("Location: agency_dashboard.php");
+                    break;
+                case 'client':
+                    header("Location: client_dashboard.php");
+                    break;
+            }
+            exit();
+        } else {
+            // Log out unauthorized sessions
+            setcookie('jwt_token', '', time() - 3600, '/');
+            header("Location: login.php");
+            exit();
         }
-        exit();
     }
 }
 ?>
@@ -343,9 +345,10 @@ if (isset($_COOKIE['jwt_token'])) {
                     <img src="assets/logo.png" alt="Sentinel Tour Logo">
                 </div>
 
+
                 <div class="form-header">
-                    <h2 id="login-title">Welcome</h2>
-                    <p id="login-subtitle">Please enter your details to login</p>
+                    <h2 id="login-title">Management Login</h2>
+                    <p id="login-subtitle">Admin, Agency, or Client access</p>
                 </div>
 
                 <form action="login_action.php" method="POST" autocomplete="off">

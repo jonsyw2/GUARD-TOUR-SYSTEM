@@ -32,7 +32,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             header("Location: login.php");
             exit();
         }
-        
+
         if (password_verify($password, $user['password'])) {
             // Log Success
             $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'SUCCESS')");
@@ -63,15 +63,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     break;
                 case 'client':
                     header("Location: client_dashboard.php");
-                    break;
-                case 'guard':
-                    header("Location: guard_dashboard.php");
-                    break;
-                case 'inspector':
-                    header("Location: inspector_dashboard.php");
-                    break;
-                case 'supervisor':
-                    header("Location: supervisor_dashboard.php");
                     break;
                 default:
                     $_SESSION['auth_error'] = 'Invalid user level!';

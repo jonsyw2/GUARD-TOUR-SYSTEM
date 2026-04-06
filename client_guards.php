@@ -43,6 +43,7 @@ $guards_sql = "
         g.nbi_no,
         g.lesp_no,
         g.lesp_expiry,
+        g.profile_photo,
         (
             SELECT COUNT(*) FROM scans s
             JOIN checkpoints c ON s.checkpoint_id = c.id
@@ -274,7 +275,16 @@ if (!empty($mapping_ids)) {
                             $is_active = $g['scans_today'] > 0;
                         ?>
                             <div class="guard-card" onclick="openGuardModal('<?php echo addslashes($g['guard_name']); ?>', '<?php echo addslashes($g['gender'] ?? 'N/A'); ?>', '<?php echo addslashes($g['contact_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['police_clearance_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['nbi_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_expiry'] ?? 'N/A'); ?>', '<?php echo addslashes($g['agency_name']); ?>')">
-                                <div class="guard-avatar"><?php echo htmlspecialchars($initials); ?></div>
+                                <?php
+                                $photo_url = $g['profile_photo'] ?? '';
+                                if ($photo_url && strpos($photo_url, 'http') !== 0) {
+                                    $photo_url = 'https://guardtour.ccbisphils.com/' . $photo_url;
+                                }
+                                if ($photo_url): ?>
+                                    <img src="<?php echo htmlspecialchars($photo_url); ?>" alt="Profile" style="width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;">
+                                <?php else: ?>
+                                    <div class="guard-avatar"><?php echo htmlspecialchars($initials); ?></div>
+                                <?php endif; ?>
                                 <div class="guard-info">
                                     <div class="guard-name"><?php echo htmlspecialchars($g['guard_name']); ?></div>
                                     <div class="guard-username">@<?php echo htmlspecialchars($g['username']); ?></div>
