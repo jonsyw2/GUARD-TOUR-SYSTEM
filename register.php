@@ -110,7 +110,7 @@
         .footer a:hover {
             text-decoration: underline;
         }
-    </style>
+    <script src="js/modal_system.js"></script>
 </head>
 <body>
     <div class="container">
@@ -139,5 +139,17 @@
             Already have an account? <a href="login.php">Login here</a>
         </div>
     </div>
+    <?php
+    session_start();
+    if(isset($_SESSION['auth_error'])): ?>
+        <script>
+            window.addEventListener('load', () => {
+                CustomModal.alert('<?php echo $_SESSION['auth_error']; ?>', 'Registration Error', 'error');
+            });
+        </script>
+        <?php unset($_SESSION['auth_error']); ?>
+    <?php endif; ?>
+
+    <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>

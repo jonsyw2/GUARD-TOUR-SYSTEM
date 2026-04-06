@@ -18,16 +18,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows > 0) {
         $user = $result->fetch_assoc();
         
-        // Check unauthorized roles
-        $allowed_roles = ['admin', 'agency', 'client'];
-        if (!in_array($user['user_level'], $allowed_roles)) {
-            echo "<script>alert('Only management roles can access this portal.'); window.location.href='login.php';</script>";
+        // Restrict login to management roles only (admin, agency, client, supervisor)
+        $management_roles = ['admin', 'agency', 'client', 'supervisor'];
+        if (!in_array($user['user_level'], $management_roles)) {
+            $_SESSION['auth_error'] = 'Only management roles are allowed to login here.';
+            header("Location: login.php");
             exit();
         }
 
         // Check Account Status
         if (($user['status'] ?? 'active') === 'suspended') {
-            echo "<script>alert('Your account has been suspended. Please contact the administrator.'); window.location.href='login.php';</script>";
+            $_SESSION['auth_error'] = 'Your account has been suspended. Please contact the administrator.';
+            header("Location: login.php");
             exit();
         }
 
@@ -63,19 +65,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     header("Location: client_dashboard.php");
                     break;
                 default:
-                    echo "<script>alert('Invalid user level!'); window.location.href='login.php';</script>";
+                    $_SESSION['auth_error'] = 'Invalid user level!';
+                    header("Location: login.php");
                     break;
             }
             exit();
         } else {
             // Log Failure
             $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'FAILED')");
-            echo "<script>alert('Incorrect password!'); window.location.href='login.php';</script>";
+            $_SESSION['auth_error'] = 'Incorrect password!';
+            header("Location: login.php");
         }
     } else {
         // Log Failure
         $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'FAILED')");
-        echo "<script>alert('Username not found!'); window.location.href='login.php';</script>";
+        $_SESSION['auth_error'] = 'Username not found!';
+        header("Location: login.php");
     }
 }
 $conn->close();

@@ -1,4 +1,5 @@
 <?php
+session_start();
 require_once 'db_config.php';
 require_once 'jwt_helper.php';
 
@@ -323,6 +324,7 @@ if (isset($_COOKIE['jwt_token'])) {
             if (passwordField && !passwordField.value) passwordField.value = '';
         });
     </script>
+    <script src="js/modal_system.js"></script>
 </head>
 <body>
     <div class="split-layout">
@@ -342,7 +344,6 @@ if (isset($_COOKIE['jwt_token'])) {
                 <div class="mobile-logo">
                     <img src="assets/logo.png" alt="Sentinel Tour Logo">
                 </div>
-
 
 
                 <div class="form-header">
@@ -382,6 +383,21 @@ if (isset($_COOKIE['jwt_token'])) {
             </div>
         </div>
     </div>
+    <script>
+        <?php if(isset($_SESSION['auth_error'])): ?>
+            window.addEventListener('load', () => {
+                CustomModal.alert('<?php echo $_SESSION['auth_error']; ?>', 'Login Error', 'error');
+            });
+            <?php unset($_SESSION['auth_error']); ?>
+        <?php endif; ?>
 
+        <?php if(isset($_SESSION['auth_success'])): ?>
+            window.addEventListener('load', () => {
+                CustomModal.alert('<?php echo $_SESSION['auth_success']; ?>', 'Success', 'success');
+            });
+            <?php unset($_SESSION['auth_success']); ?>
+        <?php endif; ?>
+    </script>
+    <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>

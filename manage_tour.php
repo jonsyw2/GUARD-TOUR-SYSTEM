@@ -450,6 +450,9 @@ $qrs_sql = "
 ";
 $qrs_result = $conn->query($qrs_sql);
 
+// Helper for session alerts in manage_tour if needed would go here if not using AJAX?
+// But manage_tour uses it during POST processing.
+?>
 // Fetch available checkpoints for Tour Setup tab (exclude zero and end)
 $available_checkpoints = [];
 if ($mapping_id) {
@@ -511,9 +514,9 @@ if ($mapping_id) {
     <title>My Tours & Checkpoints - Client Portal</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="js/modal_system.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
@@ -1144,7 +1147,7 @@ endif; ?>
                                                     <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['company_name'] ?: $_SESSION['username'] ?: 'Client')); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>', '<?php echo $display_no; ?>')">Show</button>
                                                     <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR()">Download QR</button>
                                                     <?php if (!$row['is_zero_checkpoint']): ?>
-                                                    <form action="manage_tour.php" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this checkpoint? This will also remove it from any tour sequence.');">
+                                                    <form action="manage_tour.php" method="POST" style="margin: 0;" onsubmit="CustomModal.confirmForm(event, 'Are you sure you want to delete this checkpoint? This will also remove it from any tour sequence.');">
                                                         <input type="hidden" name="checkpoint_id" value="<?php echo $row['id']; ?>">
                                                         <button type="submit" name="delete_checkpoint" class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #ef4444;">Delete</button>
                                                     </form>
@@ -1576,7 +1579,7 @@ endforeach; ?>
                 canvas.classList.remove('download-mode');
                 btn.textContent = originalText;
                 btn.disabled = false;
-                alert('Failed to generate PDF. Please try again.');
+                CustomModal.alert('Failed to generate PDF. Please try again.', 'Error', 'error');
             });
         }
 
@@ -1787,5 +1790,6 @@ endforeach; ?>
             }
         }
     </script>
+    <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>

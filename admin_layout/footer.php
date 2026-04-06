@@ -42,5 +42,6 @@
             });
         }, 5000);
     </script>
+    <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>
