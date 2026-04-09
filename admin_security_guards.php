@@ -148,8 +148,9 @@ include 'admin_layout/sidebar.php';
             <form method="GET" action="admin_security_guards.php">
                 <div class="filter-bar">
                     <input type="text" name="search" placeholder="🔍  Search guard name or access key…"
-                           value="<?php echo htmlspecialchars($search); ?>">
-                    <select name="agency">
+                           value="<?php echo htmlspecialchars($search); ?>"
+                           onchange="this.form.submit()">
+                    <select name="agency" onchange="this.form.submit()">
                         <option value="0">All Agencies</option>
                         <?php if ($agencies_res): while($ag = $agencies_res->fetch_assoc()): ?>
                             <option value="<?php echo $ag['id']; ?>"
@@ -158,8 +159,6 @@ include 'admin_layout/sidebar.php';
                             </option>
                         <?php endwhile; endif; ?>
                     </select>
-                    <button type="submit" class="btn-filter">Apply Filter</button>
-                    <a href="admin_security_guards.php" class="btn-reset">Reset</a>
                     <span class="results-count"><?php echo $total_guards; ?> guard(s) found</span>
                 </div>
             </form>

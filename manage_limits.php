@@ -42,8 +42,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
 $mapping_sql = "
     SELECT 
         ac.id, 
-        a.username AS agency_name, 
-        c.username AS client_name, 
+        a.username, 
+        a.agency_name,
+        c.username AS client_username, 
+        ac.company_name,
         ac.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
@@ -53,7 +55,7 @@ $mapping_sql = "
     FROM agency_clients ac
     JOIN users a ON ac.agency_id = a.id
     JOIN users c ON ac.client_id = c.id
-    ORDER BY a.username ASC, c.username ASC
+    ORDER BY COALESCE(NULLIF(a.agency_name, ''), a.username) ASC, COALESCE(NULLIF(ac.company_name, ''), c.username) ASC
 ";
 $mappings_result = $conn->query($mapping_sql);
 
@@ -109,8 +111,18 @@ include 'admin_layout/sidebar.php';
                                             }
                                         ?>
                                         <tr>
-                                            <td><strong><?php echo htmlspecialchars($row['agency_name']); ?></strong></td>
-                                            <td><strong><?php echo htmlspecialchars($row['client_name']); ?></strong></td>
+                                            <td>
+                                                <strong><?php echo htmlspecialchars($row['agency_name'] ?: $row['username']); ?></strong>
+                                                <?php if ($row['agency_name']): ?>
+                                                    <div style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">@<?php echo htmlspecialchars($row['username']); ?></div>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <strong><?php echo htmlspecialchars($row['company_name'] ?: $row['client_username']); ?></strong>
+                                                <?php if ($row['company_name']): ?>
+                                                    <div style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">@<?php echo htmlspecialchars($row['client_username']); ?></div>
+                                                <?php endif; ?>
+                                            </td>
                                             <td>
                                                 <div class="d-flex align-items-center gap-2">
                                                     <span class="limit-pill"><?php echo $row['current_qrs']; ?> / <?php echo $row['qr_limit']; ?> QRs</span>

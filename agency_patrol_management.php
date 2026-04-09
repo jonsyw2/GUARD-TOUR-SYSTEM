@@ -824,10 +824,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <?php if ($starting_point): 
                                     $start_shift = $selected_client['shift_type'] ?? '';
                                     $start_interval = 0;
+                                    $start_duration = 1; // Default to 1
                                     foreach($current_assignments as $as) {
                                         if($as['checkpoint_id'] == $starting_point['id']) {
                                             $start_shift = $as['shift_name'];
                                             $start_interval = $as['interval_minutes'];
+                                            $start_duration = $as['duration_minutes'] ?? 1;
                                             break;
                                         }
                                     }
@@ -845,7 +847,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="0" min="0">
+                                                    <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
@@ -886,7 +888,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0">
+                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 1; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
@@ -1375,7 +1377,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     </div>
                     <div class="input-group">
                         <label>Duration</label>
-                        <input type="number" name="durations[]" value="0" min="0">
+                        <input type="number" name="durations[]" value="1" min="0">
                         <label>min</label>
                     </div>
                     <div class="input-group">

@@ -1008,10 +1008,12 @@ if ($mapping_id) {
                             <?php if ($starting_point):
     $start_shift = '';
     $start_interval = 0;
+    $start_duration = 1; // Default to 1
     foreach ($current_assignments as $as) {
         if ($as['checkpoint_id'] == $starting_point['id']) {
             $start_shift = $as['shift_name'];
             $start_interval = $as['interval_minutes'];
+            $start_duration = $as['duration_minutes'] ?? 1;
             break;
         }
     }
@@ -1029,7 +1031,7 @@ if ($mapping_id) {
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="0" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
@@ -1073,7 +1075,7 @@ endif; ?>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 0; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 1; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
@@ -1109,10 +1111,12 @@ endforeach; ?>
                             <?php if ($ending_point):
     $end_shift = '';
     $end_interval = 0;
+    $end_duration = 1; // Default to 1
     foreach ($current_assignments as $as) {
         if ($as['checkpoint_id'] == $ending_point['id']) {
             $end_shift = $as['shift_name'];
             $end_interval = $as['interval_minutes'];
+            $end_duration = $as['duration_minutes'] ?? 1;
             break;
         }
     }
@@ -1130,7 +1134,7 @@ endforeach; ?>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="0" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo $end_duration; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
@@ -1477,7 +1481,7 @@ endforeach; ?>
                     </div>
                     <div class="input-group">
                         <label>Duration</label>
-                        <input type="number" name="durations[]" value="0" min="0">
+                        <input type="number" name="durations[]" value="1" min="0">
                         <label>min</label>
                     </div>
                     <div class="input-group">
