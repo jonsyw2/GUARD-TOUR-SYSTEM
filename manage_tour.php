@@ -9,27 +9,29 @@ if ($_SESSION['user_level'] !== 'client') {
 $client_id = $_SESSION['user_id'] ?? null;
 
 // Ensure columns exist (MySQL & MariaDB Compatible)
-try {
-    $check_duration = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'duration_minutes'");
-    if ($check_duration && $check_duration->num_rows == 0) {
-        $conn->query("ALTER TABLE tour_assignments ADD COLUMN duration_minutes INT DEFAULT 0");
+if (!function_exists('addColumnSafely')) {
+    function addColumnSafely($conn, $table, $column, $definition, $after = '') {
+        $res = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
+        if ($res && $res->num_rows == 0) {
+            $afterClause = $after ? " AFTER `$after`" : "";
+            $conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition $afterClause");
+        }
     }
-
-    $check_shift = $conn->query("SHOW COLUMNS FROM tour_assignments LIKE 'shift_name'");
-    if ($check_shift && $check_shift->num_rows == 0) {
-        $conn->query("ALTER TABLE tour_assignments ADD COLUMN shift_name VARCHAR(50)");
-    }
-
-    $check_end = $conn->query("SHOW COLUMNS FROM checkpoints LIKE 'is_end_checkpoint'");
-    if ($check_end && $check_end->num_rows == 0) {
-        $conn->query("ALTER TABLE checkpoints ADD COLUMN is_end_checkpoint TINYINT(1) DEFAULT 0");
-    }
-} catch (Exception $e) {
-    // Silently continue if columns already exist or if there's a minor DB issue
 }
 
+addColumnSafely($conn, 'tour_assignments', 'duration_minutes', 'INT DEFAULT 0');
+addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes');
+addColumnSafely($conn, 'checkpoints', 'is_end_checkpoint', 'TINYINT(1) DEFAULT 0');
+addColumnSafely($conn, 'agency_clients', 'is_sequence_fixed', 'TINYINT(1) DEFAULT 0', 'is_visual_locked');
+addColumnSafely($conn, 'agency_clients', 'sequence_change_request', "ENUM('none', 'pending', 'approved') DEFAULT 'none'", 'is_sequence_fixed');
+
+
 $no_mappings = true;
+$all_mappings = [];
+$mapping_ids = [];
+$mapping_status = [];
 $debug_info = "DEBUG: Mapping check started. ";
+
 
 if ($client_id) {
     $client_id_int = (int)$client_id;

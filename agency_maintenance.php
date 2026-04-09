@@ -509,7 +509,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor_acti
 }
 
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username, agency_name, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
+$agencies_result = $conn->query("SELECT id, username, agency_name, agency_qr_limit, agency_guard_limit, agency_inspector_limit, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
 
 // Fetch all clients
 $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
