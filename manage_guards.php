@@ -26,7 +26,6 @@ addColumnSafely($conn, 'guards', 'gender', 'VARCHAR(20)', 'name');
 addColumnSafely($conn, 'guards', 'police_clearance_no', 'VARCHAR(50)', 'lesp_expiry');
 addColumnSafely($conn, 'guards', 'nbi_no', 'VARCHAR(50)', 'police_clearance_no');
 addColumnSafely($conn, 'guards', 'contact_no', 'VARCHAR(20)', 'nbi_no');
-addColumnSafely($conn, 'guards', 'shift', "VARCHAR(50) DEFAULT 'Day Shift'", 'contact_no');
 
 $message = '';
 $message_type = '';
@@ -66,7 +65,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
-    $shift = $conn->real_escape_string($_POST['shift'] ?? 'Day Shift');
     $client_mapping_id = isset($_POST['assign_to_client']) ? (int)$_POST['assign_to_client'] : null;
     
     // Format Full Name: Last, First Middle
@@ -109,8 +107,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
             $user_id = $conn->insert_id;
             
             // 2. Create Guard entry
-            $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry, shift) 
-                         VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry', '$shift')");
+            $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry) 
+                         VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry')");
             $guard_id = $conn->insert_id;
 
             // 3. Handle Auto-assignment
@@ -144,7 +142,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
     $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
-    $shift = $conn->real_escape_string($_POST['shift'] ?? 'Day Shift');
     $client_mapping_id = isset($_POST['client_mapping_id']) ? (int)$_POST['client_mapping_id'] : null;
     
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
@@ -160,8 +157,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
                         police_clearance_no = '$police_clearance_no',
                         nbi_no = '$nbi_no',
                         lesp_no = '$lesp_no', 
-                        lesp_expiry = '$lesp_expiry',
-                        shift = '$shift'
+                        lesp_expiry = '$lesp_expiry' 
                       WHERE id = $guard_id");
         
         // Handle Assignment Update
@@ -306,10 +302,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 }
 
 // Fetch Guards created by this agency with current assignment info
-$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo, g.shift,
+$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo,
                       GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
-                      GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names,
-                      GROUP_CONCAT(COALESCE(ac.site_name, 'No Site Name') SEPARATOR ', ') as site_names
+                      GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
                FROM guards g 
                JOIN users u ON g.user_id = u.id 
                LEFT JOIN guard_assignments ga ON g.id = ga.guard_id
@@ -321,7 +316,7 @@ $guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_n
 $guards_res = $conn->query($guards_sql);
 
 // Fetch assigned clients for the dropdown
-$clients_sql = "SELECT ac.id as mapping_id, u.username as client_name, ac.site_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
+$clients_sql = "SELECT ac.id as mapping_id, u.username as client_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 if ($clients_res) {
@@ -438,7 +433,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Guard & Assignment Management</h2>
+            <h2>Personnel & Assignment Management</h2>
         </header>
 
         <div class="content-area">
@@ -449,21 +444,15 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             <!-- Active Guards Table -->
             <div class="card">
                 <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="margin:0;">Active Guards</h3>
+                    <h3 style="margin:0;">Active Personnel</h3>
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <span style="font-size: 0.8rem; font-weight: 700; color: var(--primary);">
                             <?php echo $current_guard_count; ?> / <?php echo $total_guard_limit; ?> accounts
                          </span>
                         <?php if ($guard_limit_reached): ?>
-<<<<<<< HEAD
                             <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Guards</button>
                         <?php else: ?>
                             <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Guards</button>
-=======
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Guard</button>
-                        <?php else: ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Guard</button>
->>>>>>> ebf9f8370c8ff83319b8d41fe172d700784cdbe9
                         <?php endif; ?>
                     </div>
                 </div>
@@ -473,7 +462,6 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                             <tr>
                                 <th>Guard Name</th>
                                 <th>Access Key</th>
-                                <th>Assigned Shift</th>
                                 <th>Assigned Client</th>
                                 <th>Date Created</th>
                                 <th>Actions</th>
@@ -510,26 +498,12 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                                         </td>
                                         <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
                                         <td>
-                                            <span class="badge" style="background: <?php echo ($row['shift'] ?? 'Day Shift') === 'Day Shift' ? '#fef9c3' : '#1e1b4b'; ?>; color: <?php echo ($row['shift'] ?? 'Day Shift') === 'Day Shift' ? '#854d0e' : '#e0e7ff'; ?>; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
-                                                <?php echo htmlspecialchars($row['shift'] ?? 'Day Shift'); ?>
-                                            </span>
-                                            <div style="font-size: 0.65rem; color: #6b7280; margin-top: 2px;">
-                                                <?php echo ($row['shift'] ?? 'Day Shift') === 'Day Shift' ? '06:00 AM – 06:00 PM' : '06:00 PM – 06:00 AM'; ?>
-                                            </div>
-                                        </td>
-                                        <td>
                                             <?php if ($row['client_names']): ?>
-                                                <?php 
-                                                $c_names = explode(', ', $row['client_names']); 
-                                                $s_names = explode(', ', $row['site_names'] ?? '');
-                                                ?>
+                                                <?php $names = explode(', ', $row['client_names']); ?>
                                                 <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                                                    <?php for($i=0; $i < count($c_names); $i++): ?>
-                                                        <span class="badge" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">
-                                                            <?php echo htmlspecialchars($c_names[$i]); ?> 
-                                                            <?php if (!empty($s_names[$i]) && $s_names[$i] !== 'No Site Name') echo " (" . htmlspecialchars($s_names[$i]) . ")"; ?>
-                                                        </span>
-                                                    <?php endfor; ?>
+                                                    <?php foreach($names as $name): ?>
+                                                        <span class="badge" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;"><?php echo htmlspecialchars($name); ?></span>
+                                                    <?php endforeach; ?>
                                                 </div>
                                             <?php else: ?>
                                                 <span style="color: #9ca3af; font-size: 0.8rem;">None</span>
@@ -538,7 +512,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                                         <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                         <td>
                                             <div style="display: flex; gap: 6px;">
-                                                <button onclick="event.stopPropagation(); openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>', '<?php echo addslashes($row['shift'] ?? 'Day Shift'); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #3b82f6; width: auto;">Edit</button>
+                                                <button onclick="event.stopPropagation(); openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #3b82f6; width: auto;">Edit</button>
                                                 <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
                                             </div>
                                         </td>
@@ -606,25 +580,6 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                     <div class="form-group">
                         <label class="form-label">LESP Expiry Date</label>
                         <input type="date" name="lesp_expiry" class="form-control" required>
-                    </div>
-                    <div class="form-group" style="grid-column: span 2;">
-                        <label class="form-label">Assigned Shift (Global 12-hour System)</label>
-                        <select name="shift" class="form-control" required>
-                            <option value="Day Shift">Day Shift (06:00 AM – 06:00 PM)</option>
-                            <option value="Night Shift">Night Shift (06:00 PM – 06:00 AM)</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="grid-column: span 2;">
-                        <label class="form-label">Assign to Client Site (Optional)</label>
-                        <select name="assign_to_client" class="form-control">
-                            <option value="0">--- No Assignment ---</option>
-                            <?php foreach($clients_data as $client): ?>
-                                <option value="<?php echo $client['mapping_id']; ?>">
-                                    <?php echo htmlspecialchars($client['client_name']); ?> 
-                                    <?php if ($client['site_name']) echo " - " . htmlspecialchars($client['site_name']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
                         <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 0;">An access key will be automatically generated upon account creation.</p>
@@ -735,25 +690,6 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                         <input type="date" name="lesp_expiry" id="edit_lesp_expiry" class="form-control" required>
                     </div>
                 </div>
-                <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Assigned Shift</label>
-                    <select name="shift" id="edit_shift" class="form-control" required>
-                        <option value="Day Shift">Day Shift (06:00 AM – 06:00 PM)</option>
-                        <option value="Night Shift">Night Shift (06:00 PM – 06:00 AM)</option>
-                    </select>
-                </div>
-                <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Assigned Client Site</label>
-                    <select name="client_mapping_id" id="edit_mapping_id" class="form-control">
-                        <option value="0">--- No Assignment ---</option>
-                        <?php foreach($clients_data as $client): ?>
-                            <option value="<?php echo $client['mapping_id']; ?>">
-                                <?php echo htmlspecialchars($client['client_name']); ?> 
-                                <?php if ($client['site_name']) echo " - " . htmlspecialchars($client['site_name']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('editGuardModal')">Cancel</button>
                     <button type="submit" name="update_guard" class="btn">Update Details</button>
@@ -837,8 +773,16 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             document.getElementById('viewClientModal').classList.add('show');
         }
 
+        function openEditModal(id, last, first, middle) {
+            document.getElementById('edit_guard_id').value = id;
+            document.getElementById('edit_last_name').value = last;
+            document.getElementById('edit_first_name').value = first;
+            document.getElementById('edit_middle_name').value = middle;
+            document.getElementById('edit_guardModal').classList.add('show');
+        }
+        
         // Correction: Fixed modal ID naming consistency
-        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id, shift) {
+        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id) {
             document.getElementById('edit_guard_id').value = id;
             document.getElementById('edit_last_name').value = last;
             document.getElementById('edit_first_name').value = first;
@@ -850,16 +794,6 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             document.getElementById('edit_nbi_no').value = nbi;
             document.getElementById('edit_lesp_no').value = lesp_no;
             document.getElementById('edit_lesp_expiry').value = lesp_expiry;
-            document.getElementById('edit_shift').value = shift;
-            
-            // Handle multiple site assignment (select first one in the edit modal primary dropdown)
-            const mappingSelect = document.getElementById('edit_mapping_id');
-            if (client_id && client_id.toString().includes(',')) {
-                mappingSelect.value = client_id.split(',')[0];
-            } else {
-                mappingSelect.value = client_id || '0';
-            }
-            
             document.getElementById('editGuardModal').classList.add('show');
         }
 

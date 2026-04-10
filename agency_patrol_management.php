@@ -45,19 +45,17 @@ addColumnSafely($conn, 'agency_clients', 'sequence_change_request', "ENUM('none'
 $conn->query("ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS visual_pos_x INT DEFAULT 0, ADD COLUMN IF NOT EXISTS visual_pos_y INT DEFAULT 0");
 addColumnSafely($conn, 'checkpoints', 'is_zero_checkpoint', 'TINYINT(1) DEFAULT 0');
 addColumnSafely($conn, 'checkpoints', 'checkpoint_code', 'VARCHAR(50)', 'name');
-// addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes'); // Deprecated
+addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes');
 
 // Scans Table Migrations
 addColumnSafely($conn, 'scans', 'tour_session_id', 'VARCHAR(100)', 'justification_photo_path');
 addColumnSafely($conn, 'scans', 'shift', "VARCHAR(50) DEFAULT 'Day Shift'", 'tour_session_id');
 
-/*
 $conn->query("CREATE TABLE IF NOT EXISTS shifts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     agency_client_id INT NOT NULL,
     shift_name VARCHAR(50) NOT NULL
 )");
-*/
 
 $conn->query("CREATE TABLE IF NOT EXISTS tour_assignments (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -65,7 +63,8 @@ $conn->query("CREATE TABLE IF NOT EXISTS tour_assignments (
     checkpoint_id INT NOT NULL,
     sort_order INT NOT NULL,
     interval_minutes INT DEFAULT 0,
-    duration_minutes INT DEFAULT 0
+    duration_minutes INT DEFAULT 0,
+    shift_name VARCHAR(50)
 )");
 
 // AJAX Handler for fetching checkpoints & shifts (Modified to support Visual Designer)
@@ -96,8 +95,7 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
         }
     }
     
-    /*
-    // Shifts (Deprecated)
+    // Shifts
     $shift_res = $conn->query("SELECT id, shift_name FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
     $shifts = [];
     if ($shift_res) {
@@ -105,8 +103,6 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
             $shifts[] = $row;
         }
     }
-    */
-    $shifts = [];
     
     // Check if visual is locked
     $lock_res = $conn->query("SELECT is_visual_locked FROM agency_clients WHERE id = $mapping_id LIMIT 1");
@@ -185,7 +181,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
     $intervals = $_POST['intervals'] ?? [];
     $durations = $_POST['durations'] ?? [];
-    // $assignment_shifts = $_POST['assignment_shifts'] ?? []; // Deprecated
+    $assignment_shifts = $_POST['assignment_shifts'] ?? [];
     $is_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
     
     $conn->begin_transaction();
@@ -202,17 +198,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
             $final_checkpoint_ids[] = (int)$checkpoint_ids[$i];
             $final_intervals[] = (int)($intervals[$i] ?? 0);
             $final_durations[] = (int)($durations[$i] ?? 0);
-            // $final_shifts[] = $conn->real_escape_string($assignment_shifts[$i] ?? ''); // Deprecated
+            $final_shifts[] = $conn->real_escape_string($assignment_shifts[$i] ?? '');
         }
 
         for ($i = 0; $i < count($final_checkpoint_ids); $i++) {
             $cp_id = $final_checkpoint_ids[$i];
             $interval = $final_intervals[$i];
             $duration = $final_durations[$i];
-            // $as_shift = $final_shifts[$i] ?? ''; // Deprecated
+            $as_shift = $final_shifts[$i];
             $order = $i + 1;
-            $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes) VALUES (?, ?, ?, ?, ?)");
-            $stmt_ins->bind_param("iiiii", $mapping_id, $cp_id, $order, $interval, $duration);
+            $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes, shift_name) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt_ins->bind_param("iiiiis", $mapping_id, $cp_id, $order, $interval, $duration, $as_shift);
             $stmt_ins->execute();
         }
         $conn->commit();
@@ -294,8 +290,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                     $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, is_zero_checkpoint) VALUES ($mapping_id, 'Starting Point', '$code', 1)");
                 }
 
-                /*
-                // Handle shifts update (Deprecated)
+                // Handle shifts update
                 $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
                 $site_shifts = $_POST['shifts'] ?? [];
                 foreach ($site_shifts as $s_name) {
@@ -304,7 +299,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                         $conn->query("INSERT INTO shifts (agency_client_id, shift_name) VALUES ($mapping_id, '$s_name')");
                     }
                 }
-                */
 
                 $conn->commit();
                 $message = "Site configuration and checkpoints updated successfully!";
@@ -383,7 +377,7 @@ if ($selected_mapping_id) {
     }
 
     $assign_res = $conn->query("
-        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, cp.name 
+        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name 
         FROM tour_assignments ta 
         JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
         WHERE ta.agency_client_id = $selected_mapping_id 
@@ -393,8 +387,7 @@ if ($selected_mapping_id) {
         $current_assignments[] = $row;
     }
 
-    /*
-    // Fetch shifts for selected client (Patrol Tab) - Deprecated
+    // Fetch shifts for selected client (Patrol Tab)
     $client_shifts = [];
     $shift_query = $conn->query("SELECT shift_name FROM shifts WHERE agency_client_id = $selected_mapping_id ORDER BY id ASC");
     if ($shift_query) {
@@ -402,8 +395,6 @@ if ($selected_mapping_id) {
             $client_shifts[] = $s_row['shift_name'];
         }
     }
-    */
-    $client_shifts = [];
 }
 
 // Fetch checkpoints for table view (Patrol Management Tab)
@@ -801,8 +792,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <div class="content-area">
             
             <div class="tabs">
-                <button class="tab-btn <?php echo $active_tab === 'qr' ? 'active' : ''; ?>" onclick="switchTab(event, 'qr')">QR Checkpoints</button>
-                <button class="tab-btn <?php echo $active_tab === 'patrol' ? 'active' : ''; ?>" onclick="switchTab(event, 'patrol')">Patrol Patterns</button>
+                <button class="tab-btn <?php echo $active_tab === 'qr' ? 'active' : ''; ?>" onclick="switchTab('qr')">QR Checkpoints</button>
+                <button class="tab-btn <?php echo $active_tab === 'patrol' ? 'active' : ''; ?>" onclick="switchTab('patrol')">Patrol Patterns</button>
             </div>
 
             <!-- PATROL PATTERNS TAB -->
@@ -836,10 +827,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                             <div class="tour-list-container">
                                 <?php if ($starting_point): 
+                                    $start_shift = $selected_client['shift_type'] ?? '';
                                     $start_interval = 0;
                                     $start_duration = 1; // Default to 1
                                     foreach($current_assignments as $as) {
                                         if($as['checkpoint_id'] == $starting_point['id']) {
+                                            $start_shift = $as['shift_name'];
                                             $start_interval = $as['interval_minutes'];
                                             $start_duration = $as['duration_minutes'] ?? 1;
                                             break;
@@ -862,7 +855,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
-                                                <!-- Shift Declare Removed (Centralized to Guard Level) -->
+                                                <div class="input-group">
+                                                    <label>Shift Declare</label>
+                                                    <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                                                        <?php if (empty($client_shifts)): ?>
+                                                            <option value="Day Shift" <?php echo $start_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                            <option value="Night Shift" <?php echo $start_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                        <?php else: ?>
+                                                            <?php foreach ($client_shifts as $s_name): ?>
+                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo $start_shift === $s_name ? 'selected' : ''; ?>>
+                                                                    <?php echo htmlspecialchars($s_name); ?>
+                                                                </option>
+                                                            <?php endforeach; ?>
+                                                        <?php endif; ?>
+                                                    </select>
+                                                </div>
                                             </div>
                                             <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                         </div>
@@ -889,7 +896,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 1; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
-                                                <!-- Shift Declare Removed -->
+                                                <div class="input-group">
+                                                    <label>Shift Declare</label>
+                                                    <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                                                        <?php if (empty($client_shifts)): ?>
+                                                            <option value="Day Shift" <?php echo ($item['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                            <option value="Night Shift" <?php echo ($item['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                        <?php else: ?>
+                                                            <?php foreach ($client_shifts as $s_name): ?>
+                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($item['shift_name'] ?? '') === $s_name ? 'selected' : ''; ?>>
+                                                                    <?php echo htmlspecialchars($s_name); ?>
+                                                                </option>
+                                                            <?php endforeach; ?>
+                                                        <?php endif; ?>
+                                                    </select>
+                                                </div>
                                             </div>
                                             <button type="button" class="remove-btn" onclick="removeCheckpoint(this, '<?php echo $item['checkpoint_id']; ?>', '<?php echo addslashes($item['name']); ?>')">&times;</button>
                                         </div>
@@ -1003,7 +1024,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                     </div>
                                 </div>
                                 
-                                 <!-- Site Shifts Removed (Centralized to Guard Level) -->
+                                <div class="form-group" style="margin-top: 24px;">
+                                    <label class="form-label">Site Shifts</label>
+                                    <div id="shifts-container" style="display: flex; flex-direction: column; gap: 10px;">
+                                        <!-- Shift inputs populated here -->
+                                    </div>
+                                    <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+                                        <button type="button" class="btn" style="background:#f3f4f6; color:#374151;" onclick="addShiftInput()">+ Add Shift</button>
+                                    </div>
+                                </div>
                                 <button type="submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px;">Site Configuration</button>
                             </form>
                         <?php endif; ?>
@@ -1154,19 +1183,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         });
 
-        function switchTab(event, tabId) {
+        function switchTab(tabId) {
             // Update buttons
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            if (event && event.target) {
-                event.target.classList.add('active');
-            }
+            event.target.classList.add('active');
 
             // Update panes
             document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-            const targetPane = document.getElementById('tab-' + tabId);
-            if (targetPane) {
-                targetPane.classList.add('active');
-            }
+            document.getElementById('tab-' + tabId).classList.add('active');
             
             // Update URL to prevent losing history/state on refresh if wanted
             const url = new URL(window.location);
@@ -1180,11 +1204,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             const mappingId = parseInt(select.value);
             const siteNameInput = document.getElementById('site_name');
             const container = document.getElementById('checkpoints-container');
+            const shiftContainer = document.getElementById('shifts-container');
             const limitText = document.getElementById('qr-limit-text');
             
             // Clear all previous data immediately
             siteNameInput.value = '';
             container.innerHTML = '';
+            shiftContainer.innerHTML = '';
             limitText.textContent = '';
             
             if (!mappingId) return;
@@ -1222,14 +1248,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     } else {
                         addCheckpointInput(); // Add at least one empty row
                     }
+
+                    if (data.shifts && data.shifts.length > 0) {
+                        data.shifts.forEach(sh => {
+                            addShiftInput(sh.shift_name, sh.id);
+                        });
+                    } else {
+                        // Default shifts if none exist
+                        addShiftInput('Day Shift');
+                        addShiftInput('Night Shift');
+                    }
                 } catch (e) {
                     console.error('Error fetching site data:', e);
                     addCheckpointInput();
+                    addShiftInput();
                 }
             }
         }
 
-        /* addShiftInput removed */
+        function addShiftInput(value = '', id = '') {
+            const container = document.getElementById('shifts-container');
+            const row = document.createElement('div');
+            row.className = 'shift-input-row';
+            row.style.display = 'flex';
+            row.style.gap = '10px';
+            row.innerHTML = `
+                <input type="text" name="shifts[]" class="form-control" placeholder="Shift Name (e.g. Day Shift)" value="${value.replace(/"/g, '&quot;')}" required>
+                <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; padding: 0 16px;" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(row);
+        }
 
         function addCheckpointInput(value = '', id = '') {
             const container = document.getElementById('checkpoints-container');
@@ -1312,6 +1360,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             if (!id) return;
 
+            let shiftOptions = '';
+            if (currentShifts.length > 0) {
+                shiftOptions = currentShifts.map(s => `<option value="${s.replace(/"/g, '&quot;')}">${s}</option>`).join('');
+            } else {
+                shiftOptions = '<option value="Day Shift">Day Shift</option><option value="Night Shift">Night Shift</option>';
+            }
+
             const list = document.getElementById('tour-list');
             const item = document.createElement('div');
             item.className = 'tour-item';
@@ -1329,6 +1384,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <label>Duration</label>
                         <input type="number" name="durations[]" value="1" min="0">
                         <label>min</label>
+                    </div>
+                    <div class="input-group">
+                        <label>Shift Declare</label>
+                        <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
+                            ${shiftOptions}
+                        </select>
                     </div>
                 </div>
                 <button type="button" class="remove-btn" onclick="removeCheckpoint(this, '${id}', '${name.replace(/'/g, "\\'")}')">&times;</button>
