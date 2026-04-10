@@ -34,8 +34,7 @@ $guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY
 $guards_res = $conn->query($guards_sql);
 
 // Handle Filter Submissions
-$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-30 days'));
-$filter_end = $_GET['end_date'] ?? date('Y-m-d');
+$filter_date = $_GET['date'] ?? date('Y-m-d');
 $filter_guard = $_GET['guard_id'] ?? '';
 $filter_client = $_GET['mapping_id'] ?? '';
 $filter_checkpoint = $_GET['checkpoint_id'] ?? '';
@@ -49,13 +48,12 @@ $checkpoints_res = $conn->query($cp_filter_sql);
 // Build dynamic WHERE clause
 $where_clauses = ["c.agency_client_id IN ($mapping_ids_str)"];
 
-if (!empty($filter_start)) {
-    $start = $conn->real_escape_string($filter_start . " 00:00:00");
-    $where_clauses[] = "s.scan_time >= '$start'";
-}
-if (!empty($filter_end)) {
-    $end = $conn->real_escape_string($filter_end . " 23:59:59");
-    $where_clauses[] = "s.scan_time <= '$end'";
+if (!empty($filter_date)) {
+    $target_date = $conn->real_escape_string($filter_date);
+    $next_date = date('Y-m-d', strtotime($target_date . ' +1 day'));
+    // Capture the 24-hour shift window: 6 AM today to 6 AM tomorrow
+    $where_clauses[] = "s.scan_time >= '$target_date 06:00:00'";
+    $where_clauses[] = "s.scan_time < '$next_date 06:00:00'";
 }
 if (!empty($filter_guard)) {
     $g_id = (int)$filter_guard;
@@ -87,6 +85,7 @@ $history_sql = "
         u.username as client_name,
         s.status,
         s.shift,
+        ac.id as mapping_id,
         s.justification,
         s.photo_path,
         s.justification_photo_path
@@ -180,6 +179,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Patrol History - Agency Portal</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="js/patrol_map_viewer.js?v=1.3"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
@@ -330,6 +330,58 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             justify-content: flex-end;
             margin-bottom: 12px;
         }
+
+        /* Grouped History Styles */
+        .history-card { border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; overflow: hidden; background: white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .shift-header { background: #1e293b; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; transition: background 0.2s; }
+        .shift-header:hover { background: #334155; }
+        .shift-info { display: flex; align-items: center; gap: 16px; }
+        .shift-badge { background: #10b981; color: white; padding: 4px 12px; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; }
+        .shift-badge.night { background: #6366f1; }
+        
+        .tour-group { border-top: 1px solid #f1f5f9; padding: 0 24px; }
+        .tour-header { padding: 16px 0; display: flex; justify-content: space-between; align-items: center; cursor: pointer; border-bottom: 1px dashed #e2e8f0; }
+        .tour-header:hover { background: #f8fafc; }
+        .tour-title { font-weight: 600; color: #334155; display: flex; align-items: center; gap: 8px; }
+        
+        .tour-content { padding: 16px 0; overflow-x: auto; display: none; }
+        .tour-content.active { display: block; }
+        
+        .chevron { transition: transform 0.3s; }
+        .open .chevron { transform: rotate(180deg); }
+        
+        .empty-history { text-align: center; padding: 60px; color: #64748b; font-style: italic; }
+        .btn-visual-3d {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+            margin-right: 12px;
+        }
+        .btn-visual-3d:hover {
+            background: #059669;
+            transform: translateY(-1px);
+        }
+        .visual-3d-container {
+            width: 100%;
+            height: 500px;
+            background: #ffffff;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+        .modal-content.large {
+            max-width: 900px;
+            width: 95%;
+        }
     </style>
 </head>
 <body>
@@ -373,13 +425,10 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             <div class="card">
                 <div class="card-header">Filter Patrol History</div>
                 <form class="filter-form" method="GET" action="agency_patrol_history.php">
+
                     <div class="form-group">
-                        <label class="form-label" for="start_date">Date From</label>
-                        <input type="date" id="start_date" name="start_date" class="form-control" value="<?php echo htmlspecialchars($filter_start); ?>">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="end_date">Date To</label>
-                        <input type="date" id="end_date" name="end_date" class="form-control" value="<?php echo htmlspecialchars($filter_end); ?>">
+                        <label class="form-label" for="date">Select Date</label>
+                        <input type="date" id="date" name="date" class="form-control" value="<?php echo htmlspecialchars($filter_date); ?>" onchange="this.form.submit()">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="mapping_id">Client Site</label>
@@ -437,116 +486,157 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                     <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if (!$history_res || $history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if (!$history_res || $history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download</button>
                 </div>
 
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Date & Time</th>
-                                <th>Client</th>
-                                <th>Checkpoint</th>
-                                <th>Guard</th>
-                                <th>Status</th>
-                                <th>Remarks</th>
-                                <th>Photos</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php if (empty($filter_client)): ?>
-                                <tr>
-                                    <td colspan="7" class="empty-state">Please select a Client Site to view patrol history.</td>
-                                </tr>
-                            <?php elseif ($history_res && $history_res->num_rows > 0): ?>
-                                <?php 
-                                $current_session = ''; 
-                                while($row = $history_res->fetch_assoc()): 
-                                    // Unify session ID: exclude guard if no specific guard is filtered to avoid creating separate reports
-                                    $session_id = ($row['tour_session_id'] ?? '') ?: ($row['scan_date'] . '|' . $row['shift'] . (empty($filter_guard) ? '' : '|' . $row['guard_name']));
+                <div class="table-container" style="border: none;">
+                    <?php 
+                    if (empty($filter_client)): ?>
+                        <div class="empty-history">Please select a Client Site to view patrol history.</div>
+                    <?php elseif ($history_res && $history_res->num_rows > 0): 
+                        // Process data into groups
+                        $grouped = [];
+                        while($row = $history_res->fetch_assoc()) {
+                            $ts = strtotime($row['scan_time']);
+                            $s_date = date('Y-m-d', $ts);
+                            $hour = (int)date('H', $ts);
+                            $s_type = $row['shift'] ?? 'Day Shift';
+                            
+                            // Adjust date for Night Shift rollover (00:00 - 05:59)
+                            if ($s_type === 'Night Shift' && $hour < 6) {
+                                $s_date = date('Y-m-d', strtotime($s_date . ' -1 day'));
+                            }
+                            
+                            $shift_key = $s_date . '_' . $s_type;
+                            $tour_id = ($row['tour_session_id'] ?? '') ?: 'adhoc_' . $s_date . '_' . $s_type;
+                            
+                            if (!isset($grouped[$shift_key])) {
+                                $grouped[$shift_key] = [
+                                    'date' => $s_date,
+                                    'shift' => $s_type,
+                                    'tours' => []
+                                ];
+                            }
+                            if (!isset($grouped[$shift_key]['tours'][$tour_id])) {
+                                $grouped[$shift_key]['tours'][$tour_id] = [
+                                    'start_time' => $row['scan_time'],
+                                    'mapping_id' => $row['mapping_id'],
+                                    'scans' => []
+                                ];
+                            }
+                            $grouped[$shift_key]['tours'][$tour_id]['scans'][] = $row;
+                        }
 
-                                    if ($current_session !== $session_id):
-                                        $current_session = $session_id;
-                                        
-                                        // Use scan_time for the header display
-                                        $cycle_ts = strtotime($row['scan_time']);
-                                        $cycle_time = ($cycle_ts && $cycle_ts > 0) ? date('M d, Y h:i A', $cycle_ts) : date('M d, Y h:i A');
-
-                                        $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
-                                        $display_guard = htmlspecialchars($row['guard_name']);
-                                        $header_guard_info = empty($filter_guard) ? "Participating Guards" : "Guard: <strong style='color: #1e293b;'>" . $display_guard . "</strong>";
+                        foreach($grouped as $sk => $s_data):
+                            $is_night = ($s_data['shift'] === 'Night Shift');
+                    ?>
+                        <div class="history-card">
+                            <div class="shift-header" onclick="toggleShift(this)">
+                                <div class="shift-info">
+                                    <div style="font-weight: 700; font-size: 1.1rem;"><?php echo date('F d, Y', strtotime($s_data['date'])); ?></div>
+                                    <div class="shift-badge <?php echo $is_night ? 'night' : ''; ?>">
+                                        <?php echo $is_night ? '🌙' : '☀️'; ?> <?php echo $s_data['shift']; ?>
+                                    </div>
+                                </div>
+                                <svg class="chevron" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            </div>
+                            
+                            <div class="shift-body" style="display: block;">
+                                <?php foreach($s_data['tours'] as $t_id => $t_data): 
+                                    $tour_label = strpos($t_id, 'adhoc') !== false ? "Ad-hoc Scan Session" : "Patrol Tour Cycle";
+                                    $t_start = date('h:i A', strtotime($t_data['start_time']));
                                 ?>
-                                    <tr style="background-color: #f8fafc; border-top: 2px solid #e2e8f0; border-bottom: 2px solid #e2e8f0;">
-                                        <td colspan="7" style="font-weight: 700; color: #334155; padding: 14px 16px; font-size: 0.9rem; background: linear-gradient(to right, #f8fafc, #ffffff);">
-                                            <div style="display: flex; align-items: center; gap: 10px;">
-                                                <div style="background: #e2e8f0; padding: 6px; border-radius: 8px; color: #64748b;">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
-                                                </div>
-                                                <span style="text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-size: 0.75rem;">Tour Cycle:</span>
-                                                <span style="color: #1e293b;"><?php echo $cycle_time; ?></span>
-                                                <span style="color: #cbd5e1;">&bull;</span>
-                                                <span style="color: #64748b;"><?php echo $display_shift; ?> Shift</span>
-                                                <span style="color: #cbd5e1;">&bull;</span>
-                                                <span style="color: #64748b;"><?php echo $header_guard_info; ?></span>
+                                    <div class="tour-group">
+                                        <div class="tour-header" onclick="toggleTour(this)">
+                                            <div class="tour-title">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                                <?php echo $tour_label; ?> <span style="color: #94a3b8; font-weight: normal; margin-left: 8px;">started at <?php echo $t_start; ?></span>
                                             </div>
-                                        </td>
-                                    </tr>
-                                <?php endif; ?>
-                                    <tr>
-                                        <td><strong><?php echo date('h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($row['client_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
-                                        <td>
-                                            <span class="status-badge status-<?php echo strtolower($row['status']); ?>">
-                                                <?php echo htmlspecialchars($row['status']); ?>
-                                            </span>
-                                        </td>
-                                         <td style="font-size: 0.85rem; color: #4b5563; font-style: italic;">
-                                                <?php if (!empty($row['justification'])): ?>
-                                                    <?php echo htmlspecialchars($row['justification']); ?>
-                                                    <button class="btn-view-photo justification" style="margin-left: 8px; transform: scale(0.85);" onclick="viewPhoto('<?php echo htmlspecialchars($row['justification_photo_path'] ?? ''); ?>', 'Justification - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'])); ?>')">View Full</button>
-                                                <?php else: ?>
-                                                    ---
-                                                <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <div style="display: flex; gap: 4px;">
-                                                <?php if (!empty($row['photo_path'])): ?>
-                                                    <button class="btn-view-photo" onclick="viewPhoto('<?php echo htmlspecialchars($row['photo_path']); ?>', 'Patrol Selfie - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'] ?? '')); ?>')">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
-                                                        Selfie
-                                                    </button>
-                                                <?php endif; ?>
-                                                
-                                                 <?php if (!empty($row['justification_photo_path'])): ?>
-                                                    <button class="btn-view-photo justification" onclick="viewPhoto('<?php echo htmlspecialchars($row['justification_photo_path']); ?>', 'Justification Photo - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'] ?? '')); ?>')">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>
-                                                        Justification
-                                                    </button>
-                                                <?php elseif (!empty($row['justification'])): ?>
-                                                    <button class="btn-view-photo justification" onclick="viewPhoto('', 'Justification - <?php echo htmlspecialchars($row['checkpoint_name']); ?>', '<?php echo addslashes(htmlspecialchars($row['justification'])); ?>')">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                                                        Reason
-                                                    </button>
-                                                <?php endif; ?>
-                                                
-                                                <?php if (empty($row['photo_path']) && empty($row['justification_photo_path']) && empty($row['justification'])): ?>
-                                                    <span style="color: #9ca3af; font-size: 0.75rem;">No Photo</span>
-                                                <?php endif; ?>
+                                            <div style="display: flex; align-items: center;">
+                                                <button class="btn-visual-3d" onclick="open3DVisual('<?php echo $t_id; ?>', '<?php echo $t_data['mapping_id']; ?>', event)">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 19 21 12 17 5 21 12 2"></polygon></svg>
+                                                    Visual
+                                                </button>
+                                                <svg class="chevron" style="width: 16px; height: 16px;" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                             </div>
-                                        </td>
-                                    </tr>
-                                <?php endwhile; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="7" class="empty-state">No patrol activity found for the selected criteria.</td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+                                        </div>
+                                        
+                                        <div class="tour-content active">
+                                            <table>
+                                                <thead>
+                                                    <tr>
+                                                        <th>Time</th>
+                                                        <th>Guard</th>
+                                                        <th>Checkpoint</th>
+                                                        <th>Status</th>
+                                                        <th>Remarks</th>
+                                                        <th>Evidence</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php foreach($t_data['scans'] as $row): ?>
+                                                        <tr>
+                                                            <td style="width: 120px;"><strong><?php echo date('h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
+                                                            <td style="font-weight: 500; font-size: 0.85rem; color: #64748b;"><?php echo htmlspecialchars($row['guard_name']); ?></td>
+                                                            <td style="font-weight: 500;"><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
+                                                            <td>
+                                                                <span class="status-badge status-<?php echo strtolower($row['status']); ?>">
+                                                                    <?php echo htmlspecialchars($row['status']); ?>
+                                                                </span>
+                                                            </td>
+                                                            <td style="font-size: 0.85rem; color: #4b5563; font-style: italic;">
+                                                                <?php echo !empty($row['justification']) ? htmlspecialchars($row['justification']) : '---'; ?>
+                                                            </td>
+                                                            <td>
+                                                                <div style="display: flex; gap: 4px;">
+                                                                    <?php if (!empty($row['photo_path'])): ?>
+                                                                        <button class="btn-view-photo" onclick="viewPhoto('<?php echo htmlspecialchars($row['photo_path']); ?>', 'Patrol Selfie', '<?php echo addslashes(htmlspecialchars($row['justification'] ?? '')); ?>')">Selfie</button>
+                                                                    <?php endif; ?>
+                                                                    <?php if (!empty($row['justification_photo_path'])): ?>
+                                                                        <button class="btn-view-photo justification" onclick="viewPhoto('<?php echo htmlspecialchars($row['justification_photo_path']); ?>', 'Justification Photo', '<?php echo addslashes(htmlspecialchars($row['justification'] ?? '')); ?>')">Photo</button>
+                                                                    <?php endif; ?>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                    <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                    <?php else: ?>
+                        <div class="empty-history">No patrol activity found for the selected criteria.</div>
+                    <?php endif; ?>
                 </div>
             </div>
 
         </div>
     </main>
+
+    <div class="modal-overlay" id="visual3DModal">
+        <div class="modal-content large">
+            <button class="modal-close" onclick="closeAllModals()">&times;</button>
+            <h3 class="modal-title">Patrol Tour Visualization</h3>
+            <div id="visual3DContainer" class="visual-3d-container">
+                <!-- Map Canvas will be injected here -->
+            </div>
+            <!-- Legend Bar -->
+            <div style="display: flex; gap: 18px; align-items: center; justify-content: center; padding: 10px 12px 4px; flex-wrap: wrap;">
+                <span style="display:flex;align-items:center;gap:6px;font-size:0.78rem;font-weight:600;color:#374151;">
+                    <span style="width:12px;height:12px;border-radius:50%;background:#10b981;display:inline-block;"></span>Scanned
+                </span>
+                <span style="display:flex;align-items:center;gap:6px;font-size:0.78rem;font-weight:600;color:#374151;">
+                    <span style="width:12px;height:12px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Missed
+                </span>
+                <span style="display:flex;align-items:center;gap:6px;font-size:0.78rem;font-weight:600;color:#374151;">
+                    <span style="width:12px;height:12px;border-radius:50%;background:#cbd5e1;border:2px solid #94a3b8;display:inline-block;"></span>Pending
+                </span>
+            </div>
+            <div class="modal-actions" style="margin-top: 8px;">
+                <button class="btn-modal btn-cancel" onclick="closeAllModals()" style="width: 100%;">Close Viewer</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Photo Modal -->
     <div class="modal-overlay" id="photoModal">
@@ -589,6 +679,18 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             window.location.href = url.toString();
         }
 
+        function toggleShift(header) {
+            header.parentElement.classList.toggle('open');
+            const body = header.nextElementSibling;
+            body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleTour(header) {
+            header.parentElement.classList.toggle('open');
+            const content = header.nextElementSibling;
+            content.classList.toggle('active');
+        }
+
         function viewPhoto(url, title, reason = '') {
             const modal = document.getElementById('photoModal');
             const modalImg = document.getElementById('modalImage');
@@ -608,6 +710,21 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             
             modal.classList.add('show');
             document.body.style.overflow = 'hidden';
+        }
+
+        let visualizer = null;
+
+        function open3DVisual(tourId, mappingId, event) {
+            if (event) event.stopPropagation();
+            
+            document.getElementById('visual3DModal').classList.add('show');
+            document.body.style.overflow = 'hidden';
+            
+            if (!visualizer) {
+                visualizer = new PatrolMapViewer('visual3DContainer');
+            }
+            
+            visualizer.renderTour(tourId, mappingId);
         }
 
         function closeAllModals() {

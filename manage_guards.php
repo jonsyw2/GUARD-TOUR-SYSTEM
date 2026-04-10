@@ -308,7 +308,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 // Fetch Guards created by this agency with current assignment info
 $guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo, g.shift,
                       GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
-                      GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
+                      GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names,
+                      GROUP_CONCAT(COALESCE(ac.site_name, 'No Site Name') SEPARATOR ', ') as site_names
                FROM guards g 
                JOIN users u ON g.user_id = u.id 
                LEFT JOIN guard_assignments ga ON g.id = ga.guard_id
@@ -320,7 +321,7 @@ $guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_n
 $guards_res = $conn->query($guards_sql);
 
 // Fetch assigned clients for the dropdown
-$clients_sql = "SELECT ac.id as mapping_id, u.username as client_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
+$clients_sql = "SELECT ac.id as mapping_id, u.username as client_name, ac.site_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 if ($clients_res) {
@@ -437,7 +438,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Personnel & Assignment Management</h2>
+            <h2>Guard & Assignment Management</h2>
         </header>
 
         <div class="content-area">
@@ -448,15 +449,15 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             <!-- Active Guards Table -->
             <div class="card">
                 <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="margin:0;">Active Personnel</h3>
+                    <h3 style="margin:0;">Active Guards</h3>
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <span style="font-size: 0.8rem; font-weight: 700; color: var(--primary);">
                             <?php echo $current_guard_count; ?> / <?php echo $total_guard_limit; ?> accounts
                          </span>
                         <?php if ($guard_limit_reached): ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Personnel</button>
+                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Guard</button>
                         <?php else: ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Personnel</button>
+                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Guard</button>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -512,11 +513,17 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                                         </td>
                                         <td>
                                             <?php if ($row['client_names']): ?>
-                                                <?php $names = explode(', ', $row['client_names']); ?>
+                                                <?php 
+                                                $c_names = explode(', ', $row['client_names']); 
+                                                $s_names = explode(', ', $row['site_names'] ?? '');
+                                                ?>
                                                 <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-                                                    <?php foreach($names as $name): ?>
-                                                        <span class="badge" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;"><?php echo htmlspecialchars($name); ?></span>
-                                                    <?php endforeach; ?>
+                                                    <?php for($i=0; $i < count($c_names); $i++): ?>
+                                                        <span class="badge" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;">
+                                                            <?php echo htmlspecialchars($c_names[$i]); ?> 
+                                                            <?php if (!empty($s_names[$i]) && $s_names[$i] !== 'No Site Name') echo " (" . htmlspecialchars($s_names[$i]) . ")"; ?>
+                                                        </span>
+                                                    <?php endfor; ?>
                                                 </div>
                                             <?php else: ?>
                                                 <span style="color: #9ca3af; font-size: 0.8rem;">None</span>
@@ -599,6 +606,18 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                         <select name="shift" class="form-control" required>
                             <option value="Day Shift">Day Shift (06:00 AM – 06:00 PM)</option>
                             <option value="Night Shift">Night Shift (06:00 PM – 06:00 AM)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label class="form-label">Assign to Client Site (Optional)</label>
+                        <select name="assign_to_client" class="form-control">
+                            <option value="0">--- No Assignment ---</option>
+                            <?php foreach($clients_data as $client): ?>
+                                <option value="<?php echo $client['mapping_id']; ?>">
+                                    <?php echo htmlspecialchars($client['client_name']); ?> 
+                                    <?php if ($client['site_name']) echo " - " . htmlspecialchars($client['site_name']); ?>
+                                </option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
@@ -717,6 +736,18 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                         <option value="Night Shift">Night Shift (06:00 PM – 06:00 AM)</option>
                     </select>
                 </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Assigned Client Site</label>
+                    <select name="client_mapping_id" id="edit_mapping_id" class="form-control">
+                        <option value="0">--- No Assignment ---</option>
+                        <?php foreach($clients_data as $client): ?>
+                            <option value="<?php echo $client['mapping_id']; ?>">
+                                <?php echo htmlspecialchars($client['client_name']); ?> 
+                                <?php if ($client['site_name']) echo " - " . htmlspecialchars($client['site_name']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('editGuardModal')">Cancel</button>
                     <button type="submit" name="update_guard" class="btn">Update Details</button>
@@ -814,6 +845,15 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             document.getElementById('edit_lesp_no').value = lesp_no;
             document.getElementById('edit_lesp_expiry').value = lesp_expiry;
             document.getElementById('edit_shift').value = shift;
+            
+            // Handle multiple site assignment (select first one in the edit modal primary dropdown)
+            const mappingSelect = document.getElementById('edit_mapping_id');
+            if (client_id && client_id.toString().includes(',')) {
+                mappingSelect.value = client_id.split(',')[0];
+            } else {
+                mappingSelect.value = client_id || '0';
+            }
+            
             document.getElementById('editGuardModal').classList.add('show');
         }
 
