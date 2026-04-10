@@ -19,7 +19,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
         </li>
         <li>
             <a href="agency_maintenance.php" class="nav-link <?php echo $current_page == 'agency_maintenance.php' ? 'active' : ''; ?>">
-                <span>🛠️</span> Users Maintenance
+                <span>🛠️</span> Agency Maintenance
             </a>
         </li>
         <li>

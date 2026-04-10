@@ -347,8 +347,8 @@ if (isset($_COOKIE['jwt_token'])) {
 
 
                 <div class="form-header">
-                    <h2 id="login-title">Management Login</h2>
-                    <p id="login-subtitle">Admin, Agency, or Client access</p>
+                    <h2 id="login-title">Welcome</h2>
+                    <p id="login-subtitle">Please enter your details to login</p>
                 </div>
 
                 <form action="login_action.php" method="POST" autocomplete="off">

@@ -15,52 +15,6 @@ $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_qr_limit INT DEF
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_guard_limit INT DEFAULT 0");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_inspector_limit INT DEFAULT 0");
 
-// Handle Add Client
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
-    $client_username         = $conn->real_escape_string(trim($_POST['client_username']));
-    $client_password         = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
-    $agency_id               = (int)$_POST['agency_id'];
-    $company_name            = $conn->real_escape_string($_POST['company_name'] ?? '');
-    $company_address         = $conn->real_escape_string($_POST['company_address'] ?? '');
-    $contact_no              = $conn->real_escape_string($_POST['contact_no'] ?? '');
-    $email_address           = $conn->real_escape_string($_POST['email_address'] ?? '');
-    $contact_person          = $conn->real_escape_string($_POST['contact_person'] ?? '');
-    $website_link            = $conn->real_escape_string($_POST['website_link'] ?? '');
-    $contact_person_position = $conn->real_escape_string($_POST['contact_person_position'] ?? '');
-    $contact_person_no       = $conn->real_escape_string($_POST['contact_person_no'] ?? '');
-
-    $conn->begin_transaction();
-    try {
-        $chk = $conn->query("SELECT id FROM users WHERE username = '$client_username'");
-        if ($chk && $chk->num_rows > 0) throw new Exception("Username '$client_username' is already taken.");
-
-        $lim_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
-        $cl_limit = ($lim_res && $lr = $lim_res->fetch_assoc()) ? (int)$lr['client_limit'] : 0;
-        $cnt_res  = $conn->query("SELECT COUNT(DISTINCT client_id) as c FROM agency_clients WHERE agency_id = $agency_id");
-        $cl_count = ($cnt_res && $cr = $cnt_res->fetch_assoc()) ? (int)$cr['c'] : 0;
-        if ($cl_limit > 0 && $cl_count >= $cl_limit) {
-            throw new Exception("Agency has reached the client limit ($cl_limit). Increase it first.");
-        }
-
-        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$client_password', 'client')"))
-            throw new Exception("Error creating user: " . $conn->error);
-        $new_client_id = $conn->insert_id;
-
-        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, contact_person, website_link, contact_person_position, contact_person_no)
-                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$contact_person', '$website_link', '$contact_person_position', '$contact_person_no')"))
-            throw new Exception("Error creating client profile: " . $conn->error);
-
-        $conn->commit();
-        $message = "Client '$client_username' created and assigned to agency successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
-    } catch (Exception $e) {
-        $conn->rollback();
-        $message = "Error: " . $e->getMessage();
-        $message_type = "error";
-        $show_status_modal = true;
-    }
-}
 
 // Handle Toggle Suspend
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['toggle_status'])) {
@@ -229,10 +183,6 @@ include 'admin_layout/sidebar.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <button onclick="document.getElementById('addClientModal').classList.add('show')"
-                        style="padding: 12px 24px; background: var(--primary); color: white; border: none; border-radius: 10px; font-size: 0.9rem; font-weight: 700; cursor: pointer; white-space: nowrap; height: 48px;">
-                    ＋ Add New Client
-                </button>
             </div>
 
             <!-- Agency Banner -->
@@ -277,15 +227,19 @@ include 'admin_layout/sidebar.php';
                                     </code>
                                 </td>
                                 <td>
-                                    <strong><?php echo htmlspecialchars($c['company_name'] ?: '—'); ?></strong>
-                                    <?php if ($c['company_address']): ?>
-                                        <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;"><?php echo htmlspecialchars($c['company_address']); ?></div>
-                                    <?php endif; ?>
+                                    <a href="agency_maintenance.php?highlight_id=<?php echo $c['agency_id']; ?>" style="text-decoration: none; color: inherit; display: block;">
+                                        <strong><?php echo htmlspecialchars($c['company_name'] ?: '—'); ?></strong>
+                                        <?php if ($c['company_address']): ?>
+                                            <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;"><?php echo htmlspecialchars($c['company_address']); ?></div>
+                                        <?php endif; ?>
+                                    </a>
                                 </td>
                                 <td>
-                                    <span style="background: #ede9fe; color: #6d28d9; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;">
-                                        <?php echo htmlspecialchars($c['agency_name'] ?: $c['agency_username']); ?>
-                                    </span>
+                                    <a href="agency_maintenance.php?highlight_id=<?php echo $c['agency_id']; ?>" style="text-decoration: none; display: inline-block;">
+                                        <span style="background: #ede9fe; color: #6d28d9; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#ddd6fe'" onmouseout="this.style.background='#ede9fe'">
+                                            <?php echo htmlspecialchars($c['agency_name'] ?: $c['agency_username']); ?>
+                                        </span>
+                                    </a>
                                 </td>
                                 <td><?php echo htmlspecialchars($c['contact_person'] ?: '—'); ?></td>
                                 <td><?php echo htmlspecialchars($c['contact_no'] ?: '—'); ?></td>
@@ -300,20 +254,23 @@ include 'admin_layout/sidebar.php';
                                     <div style="display: flex; gap: 6px;">
                                         <?php if (($c['status'] ?? 'active') === 'suspended'): ?>
                                             <form method="POST" style="margin:0;">
+                                                <input type="hidden" name="toggle_status" value="1">
                                                 <input type="hidden" name="user_id" value="<?php echo $c['user_id']; ?>">
                                                 <input type="hidden" name="new_status" value="active">
-                                                <button type="submit" name="toggle_status" style="padding: 5px 12px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Restore</button>
+                                                <button type="submit" style="padding: 5px 12px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Restore</button>
                                             </form>
                                         <?php else: ?>
                                             <form method="POST" onsubmit="CustomModal.confirmForm(event, 'Suspend this client?')" style="margin:0;">
+                                                <input type="hidden" name="toggle_status" value="1">
                                                 <input type="hidden" name="user_id" value="<?php echo $c['user_id']; ?>">
                                                 <input type="hidden" name="new_status" value="suspended">
-                                                <button type="submit" name="toggle_status" style="padding: 5px 12px; background: #f59e0b; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Suspend</button>
+                                                <button type="submit" style="padding: 5px 12px; background: #f59e0b; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Suspend</button>
                                             </form>
                                         <?php endif; ?>
                                         <form method="POST" onsubmit="CustomModal.confirmForm(event, 'Permanently delete this client and all their data? This cannot be undone.')" style="margin:0;">
+                                            <input type="hidden" name="delete_client" value="1">
                                             <input type="hidden" name="user_id" value="<?php echo $c['user_id']; ?>">
-                                            <button type="submit" name="delete_client" style="padding: 5px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Delete</button>
+                                            <button type="submit" style="padding: 5px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;">Delete</button>
                                         </form>
                                     </div>
                                 </td>
@@ -367,87 +324,6 @@ include 'admin_layout/sidebar.php';
         }
     </script>
 
-    <!-- Add Client Modal -->
-    <div id="addClientModal" class="modal">
-        <div class="modal-content" style="max-width: 640px; text-align: left; padding: 32px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 16px;">
-                <h3 style="margin: 0; font-size: 1.2rem; color: #1e293b;">Add New Client</h3>
-                <button type="button" onclick="document.getElementById('addClientModal').classList.remove('show')"
-                        style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #9ca3af; line-height: 1;">&times;</button>
-            </div>
-            <form action="admin_clients.php" method="POST" autocomplete="off">
-                <div class="form-group">
-                    <label class="form-label">Assign to Agency <span style="color:#ef4444;">*</span></label>
-                    <select name="agency_id" class="form-control" required>
-                        <option value="" disabled selected>— Select Agency —</option>
-                        <?php foreach ($agencies as $ag): ?>
-                            <option value="<?php echo $ag['id']; ?>">
-                                <?php echo htmlspecialchars($ag['agency_name'] ?: $ag['username']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group">
-                        <label class="form-label">Username <span style="color:#ef4444;">*</span></label>
-                        <input type="text" name="client_username" class="form-control" required placeholder="e.g. client_acme" autocomplete="off">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Password <span style="color:#ef4444;">*</span></label>
-                        <input type="password" name="client_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
-                    </div>
-                </div>
-                <div style="border-top: 1px solid #f1f5f9; padding-top: 16px; margin: 4px 0 16px;">
-                    <p style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Company Profile (Optional)</p>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Company Name</label>
-                    <input type="text" name="company_name" class="form-control" placeholder="e.g. Acme Corp">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Company Address</label>
-                    <textarea name="company_address" class="form-control" rows="2" placeholder="Full Business Address"></textarea>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group">
-                        <label class="form-label">Contact No.</label>
-                        <input type="text" name="contact_no" class="form-control" placeholder="Company Phone">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Email Address</label>
-                        <input type="email" name="email_address" class="form-control" placeholder="contact@company.com">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Website / Social Link <span style="color:#94a3b8; font-weight:400;">(Optional)</span></label>
-                    <input type="text" name="website_link" class="form-control" placeholder="FB, Viber, or Website URL">
-                </div>
-
-                <div style="border-top: 1px solid #f1f5f9; padding-top: 16px; margin: 8px 0 16px;">
-                    <p style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Contact Person Details</p>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group">
-                        <label class="form-label">Contact Person</label>
-                        <input type="text" name="contact_person" class="form-control" placeholder="Full Name">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Position</label>
-                        <input type="text" name="contact_person_position" class="form-control" placeholder="Job Title">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Contact No. (Contact Person)</label>
-                    <input type="text" name="contact_person_no" class="form-control" placeholder="Personal or Office Phone">
-                </div>
-                <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
-                    <button type="button" onclick="document.getElementById('addClientModal').classList.remove('show')"
-                            class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
-                    <button type="submit" name="add_client" class="btn btn-primary" style="width: auto; padding: 10px 32px;">Create Client</button>
-                </div>
-            </form>
-        </div>
-    </div>
 
     <!-- Status Modal -->
     <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">

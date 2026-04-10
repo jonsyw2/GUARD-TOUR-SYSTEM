@@ -37,24 +37,45 @@ if ($agency_id == 0) {
     }
 }
 
+// Fetch agencies for global supervisor
+$all_agencies = [];
+$filter_agency = $_GET['agency_id'] ?? '';
+
+if ($agency_id == 0) {
+    $agencies_res = $conn->query("SELECT id, username, agency_name FROM users WHERE user_level = 'agency' ORDER BY agency_name ASC, username ASC");
+    if ($agencies_res) while($a = $agencies_res->fetch_assoc()) $all_agencies[] = $a;
+}
+
 // Fetch clients for filtering
+$client_where = [$sites_filter_sql];
+if (!empty($filter_agency)) {
+    $client_where[] = "ac.agency_id = " . (int)$filter_agency;
+}
+$client_where_sql = implode(" AND ", $client_where);
+
 $clients_sql = "
-    SELECT ac.id as mapping_id, u.username as client_name 
+    SELECT ac.id as mapping_id, u.username as client_name, ac.company_name 
     FROM agency_clients ac
     JOIN users u ON ac.client_id = u.id
-    WHERE $sites_filter_sql
-    ORDER BY u.username ASC
+    WHERE $client_where_sql
+    ORDER BY ac.company_name ASC, u.username ASC
 ";
 $clients_res = $conn->query($clients_sql);
 
 // Fetch history with filters
-$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-7 days'));
-$filter_end = $_GET['end_date'] ?? date('Y-m-d');
+$filter_date = $_GET['filter_date'] ?? '';
 $filter_client = $_GET['mapping_id'] ?? '';
 
 $where_clauses = [$sites_filter_sql];
-$where_clauses[] = "s.scan_time >= '" . $conn->real_escape_string($filter_start . " 00:00:00") . "'";
-$where_clauses[] = "s.scan_time <= '" . $conn->real_escape_string($filter_end . " 23:59:59") . "'";
+
+if (!empty($filter_agency)) {
+    $where_clauses[] = "ac.agency_id = " . (int)$filter_agency;
+}
+
+if (!empty($filter_date)) {
+    $where_clauses[] = "s.scan_time >= '" . $conn->real_escape_string($filter_date . " 00:00:00") . "'";
+    $where_clauses[] = "s.scan_time <= '" . $conn->real_escape_string($filter_date . " 23:59:59") . "'";
+}
 
 if (!empty($filter_client)) {
     $where_clauses[] = "ac.id = " . (int)$filter_client;
@@ -68,6 +89,7 @@ $history_sql = "
         c.name as checkpoint_name,
         g.name as guard_name,
         u.username as client_name,
+        ac.company_name,
         s.status,
         s.justification
     FROM scans s
@@ -95,11 +117,10 @@ $history_res = $conn->query($history_sql);
         .topbar { background: #111827; color: white; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
         .main-content { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         .card { background: white; padding: 24px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 24px; }
-        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; align-items: flex-end; }
+        .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px; align-items: flex-end; }
         .form-group { display: flex; flex-direction: column; gap: 8px; }
         .form-label { font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; }
         .form-control { padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.95rem; }
-        .btn-primary { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; }
         .table-container { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; }
         th, td { padding: 14px; text-align: left; border-bottom: 1px solid #f1f5f9; }
@@ -127,29 +148,37 @@ $history_res = $conn->query($history_sql);
     <main class="main-content">
         <div class="card">
             <h3 style="margin-bottom: 16px; color: #1e293b;">Patrol History Filters</h3>
-            <form method="GET" class="filter-grid">
+            <form method="GET" class="filter-grid" id="filterForm">
                 <div class="form-group">
-                    <label class="form-label">Start Date</label>
-                    <input type="date" name="start_date" class="form-control" value="<?php echo $filter_start; ?>">
+                    <label class="form-label">Filter By Date</label>
+                    <input type="date" name="filter_date" class="form-control" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
                 </div>
+
+                <?php if ($agency_id == 0): ?>
                 <div class="form-group">
-                    <label class="form-label">End Date</label>
-                    <input type="date" name="end_date" class="form-control" value="<?php echo $filter_end; ?>">
+                    <label class="form-label">Select Agency</label>
+                    <select name="agency_id" class="form-control" onchange="this.form.submit()">
+                        <option value="">All Agencies</option>
+                        <?php foreach($all_agencies as $a): ?>
+                            <option value="<?php echo $a['id']; ?>" <?php if($filter_agency == $a['id']) echo 'selected'; ?>>
+                                <?php echo htmlspecialchars($a['agency_name'] ?: $a['username']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
+                <?php endif; ?>
+
+                <div class="form-group">
                 <div class="form-group">
                     <label class="form-label">Select Site</label>
                     <select name="mapping_id" class="form-control" onchange="this.form.submit()">
                         <option value="">All Assigned Sites</option>
                         <?php while($c = $clients_res->fetch_assoc()): ?>
                             <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>>
-                                <?php echo htmlspecialchars($c['client_name']); ?>
+                                <?php echo htmlspecialchars($c['company_name'] ?: $c['client_name']); ?>
                             </option>
                         <?php endwhile; ?>
                     </select>
-                </div>
-                <div>
-                    <button type="submit" class="btn-primary">Apply</button>
-                    <a href="supervisor_dashboard.php" style="font-size: 0.85rem; color: #64748b; margin-left: 10px; text-decoration: none;">Reset</a>
                 </div>
             </form>
         </div>
@@ -172,7 +201,7 @@ $history_res = $conn->query($history_sql);
                             <?php while($row = $history_res->fetch_assoc()): ?>
                                 <tr>
                                     <td style="font-weight: 600; font-size: 0.9rem;"><?php echo date('M d, h:i A', strtotime($row['scan_time'])); ?></td>
-                                    <td><?php echo htmlspecialchars($row['client_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($row['company_name'] ?: $row['client_name']); ?></td>
                                     <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                     <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
                                     <td>

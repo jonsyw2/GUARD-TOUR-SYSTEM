@@ -112,8 +112,31 @@ if (isset($_GET['ajax_agency_data'])) {
             header('HTTP/1.1 500 Internal Server Error');
             $response = ['success' => false, 'message' => "Database Error: " . $conn->error];
         }
+    } elseif ($type === 'update_agency_limit') {
+        $agency_id = (int)($_GET['agency_id'] ?? 0);
+        $limit = (int)($_GET['limit'] ?? 0);
+        
+        $sql = "UPDATE users SET client_limit = $limit WHERE id = $agency_id AND LOWER(user_level) = 'agency'";
+        if ($conn->query($sql)) {
+            if ($conn->affected_rows > 0) {
+                $response = ['success' => true, 'message' => 'Agency client limit updated!'];
+            } else {
+                // Check if it already has that value
+                $check = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
+                $curr = $check->fetch_assoc();
+                if ($curr && (int)$curr['client_limit'] === $limit) {
+                    $response = ['success' => true, 'message' => 'No change needed, limit already set to ' . $limit];
+                } else {
+                    $response = ['success' => false, 'message' => "No rows updated. Query was: $sql"];
+                }
+            }
+        } else {
+            $response = ['success' => false, 'message' => "SQL Error: " . $conn->error];
+        }
+        // $response['debug'] = ['got_agency_id' => $agency_id, 'got_limit' => $limit];
     }
 
+    if (ob_get_length()) ob_clean();
     header('Content-Type: application/json');
     echo json_encode($response);
     exit();
@@ -230,7 +253,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $agency_name = $conn->real_escape_string($_POST['agency_name']);
     $username = $conn->real_escape_string($_POST['agency_username']);
     $password = password_hash($_POST['agency_password'], PASSWORD_DEFAULT);
-    $client_limit = (int)$_POST['client_limit'];
+    $client_limit = (int)($_POST['client_limit'] ?? 0);
     $address = $conn->real_escape_string($_POST['address']);
     $contact_person = $conn->real_escape_string($_POST['contact_person'] ?? '');
     $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
@@ -554,8 +577,8 @@ $personnel_json = json_encode($personnel_map);
 
 ?>
 <?php
-$page_title = 'Users Maintenance';
-$header_title = 'Users Maintenance';
+$page_title = 'Agency Maintenance';
+$header_title = 'Agency Maintenance';
 include 'admin_layout/head.php';
 include 'admin_layout/sidebar.php';
 ?>
@@ -625,7 +648,7 @@ include 'admin_layout/sidebar.php';
                                 $agencies_result->data_seek(0);
                                 if ($agencies_result->num_rows > 0): 
                                     while($row = $agencies_result->fetch_assoc()): ?>
-                                        <tr onclick='openQuickLinksModal(<?php echo htmlspecialchars(json_encode($row), ENT_QUOTES); ?>)'>
+                                        <tr id="agency_row_<?php echo $row['id']; ?>" onclick='openQuickLinksModal(<?php echo htmlspecialchars(json_encode($row), ENT_QUOTES); ?>)'>
                                             <td>#<?php echo $row['id']; ?></td>
                                             <td>
                                                 <strong><?php echo htmlspecialchars($row['agency_name'] ?: $row['username']); ?></strong>
@@ -635,7 +658,8 @@ include 'admin_layout/sidebar.php';
                                             </td>
                                             <td>
                                                 <div style="font-weight: 600; font-size: 1rem; color: var(--primary);">
-                                                    <?php echo $row['current_clients']; ?> / <?php echo $row['client_limit']; ?>
+                                                    <span id="table_current_<?php echo $row['id']; ?>"><?php echo $row['current_clients']; ?></span> / 
+                                                    <span id="table_max_<?php echo $row['id']; ?>"><?php echo $row['client_limit'] > 0 ? $row['client_limit'] : 'Unlimited'; ?></span>
                                                 </div>
                                             </td>
                                             <td>
@@ -663,59 +687,12 @@ include 'admin_layout/sidebar.php';
 
             <!-- TAB: USER ACCOUNTS -->
             <div id="tab-user-accounts" class="tab-pane">
-                <div class="card" style="max-width: 600px;">
-                    <div class="card-header"><h3>Add New User (Supervisor)</h3></div>
-                    <div class="card-body">
-                        <form action="" method="POST">
-                            <div class="form-group">
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <label class="form-label" style="margin-bottom: 0;">Full Name (Registered Personnel)</label>
-                                    <span style="font-size: 0.7rem; color: #64748b;">Type name or select from list</span>
-                                </div>
-                                <input type="text" name="fullname" id="account_fullname" class="form-control" required placeholder="Select agency to see personnel..." list="personnel_list">
-                                <datalist id="personnel_list"></datalist>
-                            </div>
-                            <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                                <div class="form-group">
-                                    <label class="form-label">Username</label>
-                                    <input type="text" name="username" class="form-control" required placeholder="Account username">
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">Password</label>
-                                    <input type="password" name="password" class="form-control" required placeholder="••••••••">
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Contact Number</label>
-                                <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Agency</label>
-                                <select name="agency_id" id="account_agency_id" class="form-control" required onchange="handleAgencyChange(this.value, 'account_clients_container')">
-                                    <option value="" disabled selected>Select Agency</option>
-                                    <option value="all" style="font-weight: bold; color: var(--primary);">All Agency (Global Access)</option>
-                                    <?php 
-                                    $agencies_result->data_seek(0);
-                                    while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
-                                    ?>
-                                </select>
-                            </div>
-                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                    <label class="form-label" style="margin-bottom: 0;">Assign to Clients</label>
-                                    <label style="font-size: 0.75rem; color: var(--primary); font-weight: 600; cursor: pointer;">
-                                        <input type="checkbox" id="select_all_clients" onclick="toggleSelectAllClients('account_clients_container', this.checked)"> Select All
-                                    </label>
-                                </div>
-                                <div id="account_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
-                                    <span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">Select an agency first...</span>
-                                </div>
-                            <button type="submit" name="add_supervisor" class="btn btn-primary" style="margin-top: 10px;">Create Supervisor Account</button>
-                        </form>
-                    </div>
-                </div>
 
                 <div class="card">
-                    <div class="card-header"><h3>Supervisor Accounts</h3></div>
+                    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <h3 style="margin: 0;">Supervisor Accounts</h3>
+                        <button class="btn btn-primary" style="width: auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addSupervisorModal').classList.add('show')">+ Add Supervisor</button>
+                    </div>
                     <div class="table-container">
                         <table>
                             <thead>
@@ -790,13 +767,65 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group"><label class="form-label">Contact Person</label><input type="text" name="contact_person" class="form-control" placeholder="Full Name"></div>
                     <div class="form-group"><label class="form-label">Contact No.</label><input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX"></div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Client Account Limit</label>
-                    <input type="number" name="client_limit" class="form-control" value="0" min="0" placeholder="0 = unlimited">
-                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" onclick="closeModal('addAgencyModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
                     <button type="submit" name="add_agency" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Create Agency Profile</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add New Supervisor Modal -->
+    <div id="addSupervisorModal" class="modal">
+        <div class="modal-content" style="max-width: 560px; text-align: left; padding: 0;">
+            <div style="padding: 24px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Add New User (Supervisor)</h3>
+                <button type="button" onclick="closeModal('addSupervisorModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; transition: color 0.2s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#94a3b8'">&times;</button>
+            </div>
+            <form action="agency_maintenance.php" method="POST" autocomplete="off">
+                <div style="padding: 32px; max-height: 70vh; overflow-y: auto;">
+                    <div class="form-group">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" name="fullname" id="account_fullname" class="form-control" required placeholder="Enter supervisor's full name">
+                    </div>
+                    <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div class="form-group">
+                            <label class="form-label">Username</label>
+                            <input type="text" name="username" class="form-control" required placeholder="Account username">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Password</label>
+                            <input type="password" name="password" class="form-control" required placeholder="••••••••">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Contact Number</label>
+                        <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Agency</label>
+                        <select name="agency_id" id="account_agency_id" class="form-control" required onchange="handleAgencyChange(this.value, 'account_clients_container')">
+                            <option value="" disabled selected>Select Agency</option>
+                            <option value="all" style="font-weight: bold; color: var(--primary);">All Agency (Global Access)</option>
+                            <?php 
+                            $agencies_result->data_seek(0);
+                            while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                            ?>
+                        </select>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label class="form-label" style="margin-bottom: 0;">Assign to Clients</label>
+                        <label style="font-size: 0.75rem; color: var(--primary); font-weight: 600; cursor: pointer;">
+                            <input type="checkbox" id="select_all_clients" onclick="toggleSelectAllClients('account_clients_container', this.checked)"> Select All
+                        </label>
+                    </div>
+                    <div id="account_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
+                        <span style="color: #94a3b8; font-size: 0.85rem; font-style: italic;">Select an agency first...</span>
+                    </div>
+                </div>
+                <div style="padding: 24px; border-top: 1px solid #e5e7eb; display: flex; gap: 12px; justify-content: flex-end;">
+                    <button type="button" onclick="closeModal('addSupervisorModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
+                    <button type="submit" name="add_supervisor" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Create Supervisor Account</button>
                 </div>
             </form>
         </div>
@@ -917,10 +946,6 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group" style="text-align: left;"><label class="form-label">Contact No.</label><input type="text" name="contact_no" id="edit_agency_contact_no" class="form-control"></div>
                 </div>
                 <div class="form-group" style="text-align: left; margin-bottom: 20px;">
-                    <label class="form-label">Client Limit</label>
-                    <input type="number" name="client_limit" id="edit_agency_client_limit" class="form-control" min="0" placeholder="0 = unlimited">
-                </div>
-                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
                     <label class="form-label">Account Status</label>
                     <select name="status" id="edit_agency_status" class="form-control">
                         <option value="active">Active</option>
@@ -946,7 +971,7 @@ include 'admin_layout/sidebar.php';
                 <input type="hidden" name="edit_supervisor_id" id="edit_supervisor_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Full Name</label>
-                    <input type="text" name="fullname" id="edit_sup_fullname" class="form-control" required list="personnel_list">
+                    <input type="text" name="fullname" id="edit_sup_fullname" class="form-control" required>
                 </div>
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Contact Number</label>
@@ -1038,7 +1063,6 @@ include 'admin_layout/sidebar.php';
             document.getElementById('edit_agency_contact_person').value = agency.contact_person;
             document.getElementById('edit_agency_contact_no').value = agency.contact_no;
             document.getElementById('edit_agency_status').value = agency.status;
-            document.getElementById('edit_agency_client_limit').value = agency.client_limit || 0;
             document.getElementById('editAgencyModal').classList.add('show');
         }
 
@@ -1162,6 +1186,7 @@ include 'admin_layout/sidebar.php';
                 filterClientsByAgency(agencySelect.value, 'account_clients_container');
             }
         });
+
         // --- Agency Quick Links ---
         let qlAgencyData = null;
         let qlAgencyFullData = null;
@@ -1171,8 +1196,35 @@ include 'admin_layout/sidebar.php';
             qlAgencyFullData = full_agency;
             
             const agency_name = full_agency.agency_name || full_agency.username;
-            document.getElementById('ql_agency_name').innerText = agency_name;
-            document.getElementById('ql_search_input').value = ''; // Reset search
+            const currentClients = full_agency.current_clients || 0;
+            const clientLimit = full_agency.client_limit || 0;
+            
+            document.getElementById('ql_agency_name').innerHTML = `
+                <div style="display: flex; flex-direction: column; width: 100%;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 15px;">
+                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px;">${agency_name}</span>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <div style="display: flex; align-items: center; gap: 8px; background: #fff; padding: 6px 12px; border: 1.5px solid var(--primary-light); border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+                                <span style="font-size: 0.7rem; color: #64748b; font-weight: 700; text-transform: uppercase;">Total Slots:</span>
+                                <input type="number" id="ql_agency_client_limit_input" value="${clientLimit}" 
+                                       style="width: 50px; border: none; font-weight: 800; color: var(--primary); outline: none; text-align: center; font-size: 1rem; background: transparent;">
+                            </div>
+                            <button onclick="saveAgencyClientLimit(${full_agency.id}, event)" 
+                                    style="background: var(--primary); color: white; border: none; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; transition: background 0.2s;"
+                                    title="Save Limit"
+                                    onmouseover="this.style.background='#0d9488'" onmouseout="this.style.background='var(--primary)'">
+                                ✓
+                            </button>
+                        </div>
+                    </div>
+                    <span style="font-size: 0.75rem; color: #64748b; font-weight: 500; margin-top: 6px; display: flex; align-items: center; gap: 4px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></span>
+                        Currently Assigned: <strong style="color: #1e293b; margin-left: 2px;">${currentClients} / <span id="ql_header_limit_display">${clientLimit == 0 ? '∞' : clientLimit}</span></strong>
+                    </span>
+                </div>
+            `;
+            
+            document.getElementById('ql_search_input').value = ''; 
             document.getElementById('agencyQuickLinksModal').classList.add('show');
             loadQuickLinkTab('clients');
         }
@@ -1397,6 +1449,50 @@ include 'admin_layout/sidebar.php';
             }
         }
 
+        async function saveAgencyClientLimit(agencyId, e) {
+            const input = document.getElementById('ql_agency_client_limit_input');
+            if (!input) return;
+            const newLimit = input.value;
+            
+            const btn = e ? e.currentTarget : null;
+            
+            try {
+                const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&type=update_agency_limit&agency_id=${agencyId}&limit=${newLimit}`);
+                if (!response.ok) throw new Error('Server returned ' + response.status);
+                
+                const data = await response.json();
+                if (data.success) {
+                    const displayLimit = newLimit == 0 ? '∞' : newLimit;
+                    const tableDisplayLimit = newLimit == 0 ? 'Unlimited' : newLimit;
+
+                    document.getElementById('ql_header_limit_display').innerText = displayLimit;
+                    
+                    // Update the background table row instantly
+                    const tableMax = document.getElementById('table_max_' + agencyId);
+                    if (tableMax) tableMax.innerText = tableDisplayLimit;
+
+                    if(qlAgencyFullData) qlAgencyFullData.client_limit = newLimit;
+                    
+                    // Show a quick visual success feedback on the button if exists
+                    if (btn) {
+                        const originalContent = btn.innerHTML;
+                        btn.innerHTML = '★'; 
+                        btn.style.background = '#10b981';
+                        setTimeout(() => {
+                            btn.innerHTML = originalContent;
+                            btn.style.background = 'var(--primary)';
+                        }, 1500);
+                    }
+
+                } else {
+                    CustomModal.alert('Error: ' + data.message, 'Update Error', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                CustomModal.alert('Could not save limit. Please check your connection or server logs.', 'Network Error', 'error');
+            }
+        }
+
         // --- Live Search Filtering ---
         function filterQuickLinkData() {
             const query = document.getElementById('ql_search_input').value.toLowerCase().trim();
@@ -1420,6 +1516,25 @@ include 'admin_layout/sidebar.php';
                 }
             });
         }
+        // Auto-open modal if highlight_id is present
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const highlightId = urlParams.get('highlight_id');
+            if (highlightId) {
+                const targetRow = document.getElementById('agency_row_' + highlightId);
+                if (targetRow) {
+                    targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Give it a brief moment to scroll before opening modal for better UX
+                    setTimeout(() => {
+                        targetRow.click();
+                        // Flash effect
+                        targetRow.style.transition = 'background-color 0.5s';
+                        targetRow.style.backgroundColor = '#f0f9ff';
+                        setTimeout(() => { targetRow.style.backgroundColor = ''; }, 2000);
+                    }, 500);
+                }
+            }
+        });
     </script>
 
 <?php include 'admin_layout/footer.php'; ?>

@@ -34,11 +34,8 @@ $guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY
 $guards_res = $conn->query($guards_sql);
 
 // Handle Filter Submissions
-$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-30 days'));
-$filter_end = $_GET['end_date'] ?? date('Y-m-d');
-$filter_guard = $_GET['guard_id'] ?? '';
+$filter_date = $_GET['filter_date'] ?? date('Y-m-d');
 $filter_client = $_GET['mapping_id'] ?? '';
-$filter_checkpoint = $_GET['checkpoint_id'] ?? '';
 $filter_shift = $_GET['shift'] ?? '';
 
 // Fetch checkpoints for filtering (Scope to site if selected)
@@ -49,25 +46,13 @@ $checkpoints_res = $conn->query($cp_filter_sql);
 // Build dynamic WHERE clause
 $where_clauses = ["c.agency_client_id IN ($mapping_ids_str)"];
 
-if (!empty($filter_start)) {
-    $start = $conn->real_escape_string($filter_start . " 00:00:00");
-    $where_clauses[] = "s.scan_time >= '$start'";
-}
-if (!empty($filter_end)) {
-    $end = $conn->real_escape_string($filter_end . " 23:59:59");
-    $where_clauses[] = "s.scan_time <= '$end'";
-}
-if (!empty($filter_guard)) {
-    $g_id = (int)$filter_guard;
-    $where_clauses[] = "s.guard_id = $g_id";
+if (!empty($filter_date)) {
+    $date = $conn->real_escape_string($filter_date);
+    $where_clauses[] = "DATE(s.scan_time) = '$date'";
 }
 if (!empty($filter_client)) {
     $m_id = (int)$filter_client;
     $where_clauses[] = "c.agency_client_id = $m_id";
-}
-if (!empty($filter_checkpoint)) {
-    $c_id = (int)$filter_checkpoint;
-    $where_clauses[] = "s.checkpoint_id = $c_id";
 }
 if (!empty($filter_shift)) {
     $shift = $conn->real_escape_string($filter_shift);
@@ -147,16 +132,22 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             if ($current_csv_session !== $session_id) {
                 $current_csv_session = $session_id;
                 
-                // Robust date parsing to avoid 1970
-                $raw_time = $row['tour_session_id'] ?: $row['scan_time'];
-                $ts = strtotime($raw_time);
-                $display_time = ($ts && $ts > 0) ? date('M d, Y h:i A', $ts) : date('M d, Y h:i A'); // Fallback to current time if invalid
+                // Use scan_time for robust date display (tour_session_id may be a UUID)
+                $ts = strtotime($row['scan_time']);
+                $display_time = ($ts && $ts > 0) ? date('M d, Y h:i A', $ts) : date('M d, Y h:i A');
                 
-                $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
-                $display_guard = htmlspecialchars($row['guard_name']);
+                $display_shift = htmlspecialchars($row['shift'] ?? '');
+                $header_info = 'TOUR CYCLE: ' . $display_time;
                 
-                $header_guard_info = empty($filter_guard) ? "Participating Guards" : "Guard: " . $display_guard;
-                echo '<tr style="background-color: #f1f5f9;"><td colspan="6" style="font-weight: bold; text-align: left; padding: 10px; border: 1px solid #cbd5e1;">TOUR CYCLE: ' . $display_time . ' | ' . $display_shift . ' Shift | ' . $header_guard_info . '</td></tr>';
+                if (!empty($display_shift) && strtolower($display_shift) !== 'no shift') {
+                    $header_info .= ' | ' . $display_shift . ' Shift';
+                }
+                
+                if (!empty($filter_guard)) {
+                    $header_info .= ' | Guard: ' . htmlspecialchars($row['guard_name']);
+                }
+                
+                echo '<tr style="background-color: #f1f5f9;"><td colspan="6" style="font-weight: bold; text-align: left; padding: 10px; border: 1px solid #cbd5e1;">' . $header_info . '</td></tr>';
             }
             $status_class = 'status-' . strtolower($row['status']);
             echo '<tr>';
@@ -331,6 +322,99 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             justify-content: flex-end;
             margin-bottom: 12px;
         }
+
+        .btn-visual {
+            background-color: #6366f1;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+        .btn-visual:hover { background-color: #4f46e5; }
+
+        /* Visual Map Styles */
+        .modal-content.large { max-width: 900px; width: 95%; }
+        .visual-container {
+            width: 100%;
+            height: 400px;
+            background-color: #f8fafc;
+            background-image: 
+                linear-gradient(rgba(203, 213, 225, 0.2) 1.5px, transparent 1.5px),
+                linear-gradient(90deg, rgba(203, 213, 225, 0.2) 1.5px, transparent 1.5px);
+            background-size: 30px 30px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            margin-top: 15px;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+        }
+        .checkpoint-circle {
+            width: 44px;
+            height: 44px;
+            border-radius: 50% 50% 50% 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.1rem;
+            position: absolute;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            user-select: none;
+            border: 3px solid #ffffff;
+            transform: rotate(-45deg);
+            transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .checkpoint-circle > span {
+            transform: rotate(45deg);
+            display: block;
+        }
+        .checkpoint-circle.start { background: linear-gradient(135deg, #10b981, #111827); color: white; z-index: 10; }
+        .checkpoint-circle.end { background: linear-gradient(135deg, #ea580c, #111827); color: white; z-index: 10; }
+        .checkpoint-circle.regular { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: #ffffff; }
+        .checkpoint-circle .label {
+            position: absolute;
+            bottom: -45px;
+            white-space: nowrap;
+            font-size: 0.85rem;
+            color: #111827;
+            font-weight: 800;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 2px 10px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transform: rotate(45deg);
+            transform-origin: center;
+            border: 1px solid #e2e8f0;
+        }
+        .cp-status-on-time { background: linear-gradient(135deg, #10b981, #059669) !important; color: white !important; }
+        .cp-status-late { background: linear-gradient(135deg, #ef4444, #dc2626) !important; color: white !important; }
+        .cp-status-none { background: linear-gradient(135deg, #94a3b8, #64748b) !important; color: white !important; }
+
+        .visual-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+        .visual-path { stroke: #6366f1; stroke-width: 3; stroke-linecap: round; fill: none; stroke-dasharray: 8 4; filter: drop-shadow(0 0 2px rgba(99, 102, 241, 0.5)); }
+        .static-arrow { fill: #6366f1; display: none; }
+        .download-mode .static-arrow { display: block !important; }
+        .path-status-on-time { stroke: #10b981 !important; animation: pulse-line-on-time 2s infinite; }
+        .path-status-late { stroke: #ef4444 !important; animation: pulse-line-late 2s infinite; }
+        @keyframes pulse-line-on-time {
+            0% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4)); opacity: 0.7; }
+            50% { filter: drop-shadow(0 0 8px rgba(16, 185, 129, 1)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4)); opacity: 0.7; }
+        }
+        @keyframes pulse-line-late {
+            0% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
+            50% { filter: drop-shadow(0 0 8px rgba(239, 68, 68, 1)); opacity: 1; }
+            100% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
+        }
     </style>
 </head>
 <body>
@@ -375,12 +459,8 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                 <div class="card-header">Filter Patrol History</div>
                 <form class="filter-form" method="GET" action="agency_patrol_history.php">
                     <div class="form-group">
-                        <label class="form-label" for="start_date">Date From</label>
-                        <input type="date" id="start_date" name="start_date" class="form-control" value="<?php echo htmlspecialchars($filter_start); ?>">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="end_date">Date To</label>
-                        <input type="date" id="end_date" name="end_date" class="form-control" value="<?php echo htmlspecialchars($filter_end); ?>">
+                        <label class="form-label" for="filter_date">Patrol Date</label>
+                        <input type="date" id="filter_date" name="filter_date" class="form-control" value="<?php echo htmlspecialchars($filter_date); ?>" onchange="this.form.submit()">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="mapping_id">Client Site</label>
@@ -395,30 +475,6 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="guard_id">Guard</label>
-                        <select id="guard_id" name="guard_id" class="form-control" onchange="this.form.submit()" <?php if(empty($filter_client)) echo 'disabled title="Please select a Client Site first"'; ?>>
-                            <option value="">-- All Guards --</option>
-                            <?php if ($guards_res && $guards_res->num_rows > 0): ?>
-                                <?php mysqli_data_seek($guards_res, 0); ?>
-                                <?php while($g = $guards_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $g['id']; ?>" <?php if($filter_guard == $g['id']) echo 'selected'; ?>><?php echo htmlspecialchars($g['name']); ?></option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="checkpoint_id">Checkpoint</label>
-                        <select id="checkpoint_id" name="checkpoint_id" class="form-control" onchange="this.form.submit()" <?php if(empty($filter_client)) echo 'disabled title="Please select a Client Site first"'; ?>>
-                            <option value="">-- All Checkpoints --</option>
-                            <?php if ($checkpoints_res && $checkpoints_res->num_rows > 0): ?>
-                                <?php mysqli_data_seek($checkpoints_res, 0); ?>
-                                <?php while($cp = $checkpoints_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $cp['id']; ?>" <?php if($filter_checkpoint == $cp['id']) echo 'selected'; ?>><?php echo htmlspecialchars($cp['name']); ?></option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label class="form-label" for="shift">Shift</label>
                         <select id="shift" name="shift" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Shifts --</option>
@@ -427,16 +483,19 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                             <option value="Night" <?php if($filter_shift == 'Night') echo 'selected'; ?>>Night</option>
                         </select>
                     </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button type="submit" class="btn-primary">Apply Filters</button>
-                        <a href="agency_patrol_history.php" class="btn-primary" style="background: #94a3b8; text-decoration: none;">Reset</a>
-                    </div>
                 </form>
             </div>
 
             <div class="card">
-                <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-                    <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if (!$history_res || $history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if (!$history_res || $history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download</button>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 20px;">
+                    <button type="button" class="btn-primary" style="background: #0ea5e9; <?php if (!$history_res || $history_res->num_rows == 0) echo 'opacity: 0.5; cursor: not-allowed;'; ?>" onclick="downloadHistoryCSV()" <?php if (!$history_res || $history_res->num_rows == 0) echo 'disabled title="No data to download"'; ?>>Download Report</button>
+                    <button type="button" class="btn-visual" 
+                       style="<?php if (empty($filter_client)) echo 'opacity: 0.5; cursor: not-allowed;'; ?>"
+                       onclick="openVisualDesigner()"
+                       <?php if (empty($filter_client)) echo 'disabled title="Please select a Client Site first"'; ?>>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+                        Visual
+                    </button>
                 </div>
 
                 <div class="table-container">
@@ -467,14 +526,13 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                                     if ($current_session !== $session_id):
                                         $current_session = $session_id;
                                         
-                                        // Robust date parsing to avoid 1970
-                                        $raw_cycle = $row['tour_session_id'] ?: $row['scan_time'];
-                                        $cycle_ts = strtotime($raw_cycle);
+                                        // Robust date parsing: use scan_time as fallback for display (tour_session_id may be a UUID)
+                                        $cycle_ts = strtotime($row['scan_time']);
                                         $cycle_time = ($cycle_ts && $cycle_ts > 0) ? date('M d, Y h:i A', $cycle_ts) : date('M d, Y h:i A');
 
-                                        $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
-                                        $display_guard = htmlspecialchars($row['guard_name']);
-                                        $header_guard_info = empty($filter_guard) ? "Participating Guards" : "Guard: <strong style='color: #1e293b;'>" . $display_guard . "</strong>";
+                                        $display_shift = $row['shift'] ?? '';
+                                        $has_shift = !empty($display_shift) && strtolower($display_shift) !== 'no shift';
+                                        $has_guard = !empty($filter_guard);
                                 ?>
                                     <tr style="background-color: #f8fafc; border-top: 2px solid #e2e8f0; border-bottom: 2px solid #e2e8f0;">
                                         <td colspan="7" style="font-weight: 700; color: #334155; padding: 14px 16px; font-size: 0.9rem; background: linear-gradient(to right, #f8fafc, #ffffff);">
@@ -484,10 +542,16 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                                                 </div>
                                                 <span style="text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-size: 0.75rem;">Tour Cycle:</span>
                                                 <span style="color: #1e293b;"><?php echo $cycle_time; ?></span>
-                                                <span style="color: #cbd5e1;">&bull;</span>
-                                                <span style="color: #64748b;"><?php echo $display_shift; ?> Shift</span>
-                                                <span style="color: #cbd5e1;">&bull;</span>
-                                                <span style="color: #64748b;"><?php echo $header_guard_info; ?></span>
+                                                
+                                                <?php if ($has_shift): ?>
+                                                    <span style="color: #cbd5e1;">&bull;</span>
+                                                    <span style="color: #64748b;"><?php echo htmlspecialchars($display_shift); ?> Shift</span>
+                                                <?php endif; ?>
+
+                                                <?php if ($has_guard): ?>
+                                                    <span style="color: #cbd5e1;">&bull;</span>
+                                                    <span style="color: #64748b;">Guard: <strong style='color: #1e293b;'><?php echo htmlspecialchars($row['guard_name']); ?></strong></span>
+                                                <?php endif; ?>
                                             </div>
                                         </td>
                                     </tr>
@@ -569,6 +633,44 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
         </div>
     </div>
 
+    <!-- Visual Map Modal -->
+    <div id="visualDesignerModal" class="modal-overlay">
+        <div class="modal-content large">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e5e7eb; margin-bottom: 16px; padding-bottom: 12px;">
+                <h3 class="modal-title" style="margin-bottom: 0;">Visual Patrol Map</h3>
+                <button type="button" class="modal-close" style="position: static;" onclick="closeAllModals()">&times;</button>
+            </div>
+            <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 15px; text-align: left;">
+                Draggable overview of checkpoints. <strong>Green (S)</strong> is Start, <strong>Orange (E)</strong> is End, and <strong>White</strong> are checkpoints.
+            </p>
+            <div id="visual-canvas" class="visual-container">
+                <svg id="visual-svg" class="visual-svg">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                            <polygon points="0 0, 10 3.5, 0 7" fill="#6366f1" />
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
+            <div class="modal-actions" style="margin-top: 20px;">
+                <button type="button" class="btn-modal" style="background: #111827; color: white;" onclick="downloadVisualMap()">Download Map (PDF)</button>
+                <button type="button" class="btn-modal btn-cancel" onclick="closeAllModals()">Close View</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- General Alert Modal -->
+    <div id="alertModal" class="modal-overlay">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-icon" style="background: #ecfdf5; color: #10b981;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 16 16 12 12 8"></polyline><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+            </div>
+            <h3>Notice</h3>
+            <p id="alertModalText" style="color: #6b7280; margin-bottom: 24px; margin-top: 10px;"></p>
+            <button class="btn-modal btn-cancel" style="width: 100%;" onclick="closeAllModals()">OK</button>
+        </div>
+    </div>
+
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
         <div class="modal-content">
@@ -585,7 +687,12 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script>
+        const selectedMappingId = '<?php echo $filter_client; ?>';
+        let visualCheckpoints = [];
+
         function downloadHistoryCSV() {
             const url = new URL(window.location.href);
             url.searchParams.set('download_csv', '1');
@@ -625,6 +732,164 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             if (event.target.classList.contains('modal-overlay')) {
                 closeAllModals();
             }
+        }
+
+        /********** Visual Designer Map Logic **********/
+        function openVisualDesigner() {
+            if (!selectedMappingId) {
+                showAlert("Please select a Client Site first to view the visual map.");
+                return;
+            }
+
+            const modal = document.getElementById('visualDesignerModal');
+            const canvas = document.getElementById('visual-canvas');
+            const filterDate = document.getElementById('filter_date').value;
+            
+            modal.classList.add('show');
+            canvas.querySelectorAll('.checkpoint-circle').forEach(c => c.remove());
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'visual-loading';
+            loadingDiv.style.cssText = 'display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;';
+            loadingDiv.textContent = 'Loading checkpoints...';
+            canvas.appendChild(loadingDiv);
+
+            fetch(`agency_patrol_management.php?ajax_checkpoints=1&mapping_id=${selectedMappingId}&date=${filterDate}`)
+                .then(response => response.json())
+                .then(data => {
+                    const loader = document.getElementById('visual-loading');
+                    if (loader) loader.remove();
+                    
+                    visualCheckpoints = data.checkpoints || [];
+
+                    if (visualCheckpoints.length === 0) {
+                        const emptyDiv = document.createElement('div');
+                        emptyDiv.id = 'visual-empty';
+                        emptyDiv.style.cssText = 'display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;';
+                        emptyDiv.textContent = 'No checkpoints configured for this site.';
+                        canvas.appendChild(emptyDiv);
+                        return;
+                    }
+
+                    visualCheckpoints.forEach((cp, index) => {
+                        const circle = document.createElement('div');
+                        circle.id = `cp-circle-${cp.id}`;
+                        
+                        let statusClass = 'cp-status-none';
+                        const status = (cp.latest_status || '').toLowerCase();
+                        if (status === 'on-time' || status === 'on time') statusClass = 'cp-status-on-time';
+                        else if (status === 'late') statusClass = 'cp-status-late';
+
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
+                        circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
+                        const nameTrim = (cp.name || '').trim();
+                        const isNumeric = /^\d+$/.test(nameTrim);
+                        let innerText = isNumeric ? nameTrim : (nameTrim ? nameTrim.charAt(0).toUpperCase() : '');
+                        
+                        circle.innerHTML = `
+                            <span>${innerText}</span>
+                            ${isNumeric ? '' : `<div class="label">${cp.name}</div>`}
+                        `;
+                        
+                        let x = parseInt(cp.visual_pos_x) || 0;
+                        let y = parseInt(cp.visual_pos_y) || 0;
+                        
+                        if (x === 0 && y === 0) {
+                            const containerWidth = canvas.offsetWidth || 750;
+                            const spacingX = 120;
+                            const spacingY = 120;
+                            const itemsPerRow = Math.floor((containerWidth - 60) / spacingX) || 5;
+                            x = 40 + (index % itemsPerRow) * spacingX;
+                            y = 40 + Math.floor(index / itemsPerRow) * spacingY;
+                        }
+                        
+                        circle.style.left = x + 'px';
+                        circle.style.top = y + 'px';
+                        canvas.appendChild(circle);
+                    });
+
+                    drawArrows();
+                })
+                .catch(err => {
+                    const loader = document.getElementById('visual-loading');
+                    if (loader) loader.remove();
+                    console.error(err);
+                });
+        }
+
+        function drawArrows() {
+            const svg = document.getElementById('visual-svg');
+            const canvas = document.getElementById('visual-canvas');
+            svg.querySelectorAll('.visual-path, .flowing-arrow, .static-arrow').forEach(el => el.remove());
+
+            if (visualCheckpoints.length < 2) return;
+
+            for (let i = 0; i < visualCheckpoints.length - 1; i++) {
+                const startCp = visualCheckpoints[i];
+                const endCp = visualCheckpoints[i+1];
+                const startEl = document.getElementById(`cp-circle-${startCp.id}`);
+                const endEl = document.getElementById(`cp-circle-${endCp.id}`);
+                
+                if (!startEl || !endEl) continue;
+
+                const r = 22;
+                const x1 = parseInt(startEl.style.left) + r;
+                const y1 = parseInt(startEl.style.top) + r;
+                const x2 = parseInt(endEl.style.left) + r;
+                const y2 = parseInt(endEl.style.top) + r;
+
+                const angle = Math.atan2(y2 - y1, x2 - x1);
+                const edgeX1 = x1 + r * Math.cos(angle);
+                const edgeY1 = y1 + r * Math.sin(angle);
+                const edgeX2 = x2 - (r + 5) * Math.cos(angle);
+                const edgeY2 = y2 - (r + 5) * Math.sin(angle);
+
+                const d = `M ${edgeX1} ${edgeY1} L ${edgeX2} ${edgeY2}`;
+                const status = (endCp.latest_status || '').toLowerCase();
+                let pathStatusClass = '';
+                if (status === 'on-time' || status === 'on time') pathStatusClass = ' path-status-on-time';
+                else if (status === 'late') pathStatusClass = ' path-status-late';
+
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", d);
+                path.setAttribute("class", "visual-path" + pathStatusClass);
+                svg.appendChild(path);
+
+                const midX = (edgeX1 + edgeX2) / 2;
+                const midY = (edgeY1 + edgeY2) / 2;
+                const deg = angle * (180 / Math.PI);
+                const sArrow = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                sArrow.setAttribute("points", "-6,-6 6,0 -6,6");
+                sArrow.setAttribute("class", "static-arrow");
+                sArrow.setAttribute("transform", `translate(${midX}, ${midY}) rotate(${deg})`);
+                svg.appendChild(sArrow);
+            }
+        }
+
+        function downloadVisualMap() {
+            const canvas = document.getElementById('visual-canvas');
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = 'Generating...';
+            btn.disabled = true;
+
+            canvas.classList.add('download-mode');
+            html2canvas(canvas, { backgroundColor: '#ffffff', scale: 2, useCORS: true }).then(imageCanvas => {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('l', 'mm', 'a4');
+                const imgData = imageCanvas.toDataURL('image/png');
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                pdf.text(`Patrol Map Overview`, 15, 15);
+                pdf.addImage(imgData, 'PNG', 15, 25, pdfWidth - 30, 0);
+                pdf.save(`Patrol_Map_${new Date().getTime()}.pdf`);
+                canvas.classList.remove('download-mode');
+                btn.textContent = originalText;
+                btn.disabled = false;
+            });
+        }
+
+        function showAlert(message) {
+            document.getElementById('alertModalText').textContent = message;
+            document.getElementById('alertModal').classList.add('show');
         }
     </script>
     <!-- VERSION: 2.1 -->

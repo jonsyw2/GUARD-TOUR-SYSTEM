@@ -393,7 +393,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
         /* Modal Styles */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
         .modal-overlay.show, .modal.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; max-height: 90vh; overflow-y: auto; }
 
         /* Centered Modal Specifics */
         .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
@@ -450,9 +450,9 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                             <?php echo $current_guard_count; ?> / <?php echo $total_guard_limit; ?> accounts
                          </span>
                         <?php if ($guard_limit_reached): ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Personnel</button>
+                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Guards</button>
                         <?php else: ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Personnel</button>
+                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Guards</button>
                         <?php endif; ?>
                     </div>
                 </div>

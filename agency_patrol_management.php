@@ -70,11 +70,16 @@ $conn->query("CREATE TABLE IF NOT EXISTS tour_assignments (
 // AJAX Handler for fetching checkpoints & shifts (Modified to support Visual Designer)
 if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     $mapping_id = (int)$_GET['mapping_id'];
+    $date_filter = "";
+    if (!empty($_GET['date'])) {
+        $filter_date = $conn->real_escape_string($_GET['date']);
+        $date_filter = " AND DATE(scan_time) = '$filter_date'";
+    }
     
-    // Checkpoints (Including visual position and latest status)
+    // Checkpoints (Including visual position and filtered status)
     $cp_res = $conn->query("
         SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint, cp.is_end_checkpoint,
-        (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
+        (SELECT status FROM scans WHERE checkpoint_id = cp.id $date_filter ORDER BY scan_time DESC LIMIT 1) as latest_status
         FROM checkpoints cp 
         LEFT JOIN tour_assignments ta ON cp.id = ta.checkpoint_id AND ta.agency_client_id = $mapping_id
         WHERE cp.agency_client_id = $mapping_id 
@@ -643,8 +648,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             z-index: 10;
         }
         .checkpoint-circle.regular {
-            background: linear-gradient(135deg, #ffffff, #94a3b8);
-            color: #111827;
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: #ffffff;
             border-color: #ffffff;
         }
         .checkpoint-circle .label {
@@ -1645,16 +1650,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                 const d = `M ${edgeX1} ${edgeY1} L ${edgeX2} ${edgeY2}`;
 
-                // Check destination status for glowing line
-                const status = (endCp.latest_status || '').toLowerCase();
-                let pathStatusClass = '';
-                if (status === 'on-time' || status === 'on time') pathStatusClass = ' path-status-on-time';
-                else if (status === 'late') pathStatusClass = ' path-status-late';
-
-                // Create static path
+                // Create static path (Neutral style for Management)
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 path.setAttribute("d", d);
-                path.setAttribute("class", "visual-path" + pathStatusClass);
+                path.setAttribute("class", "visual-path");
                 svg.appendChild(path);
 
                 // Create midpoint static arrow (for PNG download)
@@ -1715,13 +1714,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         const circle = document.createElement('div');
                         circle.id = `cp-circle-${cp.id}`;
                         
-                        // Static Status Coloring
-                        let statusClass = 'cp-status-none';
-                        const status = (cp.latest_status || '').toLowerCase();
-                        if (status === 'on-time' || status === 'on time') statusClass = 'cp-status-on-time';
-                        else if (status === 'late') statusClass = 'cp-status-late';
-
-                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
+                        // Default Theme Coloring (Start: Green, End: Orange, Regular: White)
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')}`;
                         circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
                         const nameTrim = (cp.name || '').trim();
                         const isNumeric = /^\d+$/.test(nameTrim);

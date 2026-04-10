@@ -304,6 +304,52 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         }
     }
 }
+
+// Handle Inspector Assignment
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_inspector'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+    $inspector_id = (int)$_POST['inspector_id'];
+    
+    // Check if already assigned
+    $check = $conn->query("SELECT id FROM inspector_assignments WHERE inspector_id = $inspector_id AND agency_client_id = $mapping_id");
+    if ($check && $check->num_rows > 0) {
+        $message = "Inspector is already assigned to this client.";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else {
+        // Enforce Client's Inspector Limit
+        $limit_sql = "
+            SELECT ac.inspector_limit, 
+                   (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors
+            FROM agency_clients ac 
+            WHERE ac.id = $mapping_id
+        ";
+        $limit_res = $conn->query($limit_sql);
+        $can_assign = true;
+        if ($limit_res && $row = $limit_res->fetch_assoc()) {
+            $max = (int)$row['inspector_limit'];
+            $current = (int)$row['current_inspectors'];
+            if ($max > 0 && $current >= $max) {
+                $message = "Assignment failed: This client site has reached its limit of $max inspectors.";
+                $message_type = "error";
+                $show_status_modal = true;
+                $can_assign = false;
+            }
+        }
+
+        if ($can_assign) {
+            if ($conn->query("INSERT INTO inspector_assignments (inspector_id, agency_client_id) VALUES ($inspector_id, $mapping_id)")) {
+                $message = "Inspector assigned successfully!";
+                $message_type = "success";
+                $show_status_modal = true;
+            } else {
+                $message = "Error assigning inspector: " . $conn->error;
+                $message_type = "error";
+                $show_status_modal = true;
+            }
+        }
+    }
+}
 }
 
 // Fetch Client Limit and Current Count for Headers (after potential POST updates)
@@ -355,6 +401,14 @@ if ($guards_res) {
     while($g = $guards_res->fetch_assoc()) $all_guards[] = $g;
 }
 
+// Fetch All Inspectors for this agency
+$inspectors_sql = "SELECT id, name FROM inspectors WHERE agency_id = $agency_id ORDER BY name ASC";
+$inspectors_res = $conn->query($inspectors_sql);
+$all_inspectors = [];
+if ($inspectors_res) {
+    while($i = $inspectors_res->fetch_assoc()) $all_inspectors[] = $i;
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -380,7 +434,7 @@ if ($guards_res) {
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
 
-        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .content-area { padding: 32px; max-width: 1220px; margin: 0 auto; width: 100%; }
         
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
@@ -397,9 +451,9 @@ if ($guards_res) {
         tbody tr:hover { background-color: #f8fafc; }
         th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
         
-        .btn-sm { padding: 5px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; font-weight: 500; }
-        .btn-primary { background: #10b981; color: white; }
-        .btn-outline { background: transparent; border: 1px solid #d1d5db; color: #374151; }
+        .btn-sm { height: 32px; padding: 0 12px; font-size: 0.75rem; border-radius: 6px; cursor: pointer; border: 1px solid transparent; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; transition: all 0.2s; }
+        .btn-primary { background: #10b981; color: white; border: none; }
+        .btn-outline { background: white; border: 1.5px solid #e2e8f0; color: #475569; }
         .btn-outline:hover { background: #f9fafb; }
 
         .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
@@ -475,7 +529,7 @@ if ($guards_res) {
                                 $row = isset($clients[$i-1]) ? $clients[$i-1] : null;
                                 if ($row):
                          ?>
-                                <tr onclick="openSummaryModal('<?php echo addslashes($row['company_name'] ?: $row['client_username']); ?>', '<?php echo $row['qr_count']; ?>', '<?php echo addslashes($row['guard_names'] ?? ''); ?>', '<?php echo addslashes($row['contact_person'] ?? ''); ?>', '<?php echo addslashes($row['contact_person_no'] ?? ''); ?>', '<?php echo addslashes($row['email_address'] ?? ''); ?>', '<?php echo addslashes($row['company_address'] ?? ''); ?>')">
+                                <tr onclick='openSummaryModal(<?php echo htmlspecialchars(json_encode($row)); ?>)'>
                                     <td><?php echo $i; ?></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
@@ -497,37 +551,37 @@ if ($guards_res) {
                                     </td>
                                     <td style="white-space: nowrap;">
                                         <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['qr_count']; ?>
+                                            Active: <?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?>
                                         </span>
                                     </td>
                                     <td style="white-space: nowrap;">
                                         <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['current_guards']; ?>
+                                            Active: <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
                                         </span>
                                     </td>
                                     <td style="white-space: nowrap;">
                                         <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['current_inspectors']; ?>
+                                            Active: <?php echo $row['current_inspectors']; ?> / <?php echo $row['inspector_limit']; ?>
                                         </span>
                                     </td>
                                      <td>
-                                        <div style="display: flex; gap: 8px; justify-content: flex-start;" onclick="event.stopPropagation()">
-                                             <button class="btn-sm btn-outline" onclick="openDetailsModal(<?php echo htmlspecialchars(json_encode($row)); ?>)">Edit Details</button>
+                                        <div style="display: flex; gap: 8px; justify-content: flex-start; align-items: center;" onclick="event.stopPropagation()">
                                             <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
+                                            <button class="btn-sm" style="background:#4f46e5; color:white; border:none;" onclick="openInspectorModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Inspector</button>
                                             <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
-                                                <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Restore this client\'s access?');" style="margin:0;">
+                                                <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Restore this client\'s access?');" style="margin:0; display: contents;">
                                                     <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
-                                                    <button type="submit" name="restore_client" class="btn-sm" style="background: #10b981; color: white; border: none; cursor: pointer;">Restore</button>
+                                                    <button type="submit" name="restore_client" class="btn-sm" style="background: #10b981; color: white; border: none;">Restore</button>
                                                 </form>
                                             <?php else: ?>
-                                                <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Suspend this client\'s access?');" style="margin:0;">
+                                                <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Suspend this client\'s access?');" style="margin:0; display: contents;">
                                                     <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
-                                                    <button type="submit" name="suspend_client" class="btn-sm" style="background: #f59e0b; color: white; border: none; cursor: pointer;">Suspend</button>
+                                                    <button type="submit" name="suspend_client" class="btn-sm" style="background: #f59e0b; color: white; border: none;">Suspend</button>
                                                 </form>
                                             <?php endif; ?>
-                                            <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Are you completely sure? This will permanently delete the client and free up all their assigned slots. This cannot be undone.');" style="margin:0;">
+                                            <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Are you completely sure? This will permanently delete the client and free up all their assigned slots. This cannot be undone.');" style="margin:0; display: contents;">
                                                 <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
-                                                <button type="submit" name="remove_client_full" class="btn-sm" style="background: #ef4444; color: white; border: none; cursor: pointer;">Remove</button>
+                                                <button type="submit" name="remove_client_full" class="btn-sm" style="background: #ef4444; color: white; border: none;">Remove</button>
                                             </form>
                                         </div>
                                     </td>
@@ -712,6 +766,7 @@ if ($guards_res) {
             </div>
 
             <div style="margin-top: 32px; display: flex; gap: 12px;">
+                <button type="button" class="btn-sm btn-outline" style="flex:1; padding: 12px; background: #f3f4f6;" id="summary_edit_btn">Edit Details</button>
                 <button type="button" class="btn-sm btn-outline" style="flex:1; padding: 12px;" onclick="closeModal('summaryModal')">Close</button>
             </div>
         </div>
@@ -803,8 +858,32 @@ if ($guards_res) {
                     </select>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn-sm btn-outline" style="flex:1;" onclick="closeModal('guardModal')">Cancel</button>
-                    <button type="submit" name="assign_guard" class="btn-sm btn-primary" style="flex:1;">Confirm Assignment</button>
+                    <button type="button" class="btn-sm btn-outline" style="flex:1; padding: 12px;" onclick="closeModal('guardModal')">Cancel</button>
+                    <button type="submit" name="assign_guard" class="btn-sm btn-primary" style="flex:1; padding: 12px;">Assign Personnel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Inspector Modal -->
+    <div id="inspectorModal" class="modal">
+        <div class="modal-content">
+            <h3 style="margin-bottom: 10px;">Assign Inspector</h3>
+            <p id="inspector_client_name" style="color: #6b7280; font-size: 0.9rem; margin-bottom: 20px;"></p>
+            <form action="agency_client_management.php" method="POST">
+                <input type="hidden" name="mapping_id" id="inspector_mapping_id">
+                <div class="form-group">
+                    <label class="form-label">Select Inspector</label>
+                    <select name="inspector_id" class="form-control" required>
+                        <option value="" disabled selected>-- Select Inspector --</option>
+                        <?php foreach($all_inspectors as $i): ?>
+                            <option value="<?php echo $i['id']; ?>"><?php echo htmlspecialchars($i['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 12px; margin-top: 24px;">
+                    <button type="button" class="btn-sm btn-outline" style="flex:1; padding: 12px;" onclick="closeModal('inspectorModal')">Cancel</button>
+                    <button type="submit" name="assign_inspector" class="btn-sm btn-primary" style="flex:1; padding: 12px; background: #4f46e5; border:none;">Assign Inspector</button>
                 </div>
             </form>
         </div>
@@ -834,25 +913,52 @@ if ($guards_res) {
     </div>
 
     <script>
+        function openAddClientModal() {
+            document.getElementById('addClientModal').classList.add('show');
+        }
 
-        function openSummaryModal(clientName, qrCount, guardNames, contactPerson, contactNo, email, address) {
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        function openGuardModal(id, clientUname) {
+            document.getElementById('guard_mapping_id').value = id;
+            document.getElementById('guard_client_name').innerText = "Assigning Personnel to Site: " + clientUname;
+            document.getElementById('guardModal').classList.add('show');
+        }
+
+        function openInspectorModal(id, clientUname) {
+            document.getElementById('inspector_mapping_id').value = id;
+            document.getElementById('inspector_client_name').innerText = "Assigning Inspector to Site: " + clientUname;
+            document.getElementById('inspectorModal').classList.add('show');
+        }
+
+        function openSummaryModal(data) {
+            const clientName = data.company_name || data.client_username;
             document.getElementById('summary_title').innerText = "Site Summary: " + clientName;
-            document.getElementById('summary_qr_count').innerText = qrCount;
+            document.getElementById('summary_qr_count').innerText = data.qr_count || 0;
             
-            document.getElementById('summary_contact_person').innerText = contactPerson || "Not Set";
-            document.getElementById('summary_contact_no').innerText = contactNo || "Not Set";
-            document.getElementById('summary_email').innerText = email || "Not Set";
-            document.getElementById('summary_address').innerText = address || "Not Set";
+            document.getElementById('summary_contact_person').innerText = data.contact_person || "Not Set";
+            document.getElementById('summary_contact_no').innerText = data.contact_person_no || "Not Set";
+            document.getElementById('summary_email').innerText = data.email_address || "Not Set";
+            document.getElementById('summary_address').innerText = data.company_address || "Not Set";
             
             const listDiv = document.getElementById('summary_guards_list');
-            if (guardNames && guardNames.trim() !== '') {
-                const names = guardNames.split(' | ');
+            if (data.guard_names && data.guard_names.trim() !== '') {
+                const names = data.guard_names.split(' | ');
                 document.getElementById('summary_guard_count').innerText = names.length;
                 listDiv.innerHTML = names.map(n => `<div style="padding: 6px 0; border-bottom: 1px dotted #e5e7eb; display: flex; align-items: center; gap: 8px;"><span style="color: #10b981;">•</span> ${n}</div>`).join('');
             } else {
                 document.getElementById('summary_guard_count').innerText = "0";
                 listDiv.innerHTML = '<span style="color: #9ca3af; font-style: italic; font-size: 0.9rem;">No guards assigned to this site.</span>';
             }
+
+            // Set up Edit button
+            document.getElementById('summary_edit_btn').onclick = function() {
+                closeModal('summaryModal');
+                openDetailsModal(data);
+            };
+
             document.getElementById('summaryModal').classList.add('show');
         }
 
@@ -866,23 +972,7 @@ if ($guards_res) {
             document.getElementById('details_contact_person').value = data.contact_person || '';
             document.getElementById('details_contact_person_position').value = data.contact_person_position || '';
             document.getElementById('details_contact_person_no').value = data.contact_person_no || '';
-
-            
             document.getElementById('detailsModal').classList.add('show');
-        }
-
-        function openAddClientModal() {
-            document.getElementById('addClientModal').classList.add('show');
-        }
-
-        function openGuardModal(id, clientUname) {
-            document.getElementById('guard_mapping_id').value = id;
-            document.getElementById('guard_client_name').innerText = "Assigning personnel to site: " + clientUname;
-            document.getElementById('guardModal').classList.add('show');
-        }
-
-        function closeModal(id) {
-            document.getElementById(id).classList.remove('show');
         }
 
         function toggleSupervisorFields() {
@@ -893,7 +983,7 @@ if ($guards_res) {
             if (chk.checked) {
                 fields.style.display = 'block';
                 inputs.forEach(input => {
-                    if (input.id !== 'sup_contact') { // Contact is optional
+                    if (input.id !== 'sup_contact') {
                         input.required = true;
                     }
                 });
@@ -912,6 +1002,5 @@ if ($guards_res) {
         }
     </script>
     <?php include_once 'includes/common_modals.php'; ?>
-    <!-- VERSION: 2.1 -->
 </body>
 </html>

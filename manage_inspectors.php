@@ -287,15 +287,6 @@ $inspectors_res = $conn->query($inspectors_sql);
                             <label class="form-label">Contact No.</label>
                             <input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX">
                         </div>
-                        <div class="form-group">
-                            <label class="form-label">Assign to Client (Optional)</label>
-                            <select name="assigned_client" class="form-control">
-                                <option value="">-- No Direct Assignment --</option>
-                                <?php foreach ($all_clients as $client): ?>
-                                    <option value="<?php echo $client['id']; ?>"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_username']); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
                         <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 20px;">An access key will be automatically generated upon account creation.</p>
                         <button type="submit" name="create_inspector" class="btn btn-primary">Create Inspector Account</button>
                     </form>
@@ -393,15 +384,6 @@ $inspectors_res = $conn->query($inspectors_sql);
                 <div class="form-group" style="text-align: left;"><label class="form-label">First Name</label><input type="text" name="first_name" id="edit_first_name" class="form-control" required></div>
                 <div class="form-group" style="text-align: left;"><label class="form-label">Middle Name</label><input type="text" name="middle_name" id="edit_middle_name" class="form-control"></div>
                 <div class="form-group" style="text-align: left;"><label class="form-label">Contact No.</label><input type="text" name="contact_no" id="edit_contact_no" class="form-control" placeholder="09XXXXXXXXX"></div>
-                <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Assign to Client (Optional)</label>
-                    <select name="assigned_client" id="edit_assigned_client" class="form-control">
-                        <option value="">-- No Direct Assignment --</option>
-                        <?php foreach ($all_clients as $client): ?>
-                            <option value="<?php echo $client['id']; ?>"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_username']); ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editInspectorModal')">Cancel</button>
                     <button type="submit" name="update_inspector" class="btn btn-primary" style="flex: 1;">Update Details</button>

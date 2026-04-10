@@ -29,20 +29,15 @@ $inspectors_sql = "SELECT id, name FROM inspectors WHERE agency_id = $agency_id 
 $inspectors_res = $conn->query($inspectors_sql);
 
 // Handle Filter Submissions
-$filter_start = $_GET['start_date'] ?? date('Y-m-d', strtotime('-30 days'));
-$filter_end = $_GET['end_date'] ?? date('Y-m-d');
+$filter_date = $_GET['visit_date'] ?? '';
 $filter_inspector = $_GET['inspector_id'] ?? '';
 
 // Build dynamic WHERE clause
 $where_clauses = ["iscn.agency_client_id IN ($mapping_ids_str)"];
 
-if (!empty($filter_start)) {
-    $start = $conn->real_escape_string($filter_start . " 00:00:00");
-    $where_clauses[] = "iscn.scan_time >= '$start'";
-}
-if (!empty($filter_end)) {
-    $end = $conn->real_escape_string($filter_end . " 23:59:59");
-    $where_clauses[] = "iscn.scan_time <= '$end'";
+if (!empty($filter_date)) {
+    $date = $conn->real_escape_string($filter_date);
+    $where_clauses[] = "DATE(iscn.scan_time) = '$date'";
 }
 if (!empty($filter_inspector)) {
     $i_id = (int)$filter_inspector;
@@ -196,12 +191,8 @@ $history_res = $conn->query($history_sql);
                 <div class="card-header">Filter Inspector Visits</div>
                 <form class="filter-form" method="GET" action="agency_inspector_history.php">
                     <div class="form-group">
-                        <label class="form-label" for="start_date">Date From</label>
-                        <input type="date" id="start_date" name="start_date" class="form-control" value="<?php echo htmlspecialchars($filter_start); ?>">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="end_date">Date To</label>
-                        <input type="date" id="end_date" name="end_date" class="form-control" value="<?php echo htmlspecialchars($filter_end); ?>">
+                        <label class="form-label" for="visit_date">Visit Date</label>
+                        <input type="date" id="visit_date" name="visit_date" class="form-control" value="<?php echo htmlspecialchars($filter_date); ?>" onchange="this.form.submit()">
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="inspector_id">Inspector</label>
@@ -213,10 +204,6 @@ $history_res = $conn->query($history_sql);
                                 <?php endwhile; ?>
                             <?php endif; ?>
                         </select>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button type="submit" class="btn-primary">Apply Filters</button>
-                        <a href="agency_inspector_history.php" class="btn-primary" style="background: #94a3b8; text-decoration: none;">Reset</a>
                     </div>
                 </form>
             </div>

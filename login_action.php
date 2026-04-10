@@ -64,8 +64,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 case 'client':
                     header("Location: client_dashboard.php");
                     break;
+                case 'supervisor':
+                    header("Location: supervisor_dashboard.php");
+                    break;
                 default:
-                    $_SESSION['auth_error'] = 'Invalid user level!';
+                    $_SESSION['auth_error'] = 'Incorrect username or password!';
                     header("Location: login.php");
                     break;
             }
@@ -73,13 +76,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         } else {
             // Log Failure
             $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'FAILED')");
-            $_SESSION['auth_error'] = 'Incorrect password!';
+            $_SESSION['auth_error'] = 'Incorrect username or password!';
             header("Location: login.php");
         }
     } else {
         // Log Failure
         $conn->query("INSERT INTO login_logs (username, ip_address, user_agent, status) VALUES ('$username', '$ip_address', '$user_agent', 'FAILED')");
-        $_SESSION['auth_error'] = 'Username not found!';
+        $_SESSION['auth_error'] = 'Incorrect username or password!';
         header("Location: login.php");
     }
 }
