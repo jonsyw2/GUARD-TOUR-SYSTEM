@@ -143,9 +143,8 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
             if ($current_csv_session !== $session_id) {
                 $current_csv_session = $session_id;
                 
-                // Robust date parsing to avoid 1970
-                $raw_time = $row['tour_session_id'] ?: $row['scan_time'];
-                $ts = strtotime($raw_time);
+                // Use scan_time for the header display
+                $ts = strtotime($row['scan_time']);
                 $display_time = ($ts && $ts > 0) ? date('M d, Y h:i A', $ts) : date('M d, Y h:i A'); // Fallback to current time if invalid
                 
                 $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
@@ -449,9 +448,8 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                                     if ($current_session !== $session_id):
                                         $current_session = $session_id;
                                         
-                                        // Robust date parsing to avoid 1970
-                                        $raw_cycle = $row['tour_session_id'] ?: $row['scan_time'];
-                                        $cycle_ts = strtotime($raw_cycle);
+                                        // Use scan_time for the header display
+                                        $cycle_ts = strtotime($row['scan_time']);
                                         $cycle_time = ($cycle_ts && $cycle_ts > 0) ? date('M d, Y h:i A', $cycle_ts) : date('M d, Y h:i A');
 
                                         $display_shift = htmlspecialchars($row['shift'] ?? 'No Shift');
