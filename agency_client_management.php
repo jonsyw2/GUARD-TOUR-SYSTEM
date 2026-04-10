@@ -269,21 +269,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-    // Check Client's Guard Limit
+    // Check Agency's Pooled Guard Assignment Limit
     $limit_sql = "
-        SELECT ac.guard_limit, 
-               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
-        FROM agency_clients ac 
-        WHERE ac.id = $mapping_id
+        SELECT u.agency_guard_limit, 
+               (SELECT COUNT(*) FROM guard_assignments ga 
+                JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id 
+                WHERE ac_inner.agency_id = u.id) as current_assigned
+        FROM users u 
+        WHERE u.id = $agency_id
     ";
     $limit_res = $conn->query($limit_sql);
     $can_assign = true;
     if ($limit_res && $row = $limit_res->fetch_assoc()) {
-        $max_guards = (int)$row['guard_limit'];
-        $current_guards = (int)$row['current_guards'];
+        $max_assigned = (int)$row['agency_guard_limit'];
+        $current_assigned = (int)$row['current_assigned'];
         
-        if ($max_guards > 0 && $current_guards >= $max_guards) {
-            $message = "Assignment failed: This client site has reached its limit of $max_guards guards.";
+        if ($max_assigned > 0 && $current_assigned >= $max_assigned) {
+            $message = "Assignment failed: Your agency has reached its total assignment limit of $max_assigned guards.";
             $message_type = "error";
             $show_status_modal = true;
             $can_assign = false;

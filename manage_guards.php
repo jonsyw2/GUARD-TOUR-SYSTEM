@@ -73,23 +73,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     
     $can_create = true;
     if ($client_mapping_id) {
-        // Check Client's Guard Limit
+        // Check Agency's Pooled Guard Assignment Limit
         $limit_sql = "
-            SELECT ac.guard_limit, 
-                   (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
-            FROM agency_clients ac 
-            WHERE ac.id = $client_mapping_id
+            SELECT u.agency_guard_limit, 
+                   (SELECT COUNT(*) FROM guard_assignments ga 
+                    JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id 
+                    WHERE ac_inner.agency_id = u.id) as total_assigned
+            FROM users u 
+            WHERE u.id = $agency_id
         ";
         $limit_res = $conn->query($limit_sql);
         if ($limit_res && $row = $limit_res->fetch_assoc()) {
-            $max_guards = (int)$row['guard_limit'];
-            $current_guards = (int)$row['current_guards'];
+            $max_assigned = (int)$row['agency_guard_limit'];
+            $current_assigned = (int)$row['total_assigned'];
             
-            if ($max_guards > 0 && $current_guards >= $max_guards) {
-                $message = "Creation failed: This client site has reached its limit of $max_guards guards.";
-                $message_type = "error";
-                $show_limit_modal = true;
-                $can_create = false;
+            if ($max_assigned > 0 && $current_assigned >= $max_assigned) {
+                // If agency total assignment limit is reached, don't assign but allow creation
+                $client_mapping_id = 0; 
+                $message = "Guard account created. Note: Agency total assignment limit reached.";
             }
         }
     }
@@ -322,13 +323,17 @@ if ($clients_res) {
     while($row = $clients_res->fetch_assoc()) $clients_data[] = $row;
 }
 
-// Calculate total allowed guards: SUM(guard_limit + 2) for each client site assigned to this agency
-$limit_sql = "SELECT COALESCE(SUM(guard_limit + 2), 0) as total_allowed FROM agency_clients WHERE agency_id = $agency_id";
+// Calculate total allowed guards: Use the agency resource pool limit (from users table) + 2 extra personnel per client site
+$limit_sql = "
+    SELECT 
+        (u.agency_guard_limit + (SELECT COUNT(*) * 2 FROM agency_clients WHERE agency_id = u.id)) as total_allowed 
+    FROM users u 
+    WHERE u.id = $agency_id
+";
 $limit_res = $conn->query($limit_sql);
 $total_guard_limit = 0;
-if ($limit_res) {
-    $limit_row = $limit_res->fetch_assoc();
-    $total_guard_limit = (int)($limit_row['total_allowed'] ?? 0);
+if ($limit_res && $limit_row = $limit_res->fetch_assoc()) {
+    $total_guard_limit = (int)$limit_row['total_allowed'];
 }
 
 // Count current guards in this agency
@@ -439,15 +444,15 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             <!-- Active Guards Table -->
             <div class="card">
                 <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-                    <h3 style="margin:0;">Active Guards Personnel</h3>
+                    <h3 style="margin:0;">Active Personnel</h3>
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 0.8rem; color: #6b7280;">
-                            <?php echo $current_guard_count; ?> / <?php echo $total_guard_limit > 0 ? $total_guard_limit : '∞'; ?> guards
-                        </span>
+                        <span style="font-size: 0.8rem; font-weight: 700; color: var(--primary);">
+                            <?php echo $current_guard_count; ?> / <?php echo $total_guard_limit; ?> accounts
+                         </span>
                         <?php if ($guard_limit_reached): ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Guard</button>
+                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem; background: #d1d5db; color: #9ca3af; cursor: not-allowed;" disabled title="Guard limit reached">+ Add Personnel</button>
                         <?php else: ?>
-                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Guard</button>
+                            <button class="btn" style="width:auto; padding: 8px 20px; font-size: 0.9rem;" onclick="document.getElementById('addGuardModal').classList.add('show')">+ Add Personnel</button>
                         <?php endif; ?>
                     </div>
                 </div>

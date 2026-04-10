@@ -8,7 +8,12 @@ if (isset($_GET['ajax_agency_data'])) {
     $response = [];
 
     if ($type === 'clients') {
-        $sql = "SELECT ac.id, c.id as user_id, c.username as name, c.status, ac.client_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
+        $sql = "SELECT ac.id, c.id as user_id, c.username as name, ac.company_name, c.status, 
+                ac.client_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit,
+                (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qr_count,
+                (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guard_count,
+                (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspector_count
+                FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
         $res = $conn->query($sql);
         while ($r = $res->fetch_assoc()) $response[] = $r;
     } elseif ($type === 'toggle_client_status') {
@@ -62,23 +67,17 @@ if (isset($_GET['ajax_agency_data'])) {
             }
             $target_agency_id = (int)$agency_res->fetch_assoc()['agency_id'];
 
-            // 2. Update Client Site Limits (Specific Mapping)
+            // 2. Update Client Site Limits (Specific Mapping) - NOW ABSOLUTE
             $sqlSite = "UPDATE agency_clients SET 
-                    client_limit = COALESCE(client_limit, 0) + $add_client,
-                    qr_limit = COALESCE(qr_limit, 0) + $add_qr, 
-                    guard_limit = COALESCE(guard_limit, 0) + $add_guards, 
-                    inspector_limit = COALESCE(inspector_limit, 0) + $add_inspectors 
+                    client_limit = $add_client,
+                    qr_limit = $add_qr, 
+                    guard_limit = $add_guards, 
+                    inspector_limit = $add_inspectors 
                     WHERE id = $mapping_id";
             $conn->query($sqlSite);
 
-            // 3. Sync with Agency Pooled Limits (Users Table)
-            $sqlAgency = "UPDATE users SET 
-                    client_limit = COALESCE(client_limit, 0) + $add_client,
-                    qr_limit = COALESCE(qr_limit, 0) + $add_qr, 
-                    guard_limit = COALESCE(guard_limit, 0) + $add_guards, 
-                    inspector_limit = COALESCE(inspector_limit, 0) + $add_inspectors 
-                    WHERE id = $target_agency_id";
-            $conn->query($sqlAgency);
+            // 3. Sync with Agency Pooled Limits (Users Table) is now skipped 
+            // because site-specific absolute limits shouldn't incrementally affect the pool.
 
             $conn->commit();
             $response = ['success' => true, 'message' => 'Limits updated successfully!'];
@@ -203,9 +202,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_details'
     $contact_no = $conn->real_escape_string($_POST['contact_no']);
     $status = $conn->real_escape_string($_POST['status'] ?? 'active');
     $client_limit = (int)($_POST['client_limit'] ?? 0);
-    $agency_qr_limit = (int)($_POST['agency_qr_limit'] ?? 0);
-    $agency_guard_limit = (int)($_POST['agency_guard_limit'] ?? 0);
-    $agency_inspector_limit = (int)($_POST['agency_inspector_limit'] ?? 0);
 
     $sql = "UPDATE users SET 
             agency_name = '$agency_name',
@@ -213,10 +209,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_details'
             contact_person = '$contact_person',
             contact_no = '$contact_no',
             status = '$status',
-            client_limit = $client_limit,
-            agency_qr_limit = $agency_qr_limit,
-            agency_guard_limit = $agency_guard_limit,
-            agency_inspector_limit = $agency_inspector_limit
+            client_limit = $client_limit
             WHERE id = $agency_id";
 
     if ($conn->query($sql)) {
@@ -238,9 +231,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $username = $conn->real_escape_string($_POST['agency_username']);
     $password = password_hash($_POST['agency_password'], PASSWORD_DEFAULT);
     $client_limit = (int)$_POST['client_limit'];
-    $agency_qr_limit = (int)($_POST['agency_qr_limit'] ?? 0);
-    $agency_guard_limit = (int)($_POST['agency_guard_limit'] ?? 0);
-    $agency_inspector_limit = (int)($_POST['agency_inspector_limit'] ?? 0);
     $address = $conn->real_escape_string($_POST['address']);
     $contact_person = $conn->real_escape_string($_POST['contact_person'] ?? '');
     $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
@@ -254,8 +244,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, agency_qr_limit, agency_guard_limit, agency_inspector_limit, address, contact_person, contact_no) 
-                VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, $agency_qr_limit, $agency_guard_limit, $agency_inspector_limit, '$address', '$contact_person', '$contact_no')";
+        $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, address, contact_person, contact_no) 
+                VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, '$address', '$contact_person', '$contact_no')";
         if ($conn->query($sql) === TRUE) {
             $message = "Agency added successfully!";
             $message_type = "success";
@@ -509,7 +499,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor_acti
 }
 
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username, agency_name, qr_limit, guard_limit, inspector_limit, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
+$agencies_result = $conn->query("SELECT id, username, agency_name, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
 
 // Fetch all clients
 $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
@@ -635,7 +625,7 @@ include 'admin_layout/sidebar.php';
                                 $agencies_result->data_seek(0);
                                 if ($agencies_result->num_rows > 0): 
                                     while($row = $agencies_result->fetch_assoc()): ?>
-                                        <tr onclick="openQuickLinksModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['agency_name'] ?: $row['username']); ?>', <?php echo $row['client_limit']; ?>, '<?php echo addslashes($row['address'] ?? ''); ?>', '<?php echo addslashes($row['contact_person'] ?? ''); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo $row['status'] ?? 'active'; ?>', <?php echo htmlspecialchars(json_encode($row)); ?>)">
+                                        <tr onclick='openQuickLinksModal(<?php echo htmlspecialchars(json_encode($row), ENT_QUOTES); ?>)'>
                                             <td>#<?php echo $row['id']; ?></td>
                                             <td>
                                                 <strong><?php echo htmlspecialchars($row['agency_name'] ?: $row['username']); ?></strong>
@@ -774,12 +764,12 @@ include 'admin_layout/sidebar.php';
 
     <!-- Add New Agency Modal -->
     <div id="addAgencyModal" class="modal">
-        <div class="modal-content" style="max-width: 560px; text-align: left; padding: 32px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 16px;">
-                <h3 style="margin: 0; font-size: 1.2rem;">Add New Agency</h3>
-                <button type="button" onclick="closeModal('addAgencyModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #9ca3af; line-height: 1;">&times;</button>
+        <div class="modal-content" style="max-width: 560px; text-align: left; padding: 0;">
+            <div style="padding: 24px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Add New Agency</h3>
+                <button type="button" onclick="closeModal('addAgencyModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; transition: color 0.2s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#94a3b8'">&times;</button>
             </div>
-            <form action="agency_maintenance.php" method="POST" autocomplete="off">
+            <form action="agency_maintenance.php" method="POST" autocomplete="off" style="padding: 32px;">
                 <div class="form-group">
                     <label class="form-label">Agency Name</label>
                     <input type="text" name="agency_name" class="form-control" required placeholder="Ex: Shield Security" autocomplete="off">
@@ -803,23 +793,6 @@ include 'admin_layout/sidebar.php';
                 <div class="form-group">
                     <label class="form-label">Client Account Limit</label>
                     <input type="number" name="client_limit" class="form-control" value="0" min="0" placeholder="0 = unlimited">
-                </div>
-                <div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-top: 4px;">
-                    <label class="form-label" style="font-weight: 700; color: #374151; margin-bottom: 12px; display: block;">Agency Resource Pool Limits <span style="font-weight: 400; color: #9ca3af; font-size: 0.8rem;">(0 = unlimited)</span></label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">QR Checkpoints</label>
-                            <input type="number" name="agency_qr_limit" class="form-control" value="0" min="0">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">Guards</label>
-                            <input type="number" name="agency_guard_limit" class="form-control" value="0" min="0">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label class="form-label">Inspectors</label>
-                            <input type="number" name="agency_inspector_limit" class="form-control" value="0" min="0">
-                        </div>
-                    </div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" onclick="closeModal('addAgencyModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
@@ -859,14 +832,7 @@ include 'admin_layout/sidebar.php';
             </div>
             
             <div style="padding: 16px; background: #ffffff;">
-                <div class="ql-nav" style="display: flex; gap: 8px; margin-bottom: 20px; overflow-x: auto; padding-bottom: 8px;">
-                    <button class="ql-tab active" onclick="loadQuickLinkTab('clients')">Clients</button>
-                    <button class="ql-tab" onclick="loadQuickLinkTab('qr')">QR Usage</button>
-                    <button class="ql-tab" onclick="loadQuickLinkTab('guards')">Guards</button>
-                    <button class="ql-tab" onclick="loadQuickLinkTab('inspectors')">Inspectors</button>
-                </div>
-                
-                <div id="ql_content_area" style="min-height: 250px; max-height: 400px; overflow-y: auto; padding: 4px;">
+                <div id="ql_content_area" style="min-height: 250px; max-height: 450px; overflow-y: auto; padding: 4px;">
                     <!-- Content injected via AJAX -->
                     <div class="ql-loader" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 250px; color: #94a3b8;">
                         <span style="font-size: 2rem; animation: spin 1s linear infinite;">↻</span>
@@ -925,9 +891,12 @@ include 'admin_layout/sidebar.php';
 
     <!-- Edit Agency Modal -->
     <div id="editAgencyModal" class="modal">
-        <div class="modal-content">
-            <h3 style="margin-bottom: 20px;">Edit Agency Details</h3>
-            <form action="" method="POST">
+        <div class="modal-content" style="max-width: 560px; text-align: left; padding: 0;">
+            <div style="padding: 24px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Edit Agency Details</h3>
+                <button type="button" onclick="closeModal('editAgencyModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; transition: color 0.2s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#94a3b8'">&times;</button>
+            </div>
+            <form action="" method="POST" style="padding: 32px;">
                 <input type="hidden" name="agency_id" id="edit_agency_id">
                 <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                     <div class="form-group" style="text-align: left;">
@@ -947,37 +916,20 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group" style="text-align: left;"><label class="form-label">Contact Person</label><input type="text" name="contact_person" id="edit_agency_contact_person" class="form-control"></div>
                     <div class="form-group" style="text-align: left;"><label class="form-label">Contact No.</label><input type="text" name="contact_no" id="edit_agency_contact_no" class="form-control"></div>
                 </div>
-                <div class="form-group" style="text-align: left;">
+                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
                     <label class="form-label">Client Limit</label>
                     <input type="number" name="client_limit" id="edit_agency_client_limit" class="form-control" min="0" placeholder="0 = unlimited">
                 </div>
-                <div style="border-top: 1px solid #e5e7eb; padding-top: 16px; margin-bottom: 16px; text-align: left;">
-                    <label class="form-label" style="font-weight: 700; color: #374151; margin-bottom: 12px; display: block;">Agency Resource Pool Limits <span style="font-weight: 400; color: #9ca3af; font-size: 0.8rem;">(0 = unlimited)</span></label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
-                        <div class="form-group" style="margin-bottom: 0; text-align: left;">
-                            <label class="form-label">QR Checkpoints</label>
-                            <input type="number" name="agency_qr_limit" id="edit_agency_qr_limit" class="form-control" min="0" placeholder="0">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0; text-align: left;">
-                            <label class="form-label">Guards</label>
-                            <input type="number" name="agency_guard_limit" id="edit_agency_guard_limit" class="form-control" min="0" placeholder="0">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0; text-align: left;">
-                            <label class="form-label">Inspectors</label>
-                            <input type="number" name="agency_inspector_limit" id="edit_agency_inspector_limit" class="form-control" min="0" placeholder="0">
-                        </div>
-                    </div>
-                </div>
-                <div class="form-group" style="text-align: left;">
+                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
                     <label class="form-label">Account Status</label>
                     <select name="status" id="edit_agency_status" class="form-control">
                         <option value="active">Active</option>
                         <option value="suspended">Suspended</option>
                     </select>
                 </div>
-                <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editAgencyModal')">Cancel</button>
-                    <button type="submit" name="update_agency_details" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
+                    <button type="button" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;" onclick="closeModal('editAgencyModal')">Cancel</button>
+                    <button type="submit" name="update_agency_details" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Save Changes</button>
                 </div>
             </form>
         </div>
@@ -985,9 +937,12 @@ include 'admin_layout/sidebar.php';
 
     <!-- Edit Supervisor Modal -->
     <div id="editSupervisorModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
-            <h3 style="margin-bottom: 20px;">Edit Supervisor Account</h3>
-            <form action="" method="POST">
+        <div class="modal-content" style="max-width: 560px; text-align: left; padding: 0;">
+            <div style="padding: 24px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Edit Supervisor Account</h3>
+                <button type="button" onclick="closeModal('editSupervisorModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; transition: color 0.2s;" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#94a3b8'">&times;</button>
+            </div>
+            <form action="" method="POST" style="padding: 32px;">
                 <input type="hidden" name="edit_supervisor_id" id="edit_supervisor_id">
                 <div class="form-group" style="text-align: left;">
                     <label class="form-label">Full Name</label>
@@ -1027,9 +982,9 @@ include 'admin_layout/sidebar.php';
                     <div id="edit_sup_clients_container" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 150px; overflow-y: auto; padding: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fbfcfd;">
                     </div>
                 </div>
-                <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('editSupervisorModal')">Cancel</button>
-                    <button type="submit" name="update_supervisor" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+                <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
+                    <button type="button" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;" onclick="closeModal('editSupervisorModal')">Cancel</button>
+                    <button type="submit" name="update_supervisor" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Save Changes</button>
                 </div>
             </form>
         </div>
@@ -1037,15 +992,15 @@ include 'admin_layout/sidebar.php';
 
     <!-- Delete Supervisor Modal -->
     <div id="deleteSupervisorModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 440px; padding: 40px;">
             <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
-            <h3>Delete Supervisor Account?</h3>
-            <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to delete <strong id="delete_supervisor_name"></strong>? This will remove their access permanently.</p>
+            <h3 style="margin-bottom: 10px; font-weight: 700; color: #1e293b;">Delete Supervisor Account?</h3>
+            <p style="color: #64748b; margin-bottom: 32px;">Are you sure you want to delete <strong id="delete_supervisor_name"></strong>? This will remove their access permanently.</p>
             <form action="" method="POST">
                 <input type="hidden" name="delete_supervisor_id" id="delete_supervisor_id">
-                <div style="display: flex; gap: 12px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151; flex: 1;" onclick="closeModal('deleteSupervisorModal')">Cancel</button>
-                    <button type="submit" name="delete_supervisor_action" class="btn" style="background: #ef4444; color: white; flex: 1;">Delete Account</button>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;" onclick="closeModal('deleteSupervisorModal')">Cancel</button>
+                    <button type="submit" name="delete_supervisor_action" class="btn" style="background: #ef4444; color: white; width: auto; padding: 10px 24px;">Delete Account</button>
                 </div>
             </form>
         </div>
@@ -1084,9 +1039,6 @@ include 'admin_layout/sidebar.php';
             document.getElementById('edit_agency_contact_no').value = agency.contact_no;
             document.getElementById('edit_agency_status').value = agency.status;
             document.getElementById('edit_agency_client_limit').value = agency.client_limit || 0;
-            document.getElementById('edit_agency_qr_limit').value = agency.agency_qr_limit || 0;
-            document.getElementById('edit_agency_guard_limit').value = agency.agency_guard_limit || 0;
-            document.getElementById('edit_agency_inspector_limit').value = agency.agency_inspector_limit || 0;
             document.getElementById('editAgencyModal').classList.add('show');
         }
 
@@ -1211,19 +1163,15 @@ include 'admin_layout/sidebar.php';
             }
         });
         // --- Agency Quick Links ---
+        let qlAgencyData = null;
         let qlAgencyFullData = null;
-        function openQuickLinksModal(agencyId, agencyName, clientLimit, address, contactPerson, contactNo, status, fullData) {
-            qlAgencyData = {
-                id: agencyId,
-                name: agencyName,
-                limit: clientLimit,
-                address: address,
-                person: contactPerson,
-                no: contactNo,
-                status: status
-            };
-            qlAgencyFullData = fullData;
-            document.getElementById('ql_agency_name').innerText = agencyName;
+
+        function openQuickLinksModal(full_agency) {
+            qlAgencyData = full_agency;
+            qlAgencyFullData = full_agency;
+            
+            const agency_name = full_agency.agency_name || full_agency.username;
+            document.getElementById('ql_agency_name').innerText = agency_name;
             document.getElementById('ql_search_input').value = ''; // Reset search
             document.getElementById('agencyQuickLinksModal').classList.add('show');
             loadQuickLinkTab('clients');
@@ -1235,25 +1183,16 @@ include 'admin_layout/sidebar.php';
             openEditModal(qlAgencyFullData);
         }
 
-        async function loadQuickLinkTab(tab) {
-            if (!qlAgencyData) return;
-            // Reset search input on tab switch
-            document.getElementById('ql_search_input').value = '';
-            
-            // Update UI Active Tab
-            document.querySelectorAll('.ql-tab').forEach(t => {
-                const label = t.innerText.toLowerCase();
-                t.classList.toggle('active', label === tab.toLowerCase() || (label === 'qr usage' && tab === 'qr'));
-            });
-
+        async function loadQuickLinkTab(type) {
             const contentArea = document.getElementById('ql_content_area');
             contentArea.innerHTML = `<div class="ql-loader" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 250px; color: #94a3b8;"><span style="font-size: 2rem; animation: spin 1s linear infinite;">↻</span><p style="margin-top: 10px; font-weight: 500;">Fetching data...</p></div>`;
 
             try {
-                const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&agency_id=${qlAgencyData.id}&type=${tab}`);
+                const response = await fetch(`agency_maintenance.php?ajax_agency_data=1&agency_id=${qlAgencyData.id}&type=${type}`);
                 const data = await response.json();
-                renderQuickLinkData(tab, data);
+                renderQuickLinkData(type, data);
             } catch (err) {
+                console.error("Quick Link Error:", err);
                 contentArea.innerHTML = `<p style="padding: 20px; text-align: center; color: #ef4444;">Error loading data. Please try again.</p>`;
             }
         }
@@ -1274,22 +1213,29 @@ include 'admin_layout/sidebar.php';
                     html += `
                         <li class="ql-data-item" style="flex-direction: column; align-items: stretch; gap: 4px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                                <div style="display:flex; align-items:center; gap:8px;">
-                                    <span class="ql-label">${item.name}</span>
-                                    ${statusTag}
+                                <div style="display:flex; flex-direction: column; gap:4px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span class="ql-label" style="font-size: 1rem;">${item.company_name || item.name}</span>
+                                        ${statusTag}
+                                    </div>
+                                    <div style="display:flex; gap:12px; font-size: 0.75rem; color: #64748b; font-weight: 500;">
+                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">QR:</strong> ${item.current_qr_count}/${item.qr_limit || 0}</span>
+                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">Guards:</strong> ${item.current_guard_count}/${item.guard_limit || 0}</span>
+                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">Inspectors:</strong> ${item.current_inspector_count}/${item.inspector_limit || 0}</span>
+                                    </div>
                                 </div>
                                 <div style="display:flex; align-items:center; gap: 4px;">
-                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Add Limits +</button>
+                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Manage Limits</button>
                                 </div>
                             </div>
                             <div id="adj_form_${item.id}" class="ql-adj-container">
-                                <p style="font-size: 0.7rem; color: #94a3b8; margin: 0 0 10px 0; font-weight:600; text-transform:uppercase;">Adjust Incremental Limits</p>
+                                <p style="font-size: 0.7rem; color: #94a3b8; margin: 0 0 10px 0; font-weight:600; text-transform:uppercase;">Client Site Limits</p>
 
                                 <div class="ql-adj-row">
                                     <span class="ql-adj-label">QR Checkpoints</span>
                                     <div class="ql-adj-ctrl">
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'qr', -1)">-</button>
-                                        <input type="number" id="adj_qr_${item.id}" class="ql-adj-input" value="0">
+                                        <input type="number" id="adj_qr_${item.id}" class="ql-adj-input" value="${item.qr_limit || 0}">
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'qr', 1)">+</button>
                                     </div>
                                 </div>
@@ -1297,7 +1243,7 @@ include 'admin_layout/sidebar.php';
                                     <span class="ql-adj-label">Security Guards</span>
                                     <div class="ql-adj-ctrl">
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'guard', -1)">-</button>
-                                        <input type="number" id="adj_guard_${item.id}" class="ql-adj-input" value="0">
+                                        <input type="number" id="adj_guard_${item.id}" class="ql-adj-input" value="${item.guard_limit || 0}">
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'guard', 1)">+</button>
                                     </div>
                                 </div>
@@ -1305,11 +1251,11 @@ include 'admin_layout/sidebar.php';
                                     <span class="ql-adj-label">Inspectors</span>
                                     <div class="ql-adj-ctrl">
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', -1)">-</button>
-                                        <input type="number" id="adj_insp_${item.id}" class="ql-adj-input" value="0">
+                                        <input type="number" id="adj_insp_${item.id}" class="ql-adj-input" value="${item.inspector_limit || 0}">
                                         <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', 1)">+</button>
                                     </div>
                                 </div>
-                                <button class="btn-save-adj" onclick="saveAdj(${item.id})">Save</button>
+                                <button class="btn-save-adj" onclick="saveAdj(${item.id})">Save Changes</button>
                             </div>
                         </li>`;
                 });
