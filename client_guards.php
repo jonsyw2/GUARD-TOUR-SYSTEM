@@ -44,6 +44,7 @@ $guards_sql = "
         g.lesp_no,
         g.lesp_expiry,
         g.profile_photo,
+        g.shift,
         (
             SELECT COUNT(*) FROM scans s
             JOIN checkpoints c ON s.checkpoint_id = c.id
@@ -326,6 +327,7 @@ if (!empty($mapping_ids)) {
                         <thead>
                             <tr>
                                 <th>Guard Name</th>
+                                <th>Assigned Shift</th>
                                 <th>Assigned Agency</th>
                                 <th>Date Assigned</th>
                                 <th>Today's Activity</th>
@@ -336,8 +338,15 @@ if (!empty($mapping_ids)) {
                             $guards_res->data_seek(0);
                             while($g = $guards_res->fetch_assoc()):
                             ?>
-                                <tr onclick="openGuardModal('<?php echo addslashes($g['guard_name']); ?>', '<?php echo addslashes($g['gender'] ?? 'N/A'); ?>', '<?php echo addslashes($g['contact_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['police_clearance_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['nbi_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_expiry'] ?? 'N/A'); ?>', '<?php echo addslashes($g['agency_name']); ?>')">
+                                <tr onclick="openGuardModal('<?php echo addslashes($g['guard_name']); ?>', '<?php echo addslashes($g['gender'] ?? 'N/A'); ?>', '<?php echo addslashes($g['contact_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['police_clearance_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['nbi_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_no'] ?? 'N/A'); ?>', '<?php echo addslashes($g['lesp_expiry'] ?? 'N/A'); ?>', '<?php echo addslashes($g['agency_name']); ?>', '<?php echo addslashes($g['shift'] ?? 'Day Shift'); ?>')">
                                     <td><strong><?php echo htmlspecialchars($g['guard_name']); ?></strong></td>
+                                    <td>
+                                        <?php if (($g['shift'] ?? 'Day Shift') === 'Day Shift'): ?>
+                                            <span style="background: #fef9c3; color: #a16207; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">☀️ Day Shift</span>
+                                        <?php else: ?>
+                                            <span style="background: #e0e7ff; color: #3730a3; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">🌙 Night Shift</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td><?php echo htmlspecialchars($g['agency_name']); ?></td>
                                     <td><?php echo date('M d, Y', strtotime($g['assigned_at'])); ?></td>
                                     <td>
@@ -406,9 +415,15 @@ if (!empty($mapping_ids)) {
                 </div>
             </div>
 
-            <div style="padding: 12px 16px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; margin-bottom: 24px;">
-                <div style="color: #1e40af; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;">Assigned Agency</div>
-                <div id="modal_agency" style="font-weight: 600; color: #1e3a8a; margin-top: 4px;">-</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+                <div style="padding: 12px 16px; background: #fef9c3; border: 1px solid #fde047; border-radius: 8px;">
+                    <div style="color: #a16207; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;">Assigned Shift</div>
+                    <div id="modal_shift" style="font-weight: 600; color: #854d0e; margin-top: 4px;">-</div>
+                </div>
+                <div style="padding: 12px 16px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;">
+                    <div style="color: #1e40af; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;">Assigned Agency</div>
+                    <div id="modal_agency" style="font-weight: 600; color: #1e3a8a; margin-top: 4px;">-</div>
+                </div>
             </div>
 
             <div class="modal-actions">
@@ -434,7 +449,7 @@ if (!empty($mapping_ids)) {
     </div>
 
     <script>
-        function openGuardModal(name, gender, contact, police, nbi, lesp_no, lesp_expiry, agency) {
+        function openGuardModal(name, gender, contact, police, nbi, lesp_no, lesp_expiry, agency, shift) {
             document.getElementById('modal_guard_name').innerText = name;
             document.getElementById('modal_gender').innerText = gender;
             document.getElementById('modal_contact').innerText = contact;
@@ -443,6 +458,7 @@ if (!empty($mapping_ids)) {
             document.getElementById('modal_lesp_no').innerText = lesp_no;
             document.getElementById('modal_lesp_expiry').innerText = lesp_expiry;
             document.getElementById('modal_agency').innerText = agency;
+            document.getElementById('modal_shift').innerText = shift;
             document.getElementById('guardDetailModal').classList.add('show');
             document.body.style.overflow = 'hidden';
         }

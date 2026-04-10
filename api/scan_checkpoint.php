@@ -50,8 +50,15 @@ if (
     $justification = !empty($data->justification) ? "'" . $conn->real_escape_string($data->justification) . "'" : "NULL";
     $photo_path = !empty($data->photo_path) ? "'" . $conn->real_escape_string($data->photo_path) . "'" : "NULL";
     $justification_photo_path = !empty($data->justification_photo_path) ? "'" . $conn->real_escape_string($data->justification_photo_path) . "'" : "NULL";
-    $shift = !empty($data->shift) ? "'" . $conn->real_escape_string($data->shift) . "'" : "NULL";
     $tour_session_id = !empty($data->tour_session_id) ? "'" . $conn->real_escape_string($data->tour_session_id) . "'" : "NULL";
+
+    // Fetch Guard's assigned shift from DB
+    $guard_shift = "Day Shift"; // Default
+    $g_res = $conn->query("SELECT shift FROM guards WHERE id = $guard_id");
+    if ($g_res && $g_res->num_rows > 0) {
+        $guard_shift = $g_res->fetch_assoc()['shift'];
+    }
+    $shift = "'" . $conn->real_escape_string($guard_shift) . "'";
 
     // Validate the checkpoint code exists
     $cp_sql = "SELECT id, agency_client_id FROM checkpoints WHERE checkpoint_code = '$code_value'";

@@ -12,8 +12,12 @@ $user_id = $_SESSION['user_id'];
 $insp_stmt = $conn->prepare("SELECT id, name FROM inspectors WHERE user_id = ?");
 $insp_stmt->bind_param("i", $user_id);
 $insp_stmt->execute();
-$insp_res = $insp_stmt->get_result();
-$inspector = $insp_res->fetch_assoc();
+$insp_stmt->bind_result($insp_id, $insp_name);
+$inspector = null;
+if ($insp_stmt->fetch()) {
+    $inspector = ['id' => $insp_id, 'name' => $insp_name];
+}
+$insp_stmt->close();
 
 if (!$inspector) {
     echo "Inspector profile not found.";
