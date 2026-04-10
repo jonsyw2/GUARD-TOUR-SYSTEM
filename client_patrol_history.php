@@ -408,9 +408,8 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                         <label class="form-label" for="shift">Shift</label>
                         <select id="shift" name="shift" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Shifts --</option>
-                            <option value="Morning" <?php if($filter_shift == 'Morning') echo 'selected'; ?>>Morning</option>
-                            <option value="Afternoon" <?php if($filter_shift == 'Afternoon') echo 'selected'; ?>>Afternoon</option>
-                            <option value="Night" <?php if($filter_shift == 'Night') echo 'selected'; ?>>Night</option>
+                            <option value="Day Shift" <?php if($filter_shift == 'Day Shift') echo 'selected'; ?>>Day Shift</option>
+                            <option value="Night Shift" <?php if($filter_shift == 'Night Shift') echo 'selected'; ?>>Night Shift</option>
                         </select>
                     </div>
                     <div style="display: flex; gap: 8px;">

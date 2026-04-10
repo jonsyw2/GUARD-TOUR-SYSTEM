@@ -26,6 +26,7 @@ addColumnSafely($conn, 'guards', 'gender', 'VARCHAR(20)', 'name');
 addColumnSafely($conn, 'guards', 'police_clearance_no', 'VARCHAR(50)', 'lesp_expiry');
 addColumnSafely($conn, 'guards', 'nbi_no', 'VARCHAR(50)', 'police_clearance_no');
 addColumnSafely($conn, 'guards', 'contact_no', 'VARCHAR(20)', 'nbi_no');
+addColumnSafely($conn, 'guards', 'shift', "VARCHAR(50) DEFAULT 'Day Shift'", 'contact_no');
 
 $message = '';
 $message_type = '';
@@ -65,6 +66,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
+    $shift = $conn->real_escape_string($_POST['shift'] ?? 'Day Shift');
     $client_mapping_id = isset($_POST['assign_to_client']) ? (int)$_POST['assign_to_client'] : null;
     
     // Format Full Name: Last, First Middle
@@ -107,8 +109,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
             $user_id = $conn->insert_id;
             
             // 2. Create Guard entry
-            $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry) 
-                         VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry')");
+            $conn->query("INSERT INTO guards (user_id, agency_id, name, gender, address, contact_no, police_clearance_no, nbi_no, lesp_no, lesp_expiry, shift) 
+                         VALUES ($user_id, $agency_id, '$fullname', '$gender', '$address', '$contact_no', '$police_clearance_no', '$nbi_no', '$lesp_no', '$lesp_expiry', '$shift')");
             $guard_id = $conn->insert_id;
 
             // 3. Handle Auto-assignment
@@ -142,6 +144,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
     $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
+    $shift = $conn->real_escape_string($_POST['shift'] ?? 'Day Shift');
     $client_mapping_id = isset($_POST['client_mapping_id']) ? (int)$_POST['client_mapping_id'] : null;
     
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
@@ -157,7 +160,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
                         police_clearance_no = '$police_clearance_no',
                         nbi_no = '$nbi_no',
                         lesp_no = '$lesp_no', 
-                        lesp_expiry = '$lesp_expiry' 
+                        lesp_expiry = '$lesp_expiry',
+                        shift = '$shift'
                       WHERE id = $guard_id");
         
         // Handle Assignment Update
@@ -302,7 +306,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 }
 
 // Fetch Guards created by this agency with current assignment info
-$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo,
+$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo, g.shift,
                       GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
                       GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
                FROM guards g 
@@ -462,6 +466,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                             <tr>
                                 <th>Guard Name</th>
                                 <th>Access Key</th>
+                                <th>Assigned Shift</th>
                                 <th>Assigned Client</th>
                                 <th>Date Created</th>
                                 <th>Actions</th>
@@ -498,6 +503,14 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                                         </td>
                                         <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
                                         <td>
+                                            <span class="badge" style="background: <?php echo ($row['shift'] ?? 'Day Shift') === 'Day Shift' ? '#fef9c3' : '#1e1b4b'; ?>; color: <?php echo ($row['shift'] ?? 'Day Shift') === 'Day Shift' ? '#854d0e' : '#e0e7ff'; ?>; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700;">
+                                                <?php echo htmlspecialchars($row['shift'] ?? 'Day Shift'); ?>
+                                            </span>
+                                            <div style="font-size: 0.65rem; color: #6b7280; margin-top: 2px;">
+                                                <?php echo ($row['shift'] ?? 'Day Shift') === 'Day Shift' ? '06:00 AM – 06:00 PM' : '06:00 PM – 06:00 AM'; ?>
+                                            </div>
+                                        </td>
+                                        <td>
                                             <?php if ($row['client_names']): ?>
                                                 <?php $names = explode(', ', $row['client_names']); ?>
                                                 <div style="display: flex; flex-wrap: wrap; gap: 4px;">
@@ -512,7 +525,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                                         <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
                                         <td>
                                             <div style="display: flex; gap: 6px;">
-                                                <button onclick="event.stopPropagation(); openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #3b82f6; width: auto;">Edit</button>
+                                                <button onclick="event.stopPropagation(); openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>', '<?php echo addslashes($row['shift'] ?? 'Day Shift'); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #3b82f6; width: auto;">Edit</button>
                                                 <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
                                             </div>
                                         </td>
@@ -580,6 +593,13 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                     <div class="form-group">
                         <label class="form-label">LESP Expiry Date</label>
                         <input type="date" name="lesp_expiry" class="form-control" required>
+                    </div>
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label class="form-label">Assigned Shift (Global 12-hour System)</label>
+                        <select name="shift" class="form-control" required>
+                            <option value="Day Shift">Day Shift (06:00 AM – 06:00 PM)</option>
+                            <option value="Night Shift">Night Shift (06:00 PM – 06:00 AM)</option>
+                        </select>
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
                         <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 0;">An access key will be automatically generated upon account creation.</p>
@@ -690,6 +710,13 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                         <input type="date" name="lesp_expiry" id="edit_lesp_expiry" class="form-control" required>
                     </div>
                 </div>
+                <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Assigned Shift</label>
+                    <select name="shift" id="edit_shift" class="form-control" required>
+                        <option value="Day Shift">Day Shift (06:00 AM – 06:00 PM)</option>
+                        <option value="Night Shift">Night Shift (06:00 PM – 06:00 AM)</option>
+                    </select>
+                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
                     <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('editGuardModal')">Cancel</button>
                     <button type="submit" name="update_guard" class="btn">Update Details</button>
@@ -773,16 +800,8 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             document.getElementById('viewClientModal').classList.add('show');
         }
 
-        function openEditModal(id, last, first, middle) {
-            document.getElementById('edit_guard_id').value = id;
-            document.getElementById('edit_last_name').value = last;
-            document.getElementById('edit_first_name').value = first;
-            document.getElementById('edit_middle_name').value = middle;
-            document.getElementById('edit_guardModal').classList.add('show');
-        }
-        
         // Correction: Fixed modal ID naming consistency
-        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id) {
+        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id, shift) {
             document.getElementById('edit_guard_id').value = id;
             document.getElementById('edit_last_name').value = last;
             document.getElementById('edit_first_name').value = first;
@@ -794,6 +813,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             document.getElementById('edit_nbi_no').value = nbi;
             document.getElementById('edit_lesp_no').value = lesp_no;
             document.getElementById('edit_lesp_expiry').value = lesp_expiry;
+            document.getElementById('edit_shift').value = shift;
             document.getElementById('editGuardModal').classList.add('show');
         }
 

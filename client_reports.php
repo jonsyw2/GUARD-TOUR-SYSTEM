@@ -335,9 +335,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
                         <span class="form-label">Shift Filter (Optional)</span>
                         <select name="shift" class="form-control" style="background: #f9fafb;">
                             <option value="">All Shifts</option>
-                            <option value="Morning">Morning</option>
-                            <option value="Afternoon">Afternoon</option>
-                            <option value="Night">Night</option>
+                            <option value="Day Shift">Day Shift</option>
+                            <option value="Night Shift">Night Shift</option>
                         </select>
                     </div>
 
