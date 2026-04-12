@@ -934,7 +934,17 @@ if ($mapping_id) {
                         </div>
                     </div>
 
-                    <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px;">
+                    <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved') && !$visual_saved): ?>
+                    <div style="background: #fef3c7; border: 1.5px solid #fcd34d; border-radius: 10px; padding: 14px 18px; margin: 16px 16px 16px 16px; display: flex; align-items: center; gap: 14px;">
+                        <span style="font-size: 1.4rem;">🗺️</span>
+                        <div>
+                            <div style="font-weight: 700; color: #92400e; font-size: 0.9rem;">Visual Layout Required</div>
+                            <div style="font-size: 0.8rem; color: #78350f; margin-top: 2px;">Please open the <strong>Visual Map Designer</strong>, position your checkpoints, and click <strong>Save &amp; Lock Layout</strong> before saving the patrol configuration.</div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <div style="display: flex; justify-content: flex-end; align-items: center; margin: 10px 16px 10px 16px;">
 
                         <button type="button" class="btn-visual" onclick="openVisualDesigner()">
                             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -1085,15 +1095,7 @@ endif; ?>
 
                         <?php if ( !$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved') ): ?>
 
-                            <?php if (!$visual_saved): ?>
-                            <div style="background: #fef3c7; border: 1.5px solid #fcd34d; border-radius: 10px; padding: 14px 18px; margin-top: 16px; display: flex; align-items: center; gap: 14px;">
-                                <span style="font-size: 1.4rem;">🗺️</span>
-                                <div>
-                                    <div style="font-weight: 700; color: #92400e; font-size: 0.9rem;">Visual Layout Required</div>
-                                    <div style="font-size: 0.8rem; color: #78350f; margin-top: 2px;">Please open the <strong>Visual Map Designer</strong>, position your checkpoints, and click <strong>Save &amp; Lock Layout</strong> before saving the patrol configuration.</div>
-                                </div>
-                            </div>
-                            <?php endif; ?>
+
 
                             <div class="add-area" <?php echo !$visual_saved ? 'style="opacity:0.4;pointer-events:none;"' : ''; ?>>
                                 <select id="checkpoint-select" class="form-control" style="flex: 1;" <?php echo !$visual_saved ? 'disabled' : ''; ?>>
