@@ -142,8 +142,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
     $nbi_no = $conn->real_escape_string($_POST['nbi_no']);
     $lesp_no = $conn->real_escape_string($_POST['lesp_no']);
     $lesp_expiry = $conn->real_escape_string($_POST['lesp_expiry']);
-    $client_mapping_id = isset($_POST['client_mapping_id']) ? (int)$_POST['client_mapping_id'] : null;
-    
     $fullname = trim($last_name . ", " . $first_name . " " . $middle_name);
     
     $conn->begin_transaction();
@@ -157,25 +155,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_guard'])) {
                         police_clearance_no = '$police_clearance_no',
                         nbi_no = '$nbi_no',
                         lesp_no = '$lesp_no', 
-                        lesp_expiry = '$lesp_expiry' 
+                        lesp_expiry = '$lesp_expiry'
                       WHERE id = $guard_id");
         
-        // Handle Assignment Update
-        if ($client_mapping_id) {
-            // Check if already assigned
-            $check = $conn->query("SELECT id FROM guard_assignments WHERE guard_id = $guard_id");
-            if ($check->num_rows > 0) {
-                $conn->query("UPDATE guard_assignments SET agency_client_id = $client_mapping_id WHERE guard_id = $guard_id");
-            } else {
-                $conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $client_mapping_id)");
-            }
-        } else {
-            // Remove assignment if "No Assignment" selected
-            $conn->query("DELETE FROM guard_assignments WHERE guard_id = $guard_id");
-        }
-        
         $conn->commit();
-        $message = "Guard details and assignment updated successfully!";
+        $message = "Guard details updated successfully!";
         $message_type = "success";
         $show_status_modal = true;
     } catch (Exception $e) {
@@ -302,9 +286,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
 }
 
 // Fetch Guards created by this agency with current assignment info
-$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo,
+$guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_no, g.nbi_no, u.username, g.created_at, g.address, g.lesp_no, g.lesp_expiry, g.profile_photo, g.shift,
                       GROUP_CONCAT(ac.id SEPARATOR ',') as mapping_ids,
-                      GROUP_CONCAT(cu.username SEPARATOR ', ') as client_names
+                      GROUP_CONCAT(COALESCE(NULLIF(ac.company_name, ''), cu.username) SEPARATOR ', ') as client_names,
+                      GROUP_CONCAT(COALESCE(NULLIF(ac.site_name, ''), 'No Site Name') SEPARATOR ', ') as site_names
                FROM guards g 
                JOIN users u ON g.user_id = u.id 
                LEFT JOIN guard_assignments ga ON g.id = ga.guard_id
@@ -316,7 +301,7 @@ $guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_n
 $guards_res = $conn->query($guards_sql);
 
 // Fetch assigned clients for the dropdown
-$clients_sql = "SELECT ac.id as mapping_id, u.username as client_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
+$clients_sql = "SELECT ac.id as mapping_id, COALESCE(NULLIF(ac.company_name, ''), u.username) as client_name, ac.site_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 if ($clients_res) {
@@ -773,16 +758,7 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
             document.getElementById('viewClientModal').classList.add('show');
         }
 
-        function openEditModal(id, last, first, middle) {
-            document.getElementById('edit_guard_id').value = id;
-            document.getElementById('edit_last_name').value = last;
-            document.getElementById('edit_first_name').value = first;
-            document.getElementById('edit_middle_name').value = middle;
-            document.getElementById('edit_guardModal').classList.add('show');
-        }
-        
-        // Correction: Fixed modal ID naming consistency
-        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id) {
+        function openEditModal(id, last, first, middle, gender, address, contact, p_clearance, nbi, lesp_no, lesp_expiry, client_id, shift) {
             document.getElementById('edit_guard_id').value = id;
             document.getElementById('edit_last_name').value = last;
             document.getElementById('edit_first_name').value = first;

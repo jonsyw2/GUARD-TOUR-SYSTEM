@@ -63,25 +63,15 @@ $clients_sql = "
 $clients_res = $conn->query($clients_sql);
 
 // Fetch history with filters
-<<<<<<< HEAD
-$filter_date = $_GET['filter_date'] ?? '';
-=======
 $filter_date = $_GET['date'] ?? date('Y-m-d');
->>>>>>> ebf9f8370c8ff83319b8d41fe172d700784cdbe9
 $filter_client = $_GET['mapping_id'] ?? '';
 $filter_shift = $_GET['shift'] ?? '';
 
 $where_clauses = [$sites_filter_sql];
-<<<<<<< HEAD
-
 if (!empty($filter_agency)) {
     $where_clauses[] = "ac.agency_id = " . (int)$filter_agency;
 }
 
-if (!empty($filter_date)) {
-    $where_clauses[] = "s.scan_time >= '" . $conn->real_escape_string($filter_date . " 00:00:00") . "'";
-    $where_clauses[] = "s.scan_time <= '" . $conn->real_escape_string($filter_date . " 23:59:59") . "'";
-=======
 if (!empty($filter_date)) {
     $target_date = $conn->real_escape_string($filter_date);
     $next_date = date('Y-m-d', strtotime($target_date . ' +1 day'));
@@ -91,7 +81,6 @@ if (!empty($filter_date)) {
 
 if (!empty($filter_shift)) {
     $where_clauses[] = "s.shift = '" . $conn->real_escape_string($filter_shift) . "'";
->>>>>>> ebf9f8370c8ff83319b8d41fe172d700784cdbe9
 }
 
 if (!empty($filter_client)) {
@@ -108,11 +97,8 @@ $history_sql = "
         c.name as checkpoint_name,
         g.name as guard_name,
         u.username as client_name,
-<<<<<<< HEAD
         ac.company_name,
-=======
         ac.id as mapping_id,
->>>>>>> ebf9f8370c8ff83319b8d41fe172d700784cdbe9
         s.status,
         s.justification
     FROM scans s
@@ -256,18 +242,12 @@ $history_res = $conn->query($history_sql);
             <h3 style="margin-bottom: 16px; color: #1e293b;">Patrol History Filters</h3>
             <form method="GET" class="filter-grid" id="filterForm">
                 <div class="form-group">
-<<<<<<< HEAD
-                    <label class="form-label">Filter By Date</label>
-                    <input type="date" name="filter_date" class="form-control" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
-=======
                     <label class="form-label">Select Date</label>
                     <input type="date" name="date" class="form-control" value="<?php echo $filter_date; ?>" onchange="this.form.submit()">
->>>>>>> ebf9f8370c8ff83319b8d41fe172d700784cdbe9
                 </div>
 
                 <?php if ($agency_id == 0): ?>
                 <div class="form-group">
-<<<<<<< HEAD
                     <label class="form-label">Select Agency</label>
                     <select name="agency_id" class="form-control" onchange="this.form.submit()">
                         <option value="">All Agencies</option>
@@ -281,64 +261,15 @@ $history_res = $conn->query($history_sql);
                 <?php endif; ?>
 
                 <div class="form-group">
-                <div class="form-group">
                     <label class="form-label">Select Site</label>
-                    <select name="mapping_id" class="form-control" onchange="this.form.submit()">
-                        <option value="">All Assigned Sites</option>
-                        <?php while($c = $clients_res->fetch_assoc()): ?>
-                            <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>>
-                                <?php echo htmlspecialchars($c['company_name'] ?: $c['client_name']); ?>
-                            </option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-            </form>
-        </div>
-
-        <div class="card" style="padding: 0; overflow: hidden;">
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Scan Time</th>
-                            <th>Client Site</th>
-                            <th>Checkpoint</th>
-                            <th>Guard</th>
-                            <th>Status</th>
-                            <th>Remarks</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if ($history_res && $history_res->num_rows > 0): ?>
-                            <?php while($row = $history_res->fetch_assoc()): ?>
-                                <tr>
-                                    <td style="font-weight: 600; font-size: 0.9rem;"><?php echo date('M d, h:i A', strtotime($row['scan_time'])); ?></td>
-                                    <td><?php echo htmlspecialchars($row['company_name'] ?: $row['client_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($row['guard_name']); ?></td>
-                                    <td>
-                                        <span class="status-badge status-<?php echo strtolower($row['status']); ?>">
-                                            <?php echo $row['status']; ?>
-                                        </span>
-                                    </td>
-                                    <td style="color: #64748b; font-size: 0.85rem;"><?php echo htmlspecialchars($row['justification'] ?? '---'); ?></td>
-                                </tr>
-                            <?php endwhile; ?>
-                        <?php else: ?>
-                            <tr>
-                                <td colspan="6" style="text-align: center; padding: 40px; color: #64748b; font-style: italic;">No patrol records found for the selected period.</td>
-                            </tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-=======
-                    <label class="form-label">Client Site</label>
                     <select name="mapping_id" class="form-control" onchange="this.form.submit()">
                         <option value="">-- All My Sites --</option>
                         <?php if ($clients_res): ?>
                             <?php mysqli_data_seek($clients_res, 0); ?>
                             <?php while($c = $clients_res->fetch_assoc()): ?>
-                                <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['client_name']); ?></option>
+                                <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>>
+                                    <?php echo htmlspecialchars($c['company_name'] ?: $c['client_name']); ?>
+                                </option>
                             <?php endwhile; ?>
                         <?php endif; ?>
                     </select>
@@ -352,7 +283,7 @@ $history_res = $conn->query($history_sql);
                     </select>
                 </div>
                 <div style="display: flex; align-items: flex-end;">
-                    <button type="submit" class="btn-primary">Apply Filters</button>
+                    <button type="submit" class="btn-primary" style="padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">Apply Filters</button>
                     <a href="supervisor_dashboard.php" style="font-size: 0.85rem; color: #64748b; margin-left: 10px; text-decoration: none;">Reset Filters</a>
                 </div>
             </form>
@@ -446,7 +377,7 @@ $history_res = $conn->query($history_sql);
                                                 <tr>
                                                     <td style="width: 120px;"><strong><?php echo date('h:i:s A', strtotime($row['scan_time'])); ?></strong></td>
                                                     <td style="font-weight: 500; font-size: 0.85rem; color: #64748b;"><?php echo htmlspecialchars($row['guard_name']); ?></td>
-                                                    <td><?php echo htmlspecialchars($row['client_name']); ?></td>
+                                                    <td><?php echo htmlspecialchars($row['company_name'] ?: $row['client_name']); ?></td>
                                                     <td style="font-weight: 500;"><?php echo htmlspecialchars($row['checkpoint_name']); ?></td>
                                                     <td>
                                                         <span class="status-badge status-<?php echo strtolower($row['status']); ?>">
@@ -492,7 +423,47 @@ $history_res = $conn->query($history_sql);
             </div>
             <div style="margin-top: 8px; display: flex; flex-direction: column; align-items: center;">
                 <button class="btn-primary" onclick="closeAllModals()" style="width: 100%; background: #64748b;">Close Viewer</button>
->>>>>>> ebf9f8370c8ff83319b8d41fe172d700784cdbe9
+            </div>
+        </div>
+    </div>
+</main>
+
+    <script>
+        function toggleShift(header) {
+            header.parentElement.classList.toggle('open');
+            const body = header.nextElementSibling;
+            body.style.display = body.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function toggleTour(header) {
+            header.parentElement.classList.toggle('open');
+            const content = header.nextElementSibling;
+            content.classList.toggle('active');
+        }
+        let visualizer = null;
+
+        function open3DVisual(tourId, mappingId, event) {
+            if (event) event.stopPropagation();
+            
+            document.getElementById('visual3DModal').classList.add('show');
+            document.body.style.overflow = 'hidden';
+            
+            if (!visualizer) {
+                visualizer = new PatrolMapViewer('visual3DContainer');
+            }
+            
+            visualizer.renderTour(tourId, mappingId);
+        }
+
+        function closeAllModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
+        }
+    </script>
+</body>
+</html>
             </div>
         </div>
     </div>
