@@ -22,6 +22,7 @@ if (!function_exists('addColumnSafely')) {
 addColumnSafely($conn, 'tour_assignments', 'duration_minutes', 'INT DEFAULT 0');
 // addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes'); // Deprecated
 addColumnSafely($conn, 'checkpoints', 'is_end_checkpoint', 'TINYINT(1) DEFAULT 0');
+addColumnSafely($conn, 'checkpoints', 'shift_name', 'VARCHAR(50)', 'scan_interval');
 addColumnSafely($conn, 'agency_clients', 'is_sequence_fixed', 'TINYINT(1) DEFAULT 0', 'is_visual_locked');
 addColumnSafely($conn, 'agency_clients', 'sequence_change_request', "ENUM('none', 'pending', 'approved') DEFAULT 'none'", 'is_sequence_fixed');
 
@@ -37,7 +38,7 @@ if ($client_id) {
     $client_id_int = (int)$client_id;
     $debug_info .= "User ID = $client_id_int. ";
     try {
-        $maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled, is_sequence_fixed, sequence_change_request FROM agency_clients WHERE client_id = $client_id_int";
+        $maps_sql = "SELECT id, qr_limit, qr_override, is_patrol_locked, site_name, is_disabled, is_sequence_fixed, sequence_change_request, visual_saved FROM agency_clients WHERE client_id = $client_id_int";
         $maps_res = $conn->query($maps_sql);
 
         if ($maps_res) {
@@ -96,6 +97,7 @@ if (!$no_mappings) {
     $is_sequence_fixed = (int)($current_mapping['is_sequence_fixed'] ?? 0);
     $sequence_change_request = $current_mapping['sequence_change_request'] ?? 'none';
     $selected_site_name = $current_mapping['site_name'] ?: "Site #" . $mapping_id;
+    $visual_saved = (int)($current_mapping['visual_saved'] ?? 0);
 }
 
 if (empty($mapping_ids)) {
@@ -125,61 +127,46 @@ $show_limit_modal = false;
 // AJAX Handler for fetching checkpoint sequence (Client version)
 if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     $m_id = (int)$_GET['mapping_id'];
+    $date_filter = "";
+    if (!empty($_GET['date'])) {
+        $filter_date = $conn->real_escape_string($_GET['date']);
+        $date_filter = " AND DATE(scan_time) = '$filter_date'";
+    }
 
     // Security: Check if mapping_id belongs to this client
     $verify_sql = "SELECT id FROM agency_clients WHERE id = $m_id AND client_id = $client_id";
     $verify_res = $conn->query($verify_sql);
 
     if ($verify_res && $verify_res->num_rows > 0) {
-        $checkpoints = [];
-
-        // 1. Fetch Starting Point with latest status
-        $start_res = $conn->query("
-            SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y,
-            (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
-            FROM checkpoints cp 
-            WHERE cp.agency_client_id = $m_id AND cp.is_zero_checkpoint = 1 
-            LIMIT 1
-        ");
-        $starting_point_visual = null;
-        if ($start_res && $start_res->num_rows > 0) {
-            $starting_point_visual = $start_res->fetch_assoc();
-            $starting_point_visual['isStart'] = true;
-        }
-
-        $assign_res = $conn->query("
+        // Fetch ALL checkpoints for the site (LEFT JOIN so unassigned ones appear too)
+        $cp_res = $conn->query("
             SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint, cp.is_end_checkpoint,
-            (SELECT status FROM scans WHERE checkpoint_id = cp.id ORDER BY scan_time DESC LIMIT 1) as latest_status
-            FROM tour_assignments ta 
-            JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
-            WHERE ta.agency_client_id = $m_id 
-            ORDER BY ta.sort_order ASC
+            (SELECT status FROM scans WHERE checkpoint_id = cp.id $date_filter ORDER BY scan_time DESC LIMIT 1) as latest_status
+            FROM checkpoints cp
+            LEFT JOIN tour_assignments ta ON cp.id = ta.checkpoint_id AND ta.agency_client_id = $m_id
+            WHERE cp.agency_client_id = $m_id
+            ORDER BY cp.is_zero_checkpoint DESC, ta.sort_order ASC, cp.id ASC
         ");
-        if ($starting_point_visual) {
-            $checkpoints[] = $starting_point_visual;
+
+        $checkpoints = [];
+        if ($cp_res) {
+            while ($row = $cp_res->fetch_assoc()) {
+                $row['isStart'] = (bool)$row['is_zero_checkpoint'];
+                $row['isEnd']   = (bool)$row['is_end_checkpoint'];
+                $checkpoints[] = $row;
+            }
         }
 
-        while ($row = $assign_res->fetch_assoc()) {
-            if ($starting_point_visual && $row['id'] == $starting_point_visual['id'])
-                continue;
-
-            $row['isStart'] = (bool)($row['is_zero_checkpoint'] ?? false);
-            $row['isEnd'] = (bool)($row['is_end_checkpoint'] ?? false);
-            $checkpoints[] = $row;
-        }
-
-        header('Content-Type: application/json');
-        
         // Check if visual is locked
         $lock_res = $conn->query("SELECT is_visual_locked FROM agency_clients WHERE id = $m_id LIMIT 1");
         $is_visual_locked = 0;
-        if ($lock_res && $row = $lock_res->fetch_assoc()) {
-            $is_visual_locked = (int)$row['is_visual_locked'];
+        if ($lock_res && $lrow = $lock_res->fetch_assoc()) {
+            $is_visual_locked = (int)$lrow['is_visual_locked'];
         }
 
+        header('Content-Type: application/json');
         echo json_encode(['checkpoints' => $checkpoints, 'is_visual_locked' => $is_visual_locked]);
-    }
-    else {
+    } else {
         header('HTTP/1.1 403 Forbidden');
         echo json_encode(['error' => 'Unauthorized']);
     }
@@ -195,7 +182,7 @@ if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
     $verify_res = $conn->query($verify_sql);
 
     if ($verify_res && $verify_res->num_rows > 0) {
-        $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1 WHERE id = ?");
+        $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1, visual_saved = 1 WHERE id = ?");
         $stmt->bind_param("i", $m_id);
         $stmt->execute();
         
@@ -259,6 +246,12 @@ if (isset($_POST['ajax_request_change']) && isset($_POST['mapping_id'])) {
 
 // Handle Save
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
+    // ── Gate: require visual layout to be saved first ────────────────────
+    if (!$visual_saved) {
+        $message = "Please open the Visual Map Designer and save the layout before configuring patrol patterns.";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else
     if ($is_patrol_locked) {
         $message = "Error: Patrol configuration is locked by your agency and cannot be modified.";
         $message_type = "error";
@@ -375,69 +368,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
     }
 }
 
-// Handle creating QR Checkpoint
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_qr'])) {
-    $mapping_id_qr = (int)$_POST['agency_client_id'];
-    $qr_name = $conn->real_escape_string($_POST['qr_name']);
-    // Auto-generate a unique checkpoint code
-    $code_unique = false;
-    $checkpoint_code = "";
-    while (!$code_unique) {
-        $checkpoint_code = "CP-" . strtoupper(bin2hex(random_bytes(4)));
-        $check = $conn->query("SELECT id FROM checkpoints WHERE checkpoint_code = '$checkpoint_code'");
-        if ($check && $check->num_rows == 0) {
-            $code_unique = true;
-        }
-    }
 
-    $is_zero_checkpoint = 0; // Manually created checkpoints are never zero
-    $scan_interval = (int)($_POST['scan_interval'] ?? 0);
-
-    // Verify this mapping belongs to the client and check limits
-    $verify_sql = "SELECT id, qr_limit, qr_override, is_disabled FROM agency_clients WHERE id = $mapping_id_qr AND client_id = $client_id";
-    $verify_res = $conn->query($verify_sql);
-
-    if ($verify_res && $verify_res->num_rows > 0) {
-        $mapping_qr = $verify_res->fetch_assoc();
-        if ($mapping_qr['is_disabled']) {
-            $message = "QR creation is currently disabled for this site.";
-            $message_type = "error";
-            $show_status_modal = true;
-        }
-        else {
-            // Check Per-Site QR Limit (excludes starting point)
-            $limit_check = $conn->query("
-                SELECT ac.qr_limit, 
-                (SELECT COUNT(*) FROM checkpoints cp 
-                 WHERE cp.agency_client_id = ac.id AND cp.is_zero_checkpoint = 0) as total_site_qrs
-                FROM agency_clients ac
-                WHERE ac.id = $mapping_id_qr
-            ");
-
-            if ($limit_check && $limit_check->num_rows > 0) {
-                $limit_data = $limit_check->fetch_assoc();
-                if ($limit_data['qr_limit'] > 0 && $limit_data['total_site_qrs'] >= $limit_data['qr_limit'] && !$mapping_qr['qr_override']) {
-                    $message = "QR limit reached for this site ($limit_data[qr_limit] QRs max). Please contact the agency administrator.";
-                    $message_type = "error";
-                    $show_limit_modal = true;
-                }
-                else {
-                    $insert_sql = "INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, qr_code_data, is_zero_checkpoint, scan_interval) VALUES ($mapping_id_qr, '$qr_name', '$checkpoint_code', '$checkpoint_code', $is_zero_checkpoint, $scan_interval)";
-                    if ($conn->query($insert_sql)) {
-                        $message = "Checkpoint '$qr_name' created successfully!";
-                        $message_type = "success";
-                        $show_status_modal = true;
-                    }
-                    else {
-                        $message = "Database error: " . $conn->error;
-                        $message_type = "error";
-                        $show_status_modal = true;
-                    }
-                }
-            }
-        }
-    }
-}
 
 // Handle Deleting QR Code
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_checkpoint'])) {
@@ -546,7 +477,7 @@ if ($mapping_id) {
 $current_assignments = [];
 if ($mapping_id) {
     $assignments_res = $conn->query("
-        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, cp.name, cp.is_zero_checkpoint, cp.is_end_checkpoint
+        SELECT ta.checkpoint_id, ta.interval_minutes, ta.duration_minutes, ta.shift_name, cp.name, cp.is_zero_checkpoint, cp.is_end_checkpoint, cp.shift_name as checkpoint_shift
         FROM tour_assignments ta 
         JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
         WHERE ta.agency_client_id = $mapping_id 
@@ -557,8 +488,7 @@ if ($mapping_id) {
     }
 }
 
-// Fetch site shifts (Deprecated)
-/*
+// Fetch site shifts
 $client_shifts = [];
 if ($mapping_id) {
     $shift_res = $conn->query("SELECT shift_name FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
@@ -568,7 +498,6 @@ if ($mapping_id) {
         }
     }
 }
-*/
 
 ?>
 <!DOCTYPE html>
@@ -643,15 +572,15 @@ if ($mapping_id) {
         .handle { cursor: grab; color: #94a3b8; font-size: 1.2rem; display: flex; align-items: center; }
         .checkpoint-name { flex: 1; font-weight: 600; color: #1e293b; }
         
-        .setting-inputs { display: flex; gap: 12px; align-items: center; }
-        .input-group { display: flex; align-items: center; gap: 6px; background: #fff; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; }
-        .input-group input { width: 55px; border: none; text-align: center; font-weight: 600; outline: none; }
+        .setting-inputs { display: flex; gap: 15px; align-items: center; }
+        .input-group { display: flex; align-items: center; gap: 8px; background: #fff; padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+        .input-group input { width: 50px; border: none; text-align: center; font-weight: 600; outline: none; }
         .input-group label { font-size: 0.75rem; color: #64748b; font-weight: 500; }
 
         .remove-btn { color: #ef4444; background: none; border: none; cursor: pointer; padding: 5px; border-radius: 5px; transition: background 0.2s; display: flex; align-items: center; justify-content: center;}
         .remove-btn:hover { background: #fee2e2; }
 
-        .add-area { margin-top: 20px; display: flex; gap: 12px; }
+        .add-area { margin-top: 20px; display: flex; gap: 10px; }
         
         .limit-info { font-size: 0.875rem; color: #6b7280; font-weight: 500; }
         .limit-count { font-weight: 700; color: #111827; }
@@ -798,8 +727,8 @@ if ($mapping_id) {
             z-index: 10;
         }
         .checkpoint-circle.regular {
-            background: linear-gradient(135deg, #ffffff, #94a3b8);
-            color: #111827;
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: #ffffff;
             border-color: #ffffff;
         }
 
@@ -1005,10 +934,18 @@ if ($mapping_id) {
                         </div>
                     </div>
 
+                    <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px;">
+
+                        <button type="button" class="btn-visual" onclick="openVisualDesigner()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            Visual
+                        </button>
+                    </div>
+
                     <form id="tour-form" method="POST" action="manage_tour.php">
                         <div class="tour-list-container">
                             <?php if ($starting_point):
-    $start_interval = 0;
+    $start_interval = 1; // Default to 1
     $start_duration = 1; // Default to 1
     foreach ($current_assignments as $as) {
         if ($as['checkpoint_id'] == $starting_point['id']) {
@@ -1026,15 +963,27 @@ if ($mapping_id) {
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo (int)($start_interval ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo (int)($start_duration ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
-                                            <!-- Shift Declare Removed (Moves to Guard Level) -->            </div>
+                                            <div class="input-group">
+                                                <label>Shift Declare</label>
+                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                    <?php if (empty($client_shifts)): ?>
+                                                        <option value="Day Shift" <?php echo ($as['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                        <option value="Night Shift" <?php echo ($as['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                    <?php else: ?>
+                                                        <?php foreach ($client_shifts as $s_name): ?>
+                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($as['shift_name'] ?? ($starting_point['shift_name'] ?? '')) === $s_name ? 'selected' : ''; ?>><?php echo htmlspecialchars($s_name); ?></option>
+                                                        <?php endforeach; ?>
+                                                    <?php endif; ?>
+                                                </select>
+                                            </div>
                                         </div>
                                         <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                     </div>
@@ -1053,16 +1002,26 @@ endif; ?>
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo (int)($item['interval_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 1; ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo (int)($item['duration_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
-                                            <div class="input-group" style="display: none;">
-                                                <!-- Shift Declare Removed -->     </select>
+                                            <div class="input-group">
+                                                <label>Shift Declare</label>
+                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                    <?php if (empty($client_shifts)): ?>
+                                                        <option value="Day Shift" <?php echo ($item['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                        <option value="Night Shift" <?php echo ($item['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                    <?php else: ?>
+                                                        <?php foreach ($client_shifts as $s_name): ?>
+                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($item['shift_name'] ?? ($item['checkpoint_shift'] ?? '')) === $s_name ? 'selected' : ''; ?>><?php echo htmlspecialchars($s_name); ?></option>
+                                                        <?php endforeach; ?>
+                                                    <?php endif; ?>
+                                                </select>
                                             </div>
                                         </div>
                                         <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved')): ?>
@@ -1077,7 +1036,7 @@ endforeach; ?>
                             </div>
 
                             <?php if ($ending_point):
-    $end_interval = 0;
+    $end_interval = 1; // Default to 1
     $end_duration = 1; // Default to 1
     foreach ($current_assignments as $as) {
         if ($as['checkpoint_id'] == $ending_point['id']) {
@@ -1095,16 +1054,27 @@ endforeach; ?>
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo $end_interval; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo (int)($end_interval ?: 1); ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo $end_duration; ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo (int)($end_duration ?: 1); ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
-                                            <div class="input-group" style="display: none;">
-                                                <!-- Shift Declare Removed -->                </div>
+                                            <div class="input-group">
+                                                <label>Shift Declare</label>
+                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                    <?php if (empty($client_shifts)): ?>
+                                                        <option value="Day Shift" <?php echo ($as['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
+                                                        <option value="Night Shift" <?php echo ($as['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
+                                                    <?php else: ?>
+                                                        <?php foreach ($client_shifts as $s_name): ?>
+                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($as['shift_name'] ?? ($ending_point['shift_name'] ?? '')) === $s_name ? 'selected' : ''; ?>><?php echo htmlspecialchars($s_name); ?></option>
+                                                        <?php endforeach; ?>
+                                                    <?php endif; ?>
+                                                </select>
+                                            </div>
                                         </div>
                                         <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                     </div>
@@ -1113,93 +1083,31 @@ endforeach; ?>
 endif; ?>
                         </div>
 
-                        <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved')): ?>
-                            <div class="add-area">
-                                <select id="checkpoint-select" class="form-control">
-                                    <option value="">-- Add Checkpoint to Sequence --</option>
+                        <?php if ( !$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved') ): ?>
+
+                            <?php if (!$visual_saved): ?>
+                            <div style="background: #fef3c7; border: 1.5px solid #fcd34d; border-radius: 10px; padding: 14px 18px; margin-top: 16px; display: flex; align-items: center; gap: 14px;">
+                                <span style="font-size: 1.4rem;">🗺️</span>
+                                <div>
+                                    <div style="font-weight: 700; color: #92400e; font-size: 0.9rem;">Visual Layout Required</div>
+                                    <div style="font-size: 0.8rem; color: #78350f; margin-top: 2px;">Please open the <strong>Visual Map Designer</strong>, position your checkpoints, and click <strong>Save &amp; Lock Layout</strong> before saving the patrol configuration.</div>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+
+                            <div class="add-area" <?php echo !$visual_saved ? 'style="opacity:0.4;pointer-events:none;"' : ''; ?>>
+                                <select id="checkpoint-select" class="form-control" style="flex: 1;" <?php echo !$visual_saved ? 'disabled' : ''; ?>>
+                                    <option value="">-- Add Checkpoint to Pattern --</option>
                                     <?php foreach ($available_checkpoints as $cp): ?>
                                         <option value="<?php echo $cp['id']; ?>"><?php echo htmlspecialchars($cp['name']); ?></option>
-                                    <?php
-    endforeach; ?>
+                                    <?php endforeach; ?>
                                 </select>
-                                <button type="button" class="btn" style="width: auto; padding: 12px 24px;" onclick="addItem()">Add to sequence</button>
+                                <button type="button" class="btn btn-primary" style="width: auto; white-space: nowrap; padding: 10px 20px;" onclick="addItem()" <?php echo !$visual_saved ? 'disabled' : ''; ?>>Add</button>
                             </div>
-                            <button type="submit" name="save_tour" class="btn btn-success" style="width: 100%; margin-top:24px;">Save Patrol Configuration</button>
+                            <button type="submit" name="save_tour" class="btn btn-success" style="width: 100%; margin-top:24px; <?php echo !$visual_saved ? 'opacity:0.4;cursor:not-allowed;' : ''; ?>" <?php echo !$visual_saved ? 'disabled' : ''; ?>>Save Patrol Configuration</button>
                         <?php
 endif; ?>
                     </form>
-                </div>
-                <div class="card">
-                    <div class="card-header">
-                        <span>Directory of Checkpoints</span>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <button type="button" class="btn-visual" style="padding: 8px 16px; font-size: 0.85rem;" onclick="openVisualDesigner()">Visual</button>
-                            <button type="button" class="btn" style="width: auto; padding: 8px 16px; font-size: 0.85rem;" onclick="document.getElementById('createQRModal').classList.add('show'); updateFormState();">Create New Checkpoint</button>
-                        </div>
-                    </div>
-                    <div class="table-container">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style="width: 50px;">No.</th>
-                                    <th>Checkpoint Name</th>
-                                    <th>Code</th>
-                                    <th>Status</th>
-                                    <th>Last Scanned</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if ($qrs_result && $qrs_result->num_rows > 0): ?>
-                                    <?php $counter = 1;
-    while ($row = $qrs_result->fetch_assoc()): ?>
-                                        <?php
-        $is_disabled = $mapping_status[$row['agency_client_id']] ?? 0;
-        $status_text = $is_disabled ? 'Inactive' : 'Active';
-        $status_class = $is_disabled ? 'status-inactive' : 'status-active';
-        $last_scan = $row['last_scanned'] ? date('M d, Y h:i:s A', strtotime($row['last_scanned'])) : '<span style="color:#9ca3af">Never Scanned</span>';
-?>
-                                        <tr>
-                                            <td><?php echo $row['is_zero_checkpoint'] ? '0' : $counter++; ?></td>
-                                            <?php $display_no = $row['is_zero_checkpoint'] ? '0' : ($counter - 1); ?>
-                                            <td>
-                                                <strong><?php echo htmlspecialchars($row['checkpoint_name']); ?></strong>
-                                                <?php if ($row['is_zero_checkpoint']): ?>
-                                                    <span class="badge" style="background: #ecfdf5; color: #065f46; font-size: 0.7rem; border: none; padding: 2px 8px; margin-left: 5px;">Site Starting Point</span>
-                                                <?php
-        endif; ?>
-                                            </td>
-                                            <td>
-                                                <div style="margin-bottom: 4px;"><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></div>
-                                            </td>
-                                            <td class="<?php echo $status_class; ?>">&#9679; <?php echo $status_text; ?></td>
-                                            <td><?php echo $last_scan; ?></td>
-                                            <td>
-                                                <div style="display: flex; gap: 8px;">
-                                                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #10b981;" onclick="showPrintModal('<?php echo htmlspecialchars(addslashes($row['checkpoint_code'])); ?>', '<?php echo htmlspecialchars(addslashes($row['company_name'] ?: $_SESSION['username'] ?: 'Client')); ?>', '<?php echo htmlspecialchars(addslashes($row['checkpoint_name'])); ?>', '<?php echo $display_no; ?>')">Show</button>
-                                                    <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #3b82f6;" onclick="downloadQR()">Download QR</button>
-                                                    <?php if (!$row['is_zero_checkpoint']): ?>
-                                                    <form action="manage_tour.php" method="POST" style="margin: 0;" onsubmit="CustomModal.confirmForm(event, 'Are you sure you want to delete this checkpoint? This will also remove it from any tour sequence.');">
-                                                        <input type="hidden" name="checkpoint_id" value="<?php echo $row['id']; ?>">
-                                                        <button type="submit" name="delete_checkpoint" class="btn" style="padding: 6px 12px; font-size: 0.8rem; width: auto; background: #ef4444;">Delete</button>
-                                                    </form>
-                                                    <?php
-        endif; ?>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php
-    endwhile; ?>
-                                <?php
-else: ?>
-                                    <tr>
-                                        <td colspan="6" class="empty-state">No checkpoints have been created for your locations yet.</td>
-                                    </tr>
-                                <?php
-endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
                 </div>
             <?php endif; ?>
         </div>
@@ -1244,67 +1152,11 @@ endif; ?>
 
 
 
-    <!-- Create Checkpoint Modal -->
-    <div class="modal-overlay" id="createQRModal">
-        <div class="modal-content" style="max-width: 600px; text-align: left;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">
-                <h3 style="margin: 0;">Create New Checkpoint</h3>
-                <button type="button" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280;" onclick="closeModal('createQRModal')">&times;</button>
-            </div>
-            
-            <div class="grid-container">
-                <!-- Create Form -->
-                <div class="form-card">
-                    <form action="manage_tour.php" method="POST">
-                        <div class="form-group">
-                            <label class="form-label">Select Site / Agency</label>
-                            <select name="agency_client_id" class="form-control" required id="siteSelect" onchange="updateFormState()">
-                                <option value="" disabled selected>-- Choose Site --</option>
-                                <?php foreach ($limits_data as $l): ?>
-                                    <option value="<?php echo $l['mapping_id']; ?>">
-                                        Site: <?php echo $l['site_name'] ?: '#' . $l['mapping_id']; ?>
-                                    </option>
-                                <?php
-endforeach; ?>
-                            </select>
-                        </div>
-                        <div id="limit-warning"></div>
-                        <div class="form-group">
-                            <label class="form-label">Checkpoint Name</label>
-                            <input type="text" name="qr_name" class="form-control" placeholder="e.g. Lobby Entrance" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Scan Interval (Minutes)</label>
-                            <input type="number" name="scan_interval" class="form-control" value="0" min="0" required>
-                        </div>
-                        <button type="submit" name="create_qr" class="btn" id="submitBtn">Create Checkpoint</button>
-                    </form>
-                </div>
 
-                <!-- Usage Stats -->
-                <div class="form-card">
-                    <h4 style="margin-bottom: 15px; color: #1e293b; font-size: 0.9rem;">QR Limits Summary</h4>
-                    <?php foreach ($limits_data as $l): ?>
-                        <div style="margin-bottom: 12px;">
-                            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; margin-bottom: 4px;">
-                                <strong style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px;"><?php echo htmlspecialchars($l['site_name'] ?: 'Site #' . $l['mapping_id']); ?></strong>
-                                <span><?php echo $l['current_site_qrs']; ?> / <?php echo $l['qr_limit']; ?></span>
-                            </div>
-                            <div style="width: 100%; height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden;">
-                                <div style="width: <?php echo min(100, ($l['qr_limit'] > 0 ? ($l['current_site_qrs'] / $l['qr_limit']) * 100 : 0)); ?>%; height: 100%; background: #3b82f6;"></div>
-                            </div>
-                        </div>
-                    <?php
-endforeach; ?>
-                    <div class="btn-visual-info">
-                    <strong>Visual Map:</strong> Drag checkpoints to position them. <strong>Blue (S)</strong> is Start point.
-                </div>
-                </div>
-            </div>
-        </div>
-    </div>
+
 
     <!-- Print QR Modal -->
+
     <div class="modal-overlay" id="printQRModal">
         <div class="modal-content print-card" style="max-width: 500px;">
             <h3 class="no-print" style="margin-bottom: 20px; font-weight: 700; color: #111827;">Checkpoint QR Code</h3>
@@ -1351,6 +1203,7 @@ endforeach; ?>
         // --- Sequence Setup Variables and Logic ---
         const qrLimit = <?php echo $qr_limit; ?>;
         const qrOverride = <?php echo $qr_override; ?>;
+        const clientShifts = <?php echo json_encode($client_shifts ?? []); ?>;
         const tourList = document.getElementById('tour-list');
 
         // Initialize Sortable
@@ -1388,19 +1241,44 @@ endforeach; ?>
             });
         }
 
-        function updateCount() {
-            if (!tourList) return;
-            const count = tourList.children.length;
-            const countDisplay = document.getElementById('current-count');
-            if (countDisplay) {
-                countDisplay.innerText = count;
-                if (count > qrLimit && !qrOverride) {
-                    countDisplay.classList.add('danger');
-                } else {
-                    countDisplay.classList.remove('danger');
-                }
+    function filterCheckpointSelect() {
+        const select = document.getElementById('checkpoint-select');
+        if (!select) return;
+
+        // Get all used checkpoint IDs (from Start, Middle, and End sections)
+        const usedIds = Array.from(document.querySelectorAll('input[name="checkpoint_ids[]"]')).map(input => input.value);
+        
+        // Loop through options and hide if already in the sequence
+        Array.from(select.options).forEach(option => {
+            if (option.value === "") return; // Don't hide the placeholder
+            
+            if (usedIds.includes(option.value)) {
+                option.style.display = 'none';
+            } else {
+                option.style.display = 'block';
+            }
+        });
+        
+        // If the currently selected option was just hidden, reset selection to placeholder
+        if (select.value !== "" && select.options[select.selectedIndex].style.display === 'none') {
+            select.value = "";
+        }
+    }
+
+    function updateCount() {
+        if (!tourList) return;
+        const count = tourList.children.length;
+        const countDisplay = document.getElementById('current-count');
+        if (countDisplay) {
+            countDisplay.innerText = count;
+            if (count > qrLimit && !qrOverride) {
+                countDisplay.classList.add('danger');
+            } else {
+                countDisplay.classList.remove('danger');
             }
         }
+        filterCheckpointSelect();
+    }
 
         function addItem() {
             const select = document.getElementById('checkpoint-select');
@@ -1418,13 +1296,22 @@ endforeach; ?>
                 <div class="setting-inputs">
                     <div class="input-group">
                         <label>Interval</label>
-                        <input type="number" name="intervals[]" value="0" min="0">
+                        <input type="number" name="intervals[]" value="1" min="0">
                         <label>min</label>
                     </div>
-                    <div class="input-group" style="display: none;">
+                    <div class="input-group">
                         <label>Duration</label>
                         <input type="number" name="durations[]" value="1" min="0">
                         <label>min</label>
+                    </div>
+                    <div class="input-group">
+                        <label>Shift Declare</label>
+                        <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;">
+                            ${clientShifts.length > 0 
+                                ? clientShifts.map(s => `<option value="${s}">${s}</option>`).join('')
+                                : `<option value="Day Shift">Day Shift</option><option value="Night Shift">Night Shift</option>`
+                            }
+                        </select>
                     </div>
                 </div>
                 <button type="button" class="remove-btn" onclick="removeItem(this)">
@@ -1632,7 +1519,10 @@ endforeach; ?>
                     isVisualLocked = true;
                     const saveBtn = document.getElementById('saveVisualBtn');
                     if (saveBtn) saveBtn.style.display = 'none';
-                    CustomModal.alert("Visual layout saved and locked successfully.", "Success", "success");
+                    await CustomModal.alert("Visual layout saved and locked successfully.", "Success", "success");
+                    // Close modal and reload so patrol controls become active
+                    document.getElementById('visualDesignerModal').classList.remove('show');
+                    window.location.reload();
                 }
             } catch (err) {
                 console.error(err);
@@ -1673,16 +1563,10 @@ endforeach; ?>
 
                 const d = `M ${edgeX1} ${edgeY1} L ${edgeX2} ${edgeY2}`;
 
-                // Check destination status for glowing line
-                const status = (endCp.latest_status || '').toLowerCase();
-                let pathStatusClass = '';
-                if (status === 'on-time' || status === 'on time') pathStatusClass = ' path-status-on-time';
-                else if (status === 'late') pathStatusClass = ' path-status-late';
-
                 // Create static path
                 const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
                 path.setAttribute("d", d);
-                path.setAttribute("class", "visual-path" + pathStatusClass);
+                path.setAttribute("class", "visual-path");
                 svg.appendChild(path);
 
                 // Create midpoint static arrow (for PNG download)
@@ -1739,11 +1623,7 @@ endforeach; ?>
                         const circle = document.createElement('div');
                         circle.id = `cp-circle-${cp.id}`;
                         
-                        let statusClass = 'cp-status-none';
-                        const status = (cp.latest_status || '').toLowerCase();
-                        if (status === 'on-time' || status === 'on time') statusClass = 'cp-status-on-time';
-                        else if (status === 'late') statusClass = 'cp-status-late';
-                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')} ${statusClass}`;
+                        circle.className = `checkpoint-circle ${cp.isStart ? 'start' : (cp.isEnd ? 'end' : 'regular')}`;
                         circle.style.zIndex = (cp.isStart || cp.isEnd) ? 10 : 5;
                         
                         const nameTrim = (cp.name || '').trim();

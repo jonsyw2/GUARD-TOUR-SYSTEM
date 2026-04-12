@@ -38,7 +38,8 @@ addColumnSafely($conn, 'agency_clients', 'site_name', 'VARCHAR(255)', 'client_id
 addColumnSafely($conn, 'agency_clients', 'is_patrol_locked', 'TINYINT(1) DEFAULT 0', 'site_name');
 addColumnSafely($conn, 'agency_clients', 'shift_type', "VARCHAR(50) DEFAULT 'Day Shift'", 'is_patrol_locked');
 addColumnSafely($conn, 'agency_clients', 'is_visual_locked', 'TINYINT(1) DEFAULT 0', 'shift_type');
-addColumnSafely($conn, 'agency_clients', 'is_sequence_fixed', 'TINYINT(1) DEFAULT 0', 'is_visual_locked');
+addColumnSafely($conn, 'agency_clients', 'visual_saved',   'TINYINT(1) DEFAULT 0', 'is_visual_locked');
+addColumnSafely($conn, 'agency_clients', 'is_sequence_fixed', 'TINYINT(1) DEFAULT 0', 'visual_saved');
 addColumnSafely($conn, 'agency_clients', 'sequence_change_request', "ENUM('none', 'pending', 'approved') DEFAULT 'none'", 'is_sequence_fixed');
 
 
@@ -141,7 +142,7 @@ if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
 if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
     $mapping_id = (int)$_POST['mapping_id'];
     
-    $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1 WHERE id = ? AND agency_id = ?");
+    $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1, visual_saved = 1 WHERE id = ? AND agency_id = ?");
     $stmt->bind_param("ii", $mapping_id, $agency_id);
     $stmt->execute();
     
@@ -178,6 +179,16 @@ $show_status_modal = false;
 // Handle Save Patrol
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $mapping_id = (int)$_POST['mapping_id'];
+
+    // ── Gate: require visual layout to be saved first ──────────────────────
+    $vs_check = $conn->query("SELECT visual_saved FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id LIMIT 1");
+    $vs_row   = $vs_check ? $vs_check->fetch_assoc() : null;
+    if (!$vs_row || !(int)$vs_row['visual_saved']) {
+        $message      = "Please open the Visual Map Designer and save the layout before configuring patrol patterns.";
+        $message_type = "error";
+        $show_status_modal = true;
+    } else {
+
     $checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
     $intervals = $_POST['intervals'] ?? [];
     $durations = $_POST['durations'] ?? [];
@@ -221,6 +232,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
         $message_type = "error";
         $show_status_modal = true;
     }
+    } // end visual_saved gate
 }
 
 // Handle Updating Client QR Limits (Site Name & Checkpoints)
@@ -330,6 +342,7 @@ $clients_sql = "
         ac.qr_limit, 
         ac.qr_override, 
         ac.is_disabled,
+        ac.visual_saved,
         (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_qrs
     FROM agency_clients ac 
     JOIN users u ON ac.client_id = u.id 
@@ -825,6 +838,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 <label for="lockPatrol" class="lock-label">Lock configuration for client (Agency Exclusive Mode)</label>
                             </div>
 
+                            <?php if (!($selected_client['visual_saved'] ?? 0)): ?>
+                            <div style="background: #fef3c7; border: 1.5px solid #fcd34d; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 14px;">
+                                <span style="font-size: 1.5rem;">🗺️</span>
+                                <div>
+                                    <div style="font-weight: 700; color: #92400e; font-size: 0.95rem;">Visual Layout Required</div>
+                                    <div style="font-size: 0.82rem; color: #78350f; margin-top: 2px;">Please open the <strong>Visual Map Designer</strong> above, position your checkpoints, and click <strong>Save &amp; Lock Layout</strong> before configuring patrol patterns.</div>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                             <div class="tour-list-container">
                                 <?php if ($starting_point): 
                                     $start_shift = $selected_client['shift_type'] ?? '';
@@ -839,6 +861,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         }
                                     }
                                 ?>
+                                    <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+                                        <button type="button" class="btn-visual" onclick="openVisualDesigner()" title="Open Visual Map Designer">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                            Visual
+                                        </button>
+                                    </div>
                                     <div class="tour-list" style="margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;">
                                         <div class="tour-item" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
                                             <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
@@ -875,6 +903,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         </div>
                                     </div>
                                 <?php endif; ?>
+
+
 
                                 <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?>">
                                     <?php foreach ($current_assignments as $item): ?>
@@ -919,6 +949,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                             </div>
 
+                            <?php if ($selected_client['visual_saved'] ?? 0): ?>
                             <div style="display: flex; gap: 10px; margin-top: 20px;">
                                 <select id="checkpoint-select" class="form-control" style="flex: 1;">
                                     <option value="">-- Add Checkpoint to Pattern --</option>
@@ -934,54 +965,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             </div>
 
                             <button type="submit" name="save_patrol" class="btn btn-success" style="width: 100%; margin-top:20px;">Save Patrol Configuration</button>
+                            <?php else: ?>
+                            <div style="display: flex; gap: 10px; margin-top: 20px; opacity: 0.45; pointer-events: none; cursor: not-allowed;">
+                                <select class="form-control" style="flex: 1;" disabled>
+                                    <option>-- Add Checkpoint to Pattern --</option>
+                                </select>
+                                <button type="button" class="btn btn-primary" disabled>Add</button>
+                            </div>
+                            <button type="button" class="btn btn-success" style="width: 100%; margin-top:20px; opacity: 0.45; cursor: not-allowed;" disabled>Save Patrol Configuration</button>
+                            <?php endif; ?>
                         </form>
 
-                        <div class="card" style="margin-top: 24px; margin-bottom: 0;">
-                            <div class="card-header" style="border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-                                <span>Active Checkpoints</span>
-                                <button type="button" class="btn-visual" onclick="openVisualDesigner()">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                                    Visual
-                                </button>
-                            </div>
-                            <div class="table-container">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th>Checkpoint Name</th>
-                                            <th>Code</th>
-                                            <th>Created</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php if ($checkpoints_result && $checkpoints_result->num_rows > 0): ?>
-                                            <?php $index = 0; while($row = $checkpoints_result->fetch_assoc()): ?>
-                                                <tr data-cp-id="<?php echo $row['id']; ?>">
-                                                    <td>
-                                                        <strong><?php echo htmlspecialchars($row['name']); ?></strong>
-                                                        <?php if ($row['is_zero_checkpoint']): ?>
-                                                            <span class="badge" style="background: #ecfdf5; color: #065f46; font-size: 0.7rem;">Site Starting Point</span>
-                                                        <?php elseif (strtolower($row['name']) === 'starting point'): ?>
-                                                            <div style="margin-top: 4px;"><span style="font-size: 0.75rem; background: #fee2e2; color: #dc2626; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Duplicate Name Issue</span></div>
-                                                        <?php endif; ?>
-                                                    </td>
-                                                    <td><code style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;"><?php echo htmlspecialchars($row['checkpoint_code']); ?></code></td>
-                                                    <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
-                                                    <td>
-                                                        <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;" onclick="showPrintModal('<?php echo $row['checkpoint_code']; ?>', '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['client_name']); ?>', '<?php echo addslashes($row['site_name']); ?>', '<?php echo addslashes($row['company_name'] ?? ''); ?>', '<?php echo $index; ?>')">Show</button>
-                                                    </td>
-                                                </tr>
-                                            <?php $index++; endwhile; ?>
-                                        <?php else: ?>
-                                            <tr>
-                                                <td colspan="4" class="empty-state">No checkpoints created yet.</td>
-                                            </tr>
-                                        <?php endif; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+
                     <?php else: ?>
                         <p style="text-align: center; color: #64748b; padding: 40px;">Select a client site above to manage its patrol pattern.</p>
                     <?php endif; ?>
@@ -1396,20 +1391,40 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             `;
             list.appendChild(item);
             
-            // Remove the selected option from the dropdown
-            select.remove(select.selectedIndex);
+            // Re-filter the dropdown (robust replacement for select.remove)
+            filterCheckpointSelect();
             select.value = '';
         }
 
+    function filterCheckpointSelect() {
+        const select = document.getElementById('checkpoint-select');
+        if (!select) return;
+
+        // Get all used checkpoint IDs (from Start, Middle, and End sections)
+        const usedIds = Array.from(document.querySelectorAll('input[name="checkpoint_ids[]"]')).map(input => input.value);
+        
+        // Loop through options and hide if already in the sequence
+        Array.from(select.options).forEach(option => {
+            if (option.value === "") return; // Don't hide the placeholder
+            
+            if (usedIds.includes(option.value)) {
+                option.style.display = 'none';
+            } else {
+                option.style.display = 'block';
+            }
+        });
+        
+        // If the currently selected option was just hidden, reset selection to placeholder
+        if (select.value !== "" && select.options[select.selectedIndex].style.display === 'none') {
+            select.value = "";
+        }
+    }
+
         function removeCheckpoint(btn, id, name) {
             btn.parentElement.remove();
-            
-            // Add back to the dropdown
+            // Re-filter the dropdown
+            filterCheckpointSelect();
             const select = document.getElementById('checkpoint-select');
-            const option = document.createElement('option');
-            option.value = id;
-            option.text = name;
-            select.appendChild(option);
             select.value = '';
         }
 
@@ -1515,6 +1530,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         }
 
+        window.addEventListener('DOMContentLoaded', () => {
+            if (typeof updatePlanLimitDisplay === 'function') {
+                updatePlanLimitDisplay();
+            }
+            if (typeof filterCheckpointSelect === 'function') {
+                filterCheckpointSelect();
+            }
+        });
+
         window.onclick = function(event) {
             const modals = ['logoutModal', 'printQRModal', 'statusModal', 'alertModal', 'visualDesignerModal'];
             modals.forEach(id => {
@@ -1560,6 +1584,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     const saveBtn = document.getElementById('saveVisualBtn');
                     if (saveBtn) saveBtn.style.display = 'none';
                     showAlert("Visual layout saved and locked successfully.");
+                    // Close modal and reload so patrol controls become active
+                    document.getElementById('visualDesignerModal').classList.remove('show');
+                    window.location.reload();
                 }
             } catch (err) {
                 console.error(err);

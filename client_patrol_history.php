@@ -417,18 +417,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                         <label class="form-label" for="date">Select Date</label>
                         <input type="date" id="date" name="date" class="form-control" value="<?php echo htmlspecialchars($filter_date); ?>" onchange="this.form.submit()">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="mapping_id">Site</label>
-                        <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
-                            <option value="">-- All Sites --</option>
-                            <?php if ($maps_res && $maps_res->num_rows > 0): ?>
-                                <?php mysqli_data_seek($maps_res, 0); ?>
-                                <?php while($m = $maps_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $m['id']; ?>" <?php if($filter_client == $m['id']) echo 'selected'; ?>><?php echo htmlspecialchars($m['site_name']); ?></option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
-                        </select>
-                    </div>
+
                     <div class="form-group">
                         <label class="form-label" for="guard_id">Guard</label>
                         <select id="guard_id" name="guard_id" class="form-control" onchange="this.form.submit()">
@@ -442,28 +431,12 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="checkpoint_id">Checkpoint</label>
-                        <select id="checkpoint_id" name="checkpoint_id" class="form-control" onchange="this.form.submit()">
-                            <option value="">-- All Checkpoints --</option>
-                            <?php if ($checkpoints_res && $checkpoints_res->num_rows > 0): ?>
-                                <?php mysqli_data_seek($checkpoints_res, 0); ?>
-                                <?php while($cp = $checkpoints_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $cp['id']; ?>" <?php if($filter_checkpoint == $cp['id']) echo 'selected'; ?>><?php echo htmlspecialchars($cp['name']); ?></option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label class="form-label" for="shift">Shift</label>
                         <select id="shift" name="shift" class="form-control" onchange="this.form.submit()">
                             <option value="">-- All Shifts --</option>
                             <option value="Day Shift" <?php if($filter_shift == 'Day Shift') echo 'selected'; ?>>Day Shift</option>
                             <option value="Night Shift" <?php if($filter_shift == 'Night Shift') echo 'selected'; ?>>Night Shift</option>
                         </select>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button type="submit" class="btn-primary">Apply Filters</button>
-                        <a href="client_patrol_history.php" class="btn-primary" style="background: #94a3b8; text-decoration: none;">Reset</a>
                     </div>
                 </form>
             </div>
