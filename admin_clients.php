@@ -50,10 +50,21 @@ if (isset($_GET['ajax_qrs']) && isset($_GET['mapping_id'])) {
         }
     }
 
+    // Pull the Starting Point (Zero Checkpoint)
+    $zero_res = $conn->query("
+        SELECT id, name, checkpoint_code
+        FROM checkpoints
+        WHERE agency_client_id = $mapping_id
+          AND is_zero_checkpoint = 1
+        LIMIT 1
+    ");
+    $zero_cp = ($zero_res && $zero_res->num_rows > 0) ? $zero_res->fetch_assoc() : null;
+
     echo json_encode([
         'qr_limit'    => $qr_limit,
         'client_name' => $info['company_name'] ?: $info['username'],
         'checkpoints' => $checkpoints,
+        'zero_checkpoint' => $zero_cp
     ]);
     exit;
 }
@@ -757,6 +768,45 @@ include 'admin_layout/sidebar.php';
                     '<th style="width:200px;">QR Code / Key</th>' +
                     '<th style="width:90px;text-align:center;">Status</th>' +
                     '</tr></thead><tbody>';
+
+            // Prepend Row 0 if it's the Starting Point
+            if (data.zero_checkpoint) {
+                const zcp = data.zero_checkpoint;
+                const escZName = escHtml(zcp.name);
+                const escZCode = escHtml(zcp.checkpoint_code);
+                
+                html += `<tr style="background: #fffbeb;">
+                    <td class="slot-num" style="background:#fef3c7; color:#92400e; font-weight:800;">0</td>
+                    <td>
+                        <input type="text" class="qr-slot-input"
+                            data-idx="zero"
+                            data-cpid="${zcp.id}"
+                            data-field="name"
+                            value="${escZName}"
+                            placeholder="Starting Point"
+                            oninput="syncRow('zero')"
+                        />
+                    </td>
+                    <td style="display: flex; align-items: center; gap: 8px;">
+                        <input type="text" class="qr-slot-input code-input"
+                            data-idx="zero"
+                            data-cpid="${zcp.id}"
+                            data-field="code"
+                            value="${escZCode}"
+                            oninput="syncRow('zero')"
+                        />
+                        <button type="button" 
+                            onclick="CustomModal.showQRCode('${escJs(zcp.checkpoint_code)}', '${escJs(zcp.name)}', '${escJs(data.client_name)}')"
+                            title="View QR Code"
+                            style="width: 32px; height: 32px; flex-shrink:0; background: #fff1f2; border: 1.5px solid #fecaca; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #dc2626; transition: all 0.2s;"
+                            onmouseover="this.style.background='#fecaca'; this.style.color='#991b1b'"
+                            onmouseout="this.style.background='#fff1f2'; this.style.color='#dc2626'">
+                            👁️
+                        </button>
+                    </td>
+                    <td style="text-align:center;"><span class="qr-slot-status" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">✓ Start</span></td>
+                </tr>`;
+            }
 
             for (let i = 0; i < limit; i++) {
                 const cp         = existing[i] ?? null;
