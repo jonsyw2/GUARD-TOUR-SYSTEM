@@ -85,6 +85,54 @@ window.CustomModal = {
             this._resolve = null; // Clear before resolving to prevent recursion if resolve calls another alert
             r();
         }
+    },
+
+    showQRCode: function(code, name, subtitle = '') {
+        console.log('CustomModal.showQRCode called with:', {code, name, subtitle});
+        const modal = document.getElementById('globalQRModal');
+        const container = document.getElementById('globalQRCodeContainer');
+        const titleEl = document.getElementById('qrModalTitle');
+        const subtitleEl = document.getElementById('qrModalSubtitle');
+        const valueEl = document.getElementById('qrCodeValue');
+
+        if (!modal || !container) {
+            console.error("Global QR modal or container not found.", {modal, container});
+            alert("Error: QR Modal elements not found. Please refresh.");
+            return;
+        }
+
+        // Update Text
+        if (titleEl) titleEl.innerText = name || 'QR Checkpoint';
+        if (subtitleEl) subtitleEl.innerText = subtitle || '';
+        if (valueEl) valueEl.innerText = code || '';
+
+        // Clear and Generate QR
+        container.innerHTML = '';
+        try {
+            if (typeof QRCode !== 'undefined') {
+                new QRCode(container, {
+                    text: code,
+                    width: 256,
+                    height: 256,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            } else {
+                container.innerHTML = '<div style="color:#ef4444; font-weight:600; padding: 20px; text-align:center; border:1px solid #fee2e2; border-radius:12px; background:#fff1f2;">QRCode Library Missing - Please Refresh</div>';
+                console.error("QRCode library (qrcode.js) is missing from the global scope.");
+            }
+        } catch (qrErr) {
+            console.error("Error generating QR code:", qrErr);
+            container.innerHTML = '<div style="color:#ef4444; padding:20px; text-align:center;">Failed to generate QR Code image.</div>';
+        }
+
+        modal.classList.add('show');
+    },
+
+    closeQR: function() {
+        const modal = document.getElementById('globalQRModal');
+        if (modal) modal.classList.remove('show');
     }
 };
 
@@ -93,11 +141,15 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         const alertModal = document.getElementById('globalAlertModal');
         const confirmModal = document.getElementById('globalConfirmModal');
+        const qrModal = document.getElementById('globalQRModal');
         if (alertModal && alertModal.classList.contains('show')) {
             CustomModal.closeAlert();
         }
         if (confirmModal && confirmModal.classList.contains('show')) {
             if (typeof window._modalCancelAction === 'function') window._modalCancelAction();
+        }
+        if (qrModal && qrModal.classList.contains('show')) {
+            CustomModal.closeQR();
         }
     }
 });

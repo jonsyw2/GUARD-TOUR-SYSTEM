@@ -221,6 +221,7 @@ include 'admin_layout/head.php';
 include 'admin_layout/sidebar.php';
 ?>
 
+
     <main class="main-content">
         <?php include 'admin_layout/topbar.php'; ?>
 
@@ -779,16 +780,29 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow(${i})"
                         />
                     </td>
-                    <td>
-                        <input type="text" class="qr-slot-input code-input"
-                            data-idx="${i}"
-                            data-cpid="${cpId}"
-                            data-field="code"
-                            value="${cpCode}"
-                            placeholder="${isExisting ? '' : '(auto-generate)'}"
-                            oninput="syncRow(${i})"
-                        />
-                        ${!isExisting ? '<span class="qr-auto-badge">auto</span>' : ''}
+                    <td style="display: flex; align-items: center; gap: 8px;">
+                        <div style="flex: 1; position: relative;">
+                            <input type="text" class="qr-slot-input code-input"
+                                data-idx="${i}"
+                                data-cpid="${cpId}"
+                                data-field="code"
+                                value="${cpCode}"
+                                placeholder="${isExisting ? '' : '(auto-generate)'}"
+                                oninput="syncRow(${i})"
+                                style="padding-right: 32px;"
+                            />
+                            ${!isExisting ? '<span class="qr-auto-badge">auto</span>' : ''}
+                        </div>
+                        ${isExisting ? `
+                            <button type="button" 
+                                onclick="console.log('Eye clicked', '${escJs(cp.checkpoint_code)}'); CustomModal.showQRCode('${escJs(cp.checkpoint_code)}', '${escJs(cp.name)}', '${escJs(data.client_name)}')"
+                                title="View QR Code"
+                                style="width: 32px; height: 32px; flex-shrink:0; background: #f1f5f9; border: 1.5px solid #e2e8f0; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #64748b; transition: all 0.2s;"
+                                onmouseover="this.style.background='#e2e8f0'; this.style.color='#1e293b'"
+                                onmouseout="this.style.background='#f1f5f9'; this.style.color='#64748b'">
+                                👁️
+                            </button>
+                        ` : ''}
                     </td>
                     <td style="text-align:center;" id="qr-status-${i}">${statusHtml}</td>
                 </tr>`;
@@ -849,6 +863,9 @@ include 'admin_layout/sidebar.php';
         function escHtml(str) {
             return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
+        function escJs(str) {
+            return (str ? String(str) : '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/`/g, '\\`');
+        }
     </script>
 
 
@@ -875,5 +892,6 @@ include 'admin_layout/sidebar.php';
         </div>
     </div>
 
-<?php include 'admin_layout/footer.php'; ?>
+    <?php include 'includes/common_modals.php'; ?>
+    <?php include 'admin_layout/footer.php'; ?>
 </html>

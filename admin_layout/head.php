@@ -106,6 +106,7 @@
         .text-muted { color: var(--text-muted); }
         .gap-2 { gap: 0.5rem; }
     </style>
-    <script src="js/modal_system.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="js/modal_system.js?v=<?php echo time(); ?>"></script>
 </head>
 <body>
