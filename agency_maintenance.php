@@ -118,22 +118,62 @@ if (isset($_GET['ajax_agency_data'])) {
         
         $sql = "UPDATE users SET client_limit = $limit WHERE id = $agency_id AND LOWER(user_level) = 'agency'";
         if ($conn->query($sql)) {
-            if ($conn->affected_rows > 0) {
-                $response = ['success' => true, 'message' => 'Agency client limit updated!'];
-            } else {
-                // Check if it already has that value
-                $check = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id");
-                $curr = $check->fetch_assoc();
-                if ($curr && (int)$curr['client_limit'] === $limit) {
-                    $response = ['success' => true, 'message' => 'No change needed, limit already set to ' . $limit];
-                } else {
-                    $response = ['success' => false, 'message' => "No rows updated. Query was: $sql"];
+            // Auto-create placeholder clients up to the new limit
+            if ($limit > 0) {
+                // Fetch agency username for prefix
+                $agRes = $conn->query("SELECT username FROM users WHERE id = $agency_id");
+                $agRow = $agRes ? $agRes->fetch_assoc() : null;
+                $agPrefix = $agRow ? preg_replace('/[^a-z0-9_]/i', '', strtolower($agRow['username'])) : 'agency' . $agency_id;
+
+                // Step 1: Re-number all auto-placeholder clients.
+                // A client is considered auto-named if its company_name is NULL, empty,
+                // or matches the pattern "Client N". Named clients (e.g. "Acme Corp") are skipped.
+                // The counter only increments for auto-named slots, so the first unnamed client
+                // is always "Client 1", second is "Client 2", etc., regardless of named clients.
+                $existingRes = $conn->query(
+                    "SELECT ac.id, ac.company_name FROM agency_clients ac WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC"
+                );
+                $clientNum = 1;
+                if ($existingRes) {
+                    while ($row = $existingRes->fetch_assoc()) {
+                        $name = $row['company_name'];
+                        $isAutoPlaceholder = is_null($name)
+                            || trim($name) === ''
+                            || preg_match('/^Client\s*\d+$/i', trim($name));
+                        if ($isAutoPlaceholder) {
+                            $autoName = $conn->real_escape_string('Client ' . $clientNum);
+                            $conn->query("UPDATE agency_clients SET company_name = '$autoName' WHERE id = {$row['id']}");
+                            $clientNum++;
+                        }
+                    }
+                }
+
+                // Step 2: Count existing clients and create new placeholder slots for any gap
+                $existRes = $conn->query("SELECT COUNT(DISTINCT client_id) as cnt FROM agency_clients WHERE agency_id = $agency_id");
+                $existCount = $existRes ? (int)$existRes->fetch_assoc()['cnt'] : 0;
+
+                // Create placeholders for any missing slots, continuing the clientNum counter
+                for ($slot = $existCount + 1; $slot <= $limit; $slot++) {
+                    $baseUsername = $agPrefix . '_client' . $slot;
+                    $tryUsername = $baseUsername;
+                    $suffix = 1;
+                    // Ensure username uniqueness
+                    while ($conn->query("SELECT id FROM users WHERE username = '" . $conn->real_escape_string($tryUsername) . "' LIMIT 1")->num_rows > 0) {
+                        $tryUsername = $baseUsername . '_' . $suffix++;
+                    }
+                    $placeholderPw = password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT);
+                    if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('" . $conn->real_escape_string($tryUsername) . "', '$placeholderPw', 'client')")) {
+                        $newClientId = $conn->insert_id;
+                        $placeholderName = 'Client ' . $clientNum;
+                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name) VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "')");
+                        $clientNum++;
+                    }
                 }
             }
+            $response = ['success' => true, 'message' => 'Agency client limit updated!'];
         } else {
             $response = ['success' => false, 'message' => "SQL Error: " . $conn->error];
         }
-        // $response['debug'] = ['got_agency_id' => $agency_id, 'got_limit' => $limit];
     }
 
     if (ob_get_length()) ob_clean();
@@ -659,7 +699,7 @@ include 'admin_layout/sidebar.php';
                                             <td>
                                                 <div style="font-weight: 600; font-size: 1rem; color: var(--primary);">
                                                     <span id="table_current_<?php echo $row['id']; ?>"><?php echo $row['current_clients']; ?></span> / 
-                                                    <span id="table_max_<?php echo $row['id']; ?>"><?php echo $row['client_limit'] > 0 ? $row['client_limit'] : 'Unlimited'; ?></span>
+                                                    <span id="table_max_<?php echo $row['id']; ?>"><?php echo $row['client_limit']; ?></span>
                                                 </div>
                                             </td>
                                             <td>
@@ -1219,7 +1259,7 @@ include 'admin_layout/sidebar.php';
                     </div>
                     <span style="font-size: 0.75rem; color: #64748b; font-weight: 500; margin-top: 6px; display: flex; align-items: center; gap: 4px;">
                         <span style="display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></span>
-                        Currently Assigned: <strong style="color: #1e293b; margin-left: 2px;">${currentClients} / <span id="ql_header_limit_display">${clientLimit == 0 ? '∞' : clientLimit}</span></strong>
+                        Currently Assigned: <strong style="color: #1e293b; margin-left: 2px;">${currentClients} / <span id="ql_header_limit_display">${clientLimit}</span></strong>
                     </span>
                 </div>
             `;
@@ -1462,8 +1502,8 @@ include 'admin_layout/sidebar.php';
                 
                 const data = await response.json();
                 if (data.success) {
-                    const displayLimit = newLimit == 0 ? '∞' : newLimit;
-                    const tableDisplayLimit = newLimit == 0 ? 'Unlimited' : newLimit;
+                    const displayLimit = newLimit;
+                    const tableDisplayLimit = newLimit;
 
                     document.getElementById('ql_header_limit_display').innerText = displayLimit;
                     
@@ -1481,7 +1521,11 @@ include 'admin_layout/sidebar.php';
                         setTimeout(() => {
                             btn.innerHTML = originalContent;
                             btn.style.background = 'var(--primary)';
-                        }, 1500);
+                            // Reload client list to show newly created placeholders
+                            loadQuickLinkTab('clients');
+                        }, 1000);
+                    } else {
+                        loadQuickLinkTab('clients');
                     }
 
                 } else {

@@ -176,6 +176,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
         $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
 
+        if ($client_limit === 0) {
+            throw new Exception("Adding clients is disabled. Contact the Admin to set a client limit first.");
+        }
         if ($client_limit > 0 && $current_clients >= $client_limit) {
             throw new Exception("You have reached your maximum client limit ($client_limit). Contact Admin to increase it.");
         }
@@ -501,7 +504,7 @@ if ($inspectors_res) {
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <?php
                             $limit_color = ($client_limit > 0 && $current_clients >= $client_limit) ? '#ef4444' : '#10b981';
-                            $limit_display = $client_limit > 0 ? $client_limit : '∞';
+                            $limit_display = $client_limit;
                         ?>
                         <div style="display: flex; align-items: center; gap: 8px; background: #f0fdf4; border: 1px solid #bbf7d0; padding: 6px 14px; border-radius: 99px;">
                             <span style="font-size: 0.75rem; color: #6b7280; font-weight: 500;">Client Slots:</span>
@@ -509,7 +512,11 @@ if ($inspectors_res) {
                                 <?php echo $current_clients; ?> / <?php echo $limit_display; ?>
                             </span>
                         </div>
+                        <?php if ($client_limit > 0): ?>
                         <button class="btn-sm btn-primary" onclick="openAddClientModal()" style="padding: 8px 16px;">+ Add Client</button>
+                        <?php else: ?>
+                        <button class="btn-sm" style="padding: 8px 16px; background:#e2e8f0; color:#94a3b8; cursor:not-allowed; border:none;" disabled title="Client limit is 0. Contact Admin to enable.">+ Add Client</button>
+                        <?php endif; ?>
                     </div>
                 </div>
                     <table>
@@ -540,7 +547,7 @@ if ($inspectors_res) {
                                             <?php endif; ?>
                                             <div>
                                                 <div style="font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                                                    <?php echo $row['company_name'] ?: '<span style="color:#9ca3af; font-weight:400; font-style:italic;">No company name set</span>'; ?>
+                                                    <?php echo $row['company_name'] ?: 'Client ' . $i; ?>
                                                     <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
                                                         <span style="font-size: 0.65rem; background: #fee2e2; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">Suspended</span>
                                                     <?php endif; ?>
