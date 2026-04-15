@@ -216,6 +216,26 @@ if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
     exit();
 }
 
+// AJAX Handler for updating checkpoint shift
+if (isset($_POST['ajax_update_shift']) && isset($_POST['cp_id'])) {
+    $cp_id = (int)$_POST['cp_id'];
+    $shift = $conn->real_escape_string($_POST['shift'] ?? 'Day Shift');
+
+    // Security: Verify checkpoint belongs to this client
+    $stmt = $conn->prepare("
+        UPDATE checkpoints cp
+        JOIN agency_clients ac ON cp.agency_client_id = ac.id
+        SET cp.shift_name = ?
+        WHERE cp.id = ? AND ac.client_id = ?
+    ");
+    $stmt->bind_param("sii", $shift, $cp_id, $client_id);
+    $stmt->execute();
+
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true]);
+    exit();
+}
+
 // AJAX Handler for requesting sequence change
 if (isset($_POST['ajax_request_change']) && isset($_POST['mapping_id'])) {
     $m_id = (int)$_POST['mapping_id'];
@@ -433,13 +453,14 @@ $qrs_sql = "
         c.agency_client_id,
         c.is_zero_checkpoint,
         c.scan_interval,
+        c.shift_name,
         ac.company_name,
         MAX(s.scan_time) as last_scanned
     FROM checkpoints c
     JOIN agency_clients ac ON c.agency_client_id = ac.id
     LEFT JOIN scans s ON c.id = s.checkpoint_id
     WHERE c.agency_client_id IN ($mapping_ids_str)
-    GROUP BY c.id
+    GROUP BY c.id, c.shift_name
     ORDER BY c.is_zero_checkpoint DESC, c.id ASC
 ";
 $qrs_result = $conn->query($qrs_sql);
