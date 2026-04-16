@@ -488,8 +488,14 @@ if ($mapping_id) {
 
 $ending_point = null;
 if ($mapping_id) {
-    $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
+    $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 2 LIMIT 1");
     if ($end_res && $end_res->num_rows > 0) {
+        $ending_point = $end_res->fetch_assoc();
+    } else {
+        // Auto-create End Point if missing (mirrors agency portal behaviour)
+        $end_code = "END-" . strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
+        $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, is_zero_checkpoint) VALUES ($mapping_id, 'End Point', '$end_code', 2)");
+        $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 2 LIMIT 1");
         $ending_point = $end_res->fetch_assoc();
     }
 }
@@ -590,6 +596,7 @@ if ($mapping_id) {
             margin-right: -5px;
         }
         .tour-item.sortable-ghost { opacity: 0.4; }
+        .tour-item-fixed::before { content: none !important; counter-increment: none !important; width: 0 !important; margin: 0 !important; }
         .handle { cursor: grab; color: #94a3b8; font-size: 1.2rem; display: flex; align-items: center; }
         .checkpoint-name { flex: 1; font-weight: 600; color: #1e293b; }
         
@@ -890,21 +897,6 @@ if ($mapping_id) {
         <header class="topbar">
             <div style="display: flex; align-items: center; gap: 20px;">
                 <h2>Tours & Checkpoints</h2>
-                
-                <?php if (count($all_mappings) > 1): ?>
-                    <div style="display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 4px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
-                        <span style="font-size: 0.8rem; font-weight: 600; color: #64748b;">Active Site:</span>
-                        <select onchange="location.href='manage_tour.php?mapping_id=' + this.value" style="border: none; background: transparent; font-weight: 700; color: #1e293b; cursor: pointer; outline: none; font-size: 0.9rem;">
-                            <?php foreach ($all_mappings as $m): ?>
-                                <option value="<?php echo $m['id']; ?>" <?php echo $mapping_id == $m['id'] ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($m['site_name'] ?: 'Site #' . $m['id']); ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                <?php elseif (!$no_mappings): ?>
-                    <span class="badge" style="background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;"><?php echo htmlspecialchars($selected_site_name); ?></span>
-                <?php endif; ?>
             </div>
 
             <div class="user-info">
@@ -955,6 +947,27 @@ if ($mapping_id) {
                         </div>
                     </div>
 
+                    <?php if (!$no_mappings): ?>
+                    <div style="padding: 0 0 12px 0; margin-bottom: 4px; border-bottom: 1px solid #f1f5f9;">
+                        <?php if (count($all_mappings) > 1): ?>
+                            <div style="display: flex; align-items: center; gap: 8px; background: #f8fafc; padding: 6px 14px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-flex;">
+                                <span style="font-size: 0.8rem; font-weight: 600; color: #64748b;">Active Site:</span>
+                                <select onchange="location.href='manage_tour.php?mapping_id=' + this.value" style="border: none; background: transparent; font-weight: 700; color: #1e293b; cursor: pointer; outline: none; font-size: 0.9rem;">
+                                    <?php foreach ($all_mappings as $m): ?>
+                                        <option value="<?php echo $m['id']; ?>" <?php echo $mapping_id == $m['id'] ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($m['site_name'] ?: 'Site #' . $m['id']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        <?php else: ?>
+                            <span style="font-size: 0.85rem; font-weight: 600; color: #475569; background: #f1f5f9; padding: 5px 12px; border-radius: 8px; border: 1px solid #e2e8f0; display: inline-block;">
+                                📍 <?php echo htmlspecialchars($selected_site_name); ?>
+                            </span>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+
                     <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved') && !$visual_saved): ?>
                     <div style="background: #fef3c7; border: 1.5px solid #fcd34d; border-radius: 10px; padding: 14px 18px; margin: 16px 16px 16px 16px; display: flex; align-items: center; gap: 14px;">
                         <span style="font-size: 1.4rem;">🗺️</span>
@@ -987,7 +1000,7 @@ if ($mapping_id) {
     }
 ?>
                                 <div class="tour-list" style="margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;">
-                                    <div class="tour-item" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
+                                    <div class="tour-item tour-item-fixed" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
                                         <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
                                         <span class="checkpoint-name"><?php echo htmlspecialchars($starting_point['name']); ?></span>
                                         <input type="hidden" name="checkpoint_ids[]" value="<?php echo $starting_point['id']; ?>">
@@ -1002,19 +1015,7 @@ if ($mapping_id) {
                                                 <input type="number" name="durations[]" value="<?php echo (int)($start_duration ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
-                                            <div class="input-group">
-                                                <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
-                                                    <?php if (empty($client_shifts)): ?>
-                                                        <option value="Day Shift" <?php echo ($as['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                        <option value="Night Shift" <?php echo ($as['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                    <?php else: ?>
-                                                        <?php foreach ($client_shifts as $s_name): ?>
-                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($as['shift_name'] ?? ($starting_point['shift_name'] ?? '')) === $s_name ? 'selected' : ''; ?>><?php echo htmlspecialchars($s_name); ?></option>
-                                                        <?php endforeach; ?>
-                                                    <?php endif; ?>
-                                                </select>
-                                            </div>
+                                                <input type="hidden" name="assignment_shifts[]" value="Day Shift">
                                         </div>
                                         <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                     </div>
@@ -1025,6 +1026,8 @@ endif; ?>
                             <div id="tour-list" class="tour-list" style="<?php echo $starting_point ? 'margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0;' : ''; ?>">
                                 <?php foreach ($current_assignments as $item): ?>
                                     <?php if ($starting_point && $item['checkpoint_id'] == $starting_point['id'])
+        continue; ?>
+                                    <?php if ($ending_point && $item['checkpoint_id'] == $ending_point['id'])
         continue; ?>
                                     <div class="tour-item">
                                         <span class="handle">☰</span>
@@ -1041,19 +1044,7 @@ endif; ?>
                                                 <input type="number" name="durations[]" value="<?php echo (int)($item['duration_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
-                                            <div class="input-group">
-                                                <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
-                                                    <?php if (empty($client_shifts)): ?>
-                                                        <option value="Day Shift" <?php echo ($item['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                        <option value="Night Shift" <?php echo ($item['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                    <?php else: ?>
-                                                        <?php foreach ($client_shifts as $s_name): ?>
-                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($item['shift_name'] ?? ($item['checkpoint_shift'] ?? '')) === $s_name ? 'selected' : ''; ?>><?php echo htmlspecialchars($s_name); ?></option>
-                                                        <?php endforeach; ?>
-                                                    <?php endif; ?>
-                                                </select>
-                                            </div>
+                                                <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($item['shift_name'] ?? 'Day Shift'); ?>">
                                         </div>
                                         <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved')): ?>
                                             <button type="button" class="remove-btn" onclick="removeItem(this)">
@@ -1078,9 +1069,9 @@ endforeach; ?>
     }
 ?>
                                 <div class="tour-list" style="margin-top: 0px; border-top: none; border-top-left-radius: 0; border-top-right-radius: 0; padding-top: 0;">
-                                    <div class="tour-item" style="cursor: default; background: #fff7ed; border-color: #ffedd5; margin-top: 0;">
+                                    <div class="tour-item tour-item-fixed" style="cursor: default; background: #fff1f2; border-color: #fecdd3; margin-top: 0; margin-bottom: 0;">
                                         <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
-                                        <span class="checkpoint-name"><?php echo htmlspecialchars($ending_point['name']); ?></span>
+                                        <span class="checkpoint-name" style="color: #be123c; font-weight: 700;"><?php echo htmlspecialchars($ending_point['name']); ?></span>
                                         <input type="hidden" name="checkpoint_ids[]" value="<?php echo $ending_point['id']; ?>">
                                         <div class="setting-inputs">
                                             <div class="input-group">
@@ -1093,19 +1084,7 @@ endforeach; ?>
                                                 <input type="number" name="durations[]" value="<?php echo (int)($end_duration ?: 1); ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
-                                            <div class="input-group">
-                                                <label>Shift Declare</label>
-                                                <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
-                                                    <?php if (empty($client_shifts)): ?>
-                                                        <option value="Day Shift" <?php echo ($as['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                        <option value="Night Shift" <?php echo ($as['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                    <?php else: ?>
-                                                        <?php foreach ($client_shifts as $s_name): ?>
-                                                            <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($as['shift_name'] ?? ($ending_point['shift_name'] ?? '')) === $s_name ? 'selected' : ''; ?>><?php echo htmlspecialchars($s_name); ?></option>
-                                                        <?php endforeach; ?>
-                                                    <?php endif; ?>
-                                                </select>
-                                            </div>
+                                                <input type="hidden" name="assignment_shifts[]" value="Day Shift">
                                         </div>
                                         <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                     </div>

@@ -153,7 +153,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_person_position = $conn->real_escape_string($_POST['contact_person_position']);
     $contact_person_no = $conn->real_escape_string($_POST['contact_person_no']);
-    $qr_limit = 0;
+    $qr_limit = 1;
+    $site_limit = 1;
     $guard_limit = 0;
     $inspector_limit = 0;
     $supervisor_limit = 0;
@@ -190,8 +191,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         $new_client_id = $conn->insert_id;
 
         // 4. Create Agency-Client Assignment and Profile
-        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no, qr_limit, guard_limit, inspector_limit, supervisor_limit) 
-                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no', $qr_limit, $guard_limit, $inspector_limit, $supervisor_limit)")) {
+        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, email_address, website_link, contact_person, contact_person_position, contact_person_no, qr_limit, client_limit, guard_limit, inspector_limit, supervisor_limit) 
+                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', '$email_address', '$website_link', '$contact_person', '$contact_person_position', '$contact_person_no', $qr_limit, $site_limit, $guard_limit, $inspector_limit, $supervisor_limit)")) {
             throw new Exception("Error creating client profile: " . $conn->error);
         }
         $mapping_id = $conn->insert_id;

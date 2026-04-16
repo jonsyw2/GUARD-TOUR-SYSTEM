@@ -78,26 +78,31 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     }
     
     // Checkpoints (Including visual position and filtered status)
+    // ORDER: Starting Point first, then regular by sort_order, then End Point last
     $cp_res = $conn->query("
-        SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint, cp.is_end_checkpoint,
-        (SELECT status FROM scans WHERE checkpoint_id = cp.id $date_filter ORDER BY scan_time DESC LIMIT 1) as latest_status
-        FROM checkpoints cp 
+        SELECT cp.id, cp.name, cp.visual_pos_x, cp.visual_pos_y, cp.is_zero_checkpoint,
+        (SELECT status FROM scans WHERE checkpoint_id = cp.id $date_filter ORDER BY scan_time DESC LIMIT 1) as latest_status,
+        IFNULL(ta.sort_order, 9999) as sort_order_val
+        FROM checkpoints cp
         LEFT JOIN tour_assignments ta ON cp.id = ta.checkpoint_id AND ta.agency_client_id = $mapping_id
-        WHERE cp.agency_client_id = $mapping_id 
-        ORDER BY cp.is_zero_checkpoint DESC, ta.sort_order ASC, cp.id ASC
+        WHERE cp.agency_client_id = $mapping_id
+        ORDER BY 
+            CASE cp.is_zero_checkpoint WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 2 THEN 2 ELSE 3 END ASC,
+            sort_order_val ASC,
+            cp.id ASC
     ");
     
     $checkpoints = [];
     if ($cp_res) {
         while ($row = $cp_res->fetch_assoc()) {
-            $row['isStart'] = (bool)$row['is_zero_checkpoint'];
-            $row['isEnd'] = (bool)$row['is_end_checkpoint'];
+            $row['isStart'] = ((int)$row['is_zero_checkpoint'] === 1);
+            $row['isEnd']   = ((int)$row['is_zero_checkpoint'] === 2);
             $checkpoints[] = $row;
         }
     }
     
     // Shifts
-    $shift_res = $conn->query("SELECT id, shift_name FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
+    $shift_res = $conn->query("SELECT id, shift_name, start_time, end_time FROM shifts WHERE agency_client_id = $mapping_id ORDER BY id ASC");
     $shifts = [];
     if ($shift_res) {
         while ($row = $shift_res->fetch_assoc()) {
@@ -151,6 +156,61 @@ if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
     exit();
 }
 
+// Handle Delete Site (with full history wipe and 1-site minimum)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_site'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+
+    // Security: Verify site belongs to this agency
+    $verify_sql = "SELECT client_id, site_name FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id";
+    $verify_res = $conn->query($verify_sql);
+
+    if ($verify_res && $row = $verify_res->fetch_assoc()) {
+        $client_id = $row['client_id'];
+        $site_name = $row['site_name'];
+
+        // Rule: Client must have at least one location
+        $count_res = $conn->query("SELECT COUNT(*) as site_count FROM agency_clients WHERE client_id = $client_id");
+        $site_count = $count_res->fetch_assoc()['site_count'];
+
+        if ($site_count <= 1) {
+            $message = "Deletion blocked: Every client must have at least one site location.";
+            $message_type = "error";
+            $show_status_modal = true;
+        } else {
+            $conn->begin_transaction();
+            try {
+                // Wipe historical data and configuration
+                $conn->query("DELETE FROM scans WHERE checkpoint_id IN (SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id)");
+                $conn->query("DELETE FROM incidents WHERE agency_client_id = $mapping_id");
+                $conn->query("DELETE FROM inspector_scans WHERE agency_client_id = $mapping_id");
+                $conn->query("DELETE FROM guard_assignments WHERE agency_client_id = $mapping_id");
+                $conn->query("DELETE FROM inspector_assignments WHERE agency_client_id = $mapping_id");
+                $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id");
+                $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
+                $conn->query("DELETE FROM checkpoints WHERE agency_client_id = $mapping_id");
+                
+                // Finally delete the site mapping
+                $conn->query("DELETE FROM agency_clients WHERE id = $mapping_id");
+
+                $conn->commit();
+                $message = "Site '$site_name' and all its historical records have been permanently removed.";
+                $message_type = "success";
+                $show_status_modal = true;
+                $preselect_org_id = $client_id; // Added to persist selection
+            } catch (Exception $e) {
+                $conn->rollback();
+                $message = "Deletion failed: " . $e->getMessage();
+                $message_type = "error";
+                $show_status_modal = true;
+            }
+        }
+    } else {
+        $message = "Unauthorized deletion attempt.";
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 // AJAX Handler for deleting a checkpoint
 if (isset($_POST['ajax_delete_checkpoint']) && isset($_POST['cp_id'])) {
     $cp_id = (int)$_POST['cp_id'];
@@ -194,6 +254,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $durations = $_POST['durations'] ?? [];
     $assignment_shifts = $_POST['assignment_shifts'] ?? [];
     $is_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
+
+    // Resolve system checkpoint IDs (Start=1, End=2) to exclude them from the sortable middle
+    $system_cp_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint != 0");
+    $system_cp_ids = [];
+    while ($r = $system_cp_res->fetch_assoc()) {
+        $system_cp_ids[] = (int)$r['id'];
+    }
     
     $conn->begin_transaction();
     try {
@@ -244,17 +311,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     $verify_sql = "SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id";
     $verify_res = $conn->query($verify_sql);
     
-    // Get client-specific QR limit
-    $client_limit_sql = "SELECT qr_limit FROM agency_clients WHERE id = $mapping_id";
-    $limit_res = $conn->query($client_limit_sql);
+    // Get shared (pooled) QR limit and current total usage
+    $pool_info_sql = "
+        SELECT ac.qr_limit, 
+               (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_usage,
+               (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id = $mapping_id) as current_site_usage
+        FROM agency_clients ac 
+        WHERE ac.id = $mapping_id";
+    $pool_res = $conn->query($pool_info_sql);
     $qr_limit = 0;
-    if ($limit_res && $row = $limit_res->fetch_assoc()) {
+    $total_usage_excluding_this_site = 0;
+    if ($pool_res && $row = $pool_res->fetch_assoc()) {
         $qr_limit = (int)$row['qr_limit'];
+        $total_usage_excluding_this_site = (int)$row['total_usage'] - (int)$row['current_site_usage'];
     }
     
     if ($verify_res && $verify_res->num_rows > 0) {
-        if ($qr_limit > 0 && count($checkpoints) > $qr_limit) {
-            $message = "Error: Checkpoint count exceeds the assigned limit of {$qr_limit}.";
+        $new_total_usage = $total_usage_excluding_this_site + count($checkpoints);
+        if ($qr_limit > 0 && $new_total_usage > $qr_limit) {
+            $message = "Error: Total checkpoints across ALL sites ({$new_total_usage}) would exceed the organizational limit of {$qr_limit}.";
             $message_type = "error";
             $show_status_modal = true;
         } else {
@@ -303,12 +378,47 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                 }
 
                 // Handle shifts update
-                $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
                 $site_shifts = $_POST['shifts'] ?? [];
-                foreach ($site_shifts as $s_name) {
+                $shift_starts = $_POST['shift_starts'] ?? [];
+                $shift_ends = $_POST['shift_ends'] ?? [];
+                
+                // Validate 24-hour Limit
+                $total_minutes = 0;
+                foreach ($site_shifts as $i => $s_name) {
+                    $start = $shift_starts[$i] ?? '';
+                    $end = $shift_ends[$i] ?? '';
+                    if (empty($start) || empty($end)) continue;
+
+                    $s_time = strtotime($start);
+                    $e_time = strtotime($end);
+                    if ($s_time === false || $e_time === false) continue;
+
+                    if ($e_time > $s_time) {
+                        $diff = ($e_time - $s_time) / 60;
+                    } else if ($e_time < $s_time) {
+                        $diff = ((strtotime("23:59:59") - $s_time) + ($e_time - strtotime("00:00:00")) + 1) / 60;
+                    } else {
+                        $diff = 1440; // Exactly 24 hours if start == end
+                    }
+                    $total_minutes += $diff;
+                }
+
+                if ($total_minutes > 1440) {
+                    $hours = round($total_minutes / 60, 1);
+                    throw new Exception("Total shift duration cannot exceed 24 hours (Currently: {$hours} hours).");
+                }
+
+                $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
+                
+                foreach ($site_shifts as $i => $s_name) {
                     $s_name = trim($conn->real_escape_string($s_name));
+                    $s_start = $conn->real_escape_string($shift_starts[$i] ?? '');
+                    $s_end = $conn->real_escape_string($shift_ends[$i] ?? '');
+                    
                     if (!empty($s_name)) {
-                        $conn->query("INSERT INTO shifts (agency_client_id, shift_name) VALUES ($mapping_id, '$s_name')");
+                        $stmt = $conn->prepare("INSERT INTO shifts (agency_client_id, shift_name, start_time, end_time) VALUES (?, ?, ?, ?)");
+                        $stmt->bind_param("isss", $mapping_id, $s_name, $s_start, $s_end);
+                        $stmt->execute();
                     }
                 }
 
@@ -330,32 +440,92 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     }
 }
 
+// Handle Add New Site (On-the-fly)
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_new_site'])) {
+    $parent_mapping_id = (int)$_POST['parent_mapping_id'];
+    $new_site_name = $conn->real_escape_string($_POST['new_site_name']);
+
+    try {
+        // Fetch parent info
+        $parent_res = $conn->query("SELECT client_id, company_name, client_limit, qr_limit FROM agency_clients WHERE id = $parent_mapping_id AND agency_id = $agency_id");
+        if (!$parent_res || $parent_res->num_rows == 0) throw new Exception("Parent client not found.");
+        
+        $p = $parent_res->fetch_assoc();
+        $target_client_id = $p['client_id'];
+        $comp_name = $p['company_name'];
+        $s_limit = (int)$p['client_limit'];
+        $qr_limit = (int)$p['qr_limit'];
+
+        // Check current count
+        $count_res = $conn->query("SELECT COUNT(*) as current_sites FROM agency_clients WHERE client_id = $target_client_id AND agency_id = $agency_id");
+        $current_sites = (int)$count_res->fetch_assoc()['current_sites'];
+
+        if ($s_limit > 0 && $current_sites >= $s_limit) {
+            throw new Exception("Cannot add more sites. This client has reached its limit of $s_limit site(s).");
+        }
+
+        // Insert new site mapping
+        // We COPY the organizational settings, including the pooled QR limit
+        $ins_sql = "INSERT INTO agency_clients (agency_id, client_id, company_name, site_name, qr_limit, client_limit) 
+                    VALUES ($agency_id, $target_client_id, '$comp_name', '$new_site_name', $qr_limit, $s_limit)";
+        
+        if ($conn->query($ins_sql)) {
+            $last_id = $conn->insert_id;
+            header("Location: agency_patrol_management.php?tab=qr&mapping_id=$last_id");
+            exit();
+        } else {
+            throw new Exception("Database error: " . $conn->error);
+        }
+
+    } catch (Exception $e) {
+        $message = $e->getMessage();
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 // Fetch assigned clients for the dropdown (Patrol Tab) and QR Management Tab
 $clients_sql = "
     SELECT 
         ac.id as mapping_id, 
+        ac.client_id,
         u.username AS client_name, 
         ac.site_name, 
         ac.is_patrol_locked,
         ac.shift_type,
         ac.company_name,
         ac.qr_limit, 
+        ac.client_limit,
         ac.qr_override, 
         ac.is_disabled,
         ac.visual_saved,
-        (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_qrs
+        (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_used_qrs,
+        (SELECT COUNT(*) FROM agency_clients WHERE client_id = ac.client_id) as site_count
     FROM agency_clients ac 
     JOIN users u ON ac.client_id = u.id 
     JOIN users ag_u ON ac.agency_id = ag_u.id
     WHERE ac.agency_id = $agency_id 
-    ORDER BY COALESCE(ac.company_name, u.username) ASC";
+    ORDER BY COALESCE(ac.company_name, u.username) ASC, ac.site_name ASC";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 while ($row = $clients_res->fetch_assoc()) {
     $clients_data[] = $row;
 }
 
-$selected_mapping_id = isset($_GET['mapping_id']) ? (int)$_GET['mapping_id'] : (isset($_POST['mapping_id']) ? (int)$_POST['mapping_id'] : null);
+// Group by organization for the two-step selector
+$orgs_data = [];
+foreach ($clients_data as $c) {
+    if (!isset($orgs_data[$c['client_id']])) {
+        $orgs_data[$c['client_id']] = [
+            'id' => $c['client_id'],
+            'name' => $c['company_name'] ?: $c['client_name'],
+            'client_limit' => (int)$c['client_limit'],
+            'first_mapping_id' => $c['mapping_id']
+        ];
+    }
+}
+
+$selected_mapping_id = isset($_GET['mapping_id']) ? (int)$_GET['mapping_id'] : (isset($_POST['mapping_id']) ? (int)$_POST['mapping_id'] : (isset($_POST['agency_client_id']) ? (int)$_POST['agency_client_id'] : null));
 
 $selected_client = null;
 if ($selected_mapping_id) {
@@ -384,6 +554,17 @@ if ($selected_mapping_id) {
         $starting_point = $start_res->fetch_assoc();
     }
 
+    // Auto-create End Point if missing
+    $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 2 LIMIT 1");
+    if ($end_res && $end_res->num_rows > 0) {
+        $ending_point = $end_res->fetch_assoc();
+    } else {
+        $code = "END-" . strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
+        $conn->query("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code, is_zero_checkpoint) VALUES ($selected_mapping_id, 'End Point', '$code', 2)");
+        $end_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 2 LIMIT 1");
+        $ending_point = $end_res->fetch_assoc();
+    }
+
     $cp_res = $conn->query("SELECT id, name FROM checkpoints WHERE agency_client_id = $selected_mapping_id AND is_zero_checkpoint = 0 ORDER BY name ASC");
     while ($row = $cp_res->fetch_assoc()) {
         $available_checkpoints[] = $row;
@@ -394,6 +575,7 @@ if ($selected_mapping_id) {
         FROM tour_assignments ta 
         JOIN checkpoints cp ON ta.checkpoint_id = cp.id 
         WHERE ta.agency_client_id = $selected_mapping_id 
+          AND cp.is_zero_checkpoint = 0
         ORDER BY ta.sort_order ASC
     ");
     while ($row = $assign_res->fetch_assoc()) {
@@ -402,10 +584,16 @@ if ($selected_mapping_id) {
 
     // Fetch shifts for selected client (Patrol Tab)
     $client_shifts = [];
-    $shift_query = $conn->query("SELECT shift_name FROM shifts WHERE agency_client_id = $selected_mapping_id ORDER BY id ASC");
+    $shift_query = $conn->query("SELECT shift_name, start_time, end_time FROM shifts WHERE agency_client_id = $selected_mapping_id ORDER BY id ASC");
     if ($shift_query) {
         while ($s_row = $shift_query->fetch_assoc()) {
-            $client_shifts[] = $s_row['shift_name'];
+            $s_display = $s_row['shift_name'];
+            if ($s_row['start_time'] && $s_row['end_time']) {
+                $s_start = date("H:i", strtotime($s_row['start_time']));
+                $s_end = date("H:i", strtotime($s_row['end_time']));
+                $s_display .= " ($s_start - $s_end)";
+            }
+            $client_shifts[] = $s_display;
         }
     }
 }
@@ -503,6 +691,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             text-align: right;
             margin-right: -5px;
         }
+        .tour-item-fixed::before { content: none !important; counter-increment: none !important; width: 0 !important; margin: 0 !important; }
         .tour-item.sortable-ghost { opacity: 0.4; }
         .handle { cursor: grab; color: #94a3b8; font-size: 1.2rem; display: flex; align-items: center; }
         .checkpoint-name { flex: 1; font-weight: 600; color: #1e293b; }
@@ -814,20 +1003,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <div class="card">
                     <div class="card-header">Configure Site Patrol Pattern</div>
                     
-                    <form action="agency_patrol_management.php" method="GET" class="form-group">
-                        <input type="hidden" name="tab" value="patrol">
-                        <label class="form-label">Select Client Site</label>
-                        <div style="display: flex; gap: 10px;">
-                            <select id="agency_client_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
-                                <option value="">-- Choose a Client Site --</option>
-                                <?php foreach ($clients_data as $client): ?>
-                                    <option value="<?php echo $client['mapping_id']; ?>" <?php echo $selected_mapping_id == $client['mapping_id'] ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?> <?php echo $client['site_name'] ? "(".htmlspecialchars($client['site_name']).")" : ""; ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
+                    <?php if ($selected_mapping_id && $selected_client): ?>
+                        <div style="display: flex; align-items: center; gap: 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 12px 18px; margin-bottom: 4px;">
+                            <span style="font-size: 1.2rem;">📍</span>
+                            <div>
+                                <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; font-weight: 600;">Viewing Patrol Pattern For</div>
+                                <div style="font-weight: 700; color: #111827; font-size: 0.95rem;">
+                                    <?php echo htmlspecialchars($selected_client['company_name'] ?: $selected_client['client_name']); ?>
+                                    <?php if ($selected_client['site_name']): ?>
+                                        <span style="font-weight: 400; color: #6b7280;"> — <?php echo htmlspecialchars($selected_client['site_name']); ?></span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
                         </div>
-                    </form>
+                    <?php else: ?>
+                        <div style="background: #fef9c3; border: 1px solid #fde68a; border-radius: 10px; padding: 16px 20px; text-align: center; color: #78350f;">
+                            <strong>No site selected.</strong> Please go to <a href="#" onclick="switchTab('qr'); return false;" style="color: #10b981; font-weight: 600;">QR Checkpoints</a>, choose a client and site, and then switch back here.
+                        </div>
+                    <?php endif; ?>
 
                     <?php if ($selected_mapping_id): ?>
                         <form action="agency_patrol_management.php" method="POST">
@@ -850,13 +1043,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="tour-list-container">
                                 <?php if ($starting_point): 
                                     $start_shift = $selected_client['shift_type'] ?? '';
-                                    $start_interval = 0;
-                                    $start_duration = 1; // Default to 1
+                                    $start_interval = 1;
+                                    $start_duration = 1;
                                     foreach($current_assignments as $as) {
                                         if($as['checkpoint_id'] == $starting_point['id']) {
                                             $start_shift = $as['shift_name'];
-                                            $start_interval = $as['interval_minutes'];
-                                            $start_duration = $as['duration_minutes'] ?? 1;
+                                            $start_interval = $as['interval_minutes'] ?: 1;
+                                            $start_duration = $as['duration_minutes'] ?: 1;
                                             break;
                                         }
                                     }
@@ -868,7 +1061,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         </button>
                                     </div>
                                     <div class="tour-list" style="margin-bottom: 0px; border-bottom: none; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding-bottom: 0;">
-                                        <div class="tour-item" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
+                                        <div class="tour-item tour-item-fixed" style="cursor: default; background: #e0f2fe; border-color: #bae6fd; margin-bottom: 0;">
                                             <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
                                             <span class="checkpoint-name"><?php echo htmlspecialchars($starting_point['name']); ?></span>
                                             <input type="hidden" name="checkpoint_ids[]" value="<?php echo $starting_point['id']; ?>">
@@ -883,21 +1076,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                                     <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0">
                                                     <label>min</label>
                                                 </div>
-                                                <div class="input-group">
-                                                    <label>Shift Declare</label>
-                                                    <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
-                                                        <?php if (empty($client_shifts)): ?>
-                                                            <option value="Day Shift" <?php echo $start_shift === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                            <option value="Night Shift" <?php echo $start_shift === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                        <?php else: ?>
-                                                            <?php foreach ($client_shifts as $s_name): ?>
-                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo $start_shift === $s_name ? 'selected' : ''; ?>>
-                                                                    <?php echo htmlspecialchars($s_name); ?>
-                                                                </option>
-                                                            <?php endforeach; ?>
-                                                        <?php endif; ?>
-                                                    </select>
-                                                </div>
+                                                <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($start_shift ?: 'Day Shift'); ?>">
                                             </div>
                                             <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
                                         </div>
@@ -918,36 +1097,59 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                             <div class="setting-inputs">
                                                 <div class="input-group">
                                                     <label>Interval</label>
-                                                    <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes']; ?>" min="0">
+                                                    <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes'] ?: 1; ?>" min="1">
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?? 1; ?>" min="0">
+                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?: 1; ?>" min="1">
                                                     <label>min</label>
                                                 </div>
-                                                <div class="input-group">
-                                                    <label>Shift Declare</label>
-                                                    <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
-                                                        <?php if (empty($client_shifts)): ?>
-                                                            <option value="Day Shift" <?php echo ($item['shift_name'] ?? '') === 'Day Shift' ? 'selected' : ''; ?>>Day Shift</option>
-                                                            <option value="Night Shift" <?php echo ($item['shift_name'] ?? '') === 'Night Shift' ? 'selected' : ''; ?>>Night Shift</option>
-                                                        <?php else: ?>
-                                                            <?php foreach ($client_shifts as $s_name): ?>
-                                                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php echo ($item['shift_name'] ?? '') === $s_name ? 'selected' : ''; ?>>
-                                                                    <?php echo htmlspecialchars($s_name); ?>
-                                                                </option>
-                                                            <?php endforeach; ?>
-                                                        <?php endif; ?>
-                                                    </select>
-                                                </div>
+                                                <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($item['shift_name'] ?? 'Day Shift'); ?>">
                                             </div>
                                             <button type="button" class="remove-btn" onclick="removeCheckpoint(this, '<?php echo $item['checkpoint_id']; ?>', '<?php echo addslashes($item['name']); ?>')">&times;</button>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
-
                             </div>
+
+                            <?php
+                            // End Point row — always pinned last
+                            if (isset($ending_point)):
+                                $end_shift = '';
+                                $end_interval = 1;
+                                $end_duration = 1;
+                                foreach($current_assignments as $as) {
+                                    if($as['checkpoint_id'] == $ending_point['id']) {
+                                        $end_shift = $as['shift_name'];
+                                        $end_interval = $as['interval_minutes'] ?: 1;
+                                        $end_duration = $as['duration_minutes'] ?: 1;
+                                        break;
+                                    }
+                                }
+                            ?>
+                            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0 0 8px 8px; border-top: none; padding: 0 15px 15px 15px; margin-top: -5px;">
+                                <div class="tour-item tour-item-fixed" style="cursor: default; background: #fff1f2; border-color: #fecdd3; margin-bottom: 0; counter-reset: tour-counter;">
+                                    <span class="handle" style="visibility: hidden; cursor: default;">☰</span>
+                                    <span class="checkpoint-name" style="color: #be123c; font-weight: 700;"><?php echo htmlspecialchars($ending_point['name']); ?></span>
+                                    <input type="hidden" name="checkpoint_ids[]" value="<?php echo $ending_point['id']; ?>">
+                                    <div class="setting-inputs">
+                                        <div class="input-group">
+                                            <label>Interval</label>
+                                            <input type="number" name="intervals[]" value="<?php echo $end_interval; ?>" min="0">
+                                            <label>min</label>
+                                        </div>
+                                        <div class="input-group">
+                                            <label>Duration</label>
+                                            <input type="number" name="durations[]" value="<?php echo $end_duration; ?>" min="0">
+                                            <label>min</label>
+                                        </div>
+                                        <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($end_shift ?: 'Day Shift'); ?>">
+                                    </div>
+                                    <button type="button" class="remove-btn" style="visibility: hidden;">&times;</button>
+                                </div>
+                            </div>
+                            <?php endif; ?>
 
                             <?php if ($selected_client['visual_saved'] ?? 0): ?>
                             <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -992,18 +1194,50 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <?php if (empty($clients_data)): ?>
                             <p style="color: #6b7280;">You have not been assigned any clients yet.</p>
                         <?php else: ?>
-                            <form action="agency_patrol_management.php?tab=qr" method="POST" id="qrLimitForm">
+                            <form action="agency_patrol_management.php?tab=qr" method="POST" id="qrLimitForm" onsubmit="const total = calculateTotalShiftMinutes(); if (total > 1440) { const hours = (total / 60).toFixed(1); showAlert('Total shift duration cannot exceed 24 hours (Currently: ' + hours + ' hours).'); return false; } return true;">
                                 <div class="form-group">
-                                    <label class="form-label" for="qr_agency_client_id">Select Client Site</label>
-                                    <select id="qr_agency_client_id" name="agency_client_id" class="form-control" required onchange="updateLimitForm()">
+                                    <label class="form-label" for="client_org_id">Select Client</label>
+                                    <select id="client_org_id" class="form-control" onchange="onOrganizationChange()">
                                         <option value="" disabled selected>-- Choose Client --</option>
-                                        <?php foreach($clients_data as $client): ?>
-                                            <option value="<?php echo $client['mapping_id']; ?>">
-                                                <?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?>
+                                        <?php foreach($orgs_data as $org): ?>
+                                            <option value="<?php echo $org['id']; ?>" <?php echo ((isset($selected_client['client_id']) && $selected_client['client_id'] == $org['id']) || (isset($preselect_org_id) && $preselect_org_id == $org['id'])) ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($org['name']); ?>
                                             </option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
+
+                                <div id="site_selection_container" style="display: none; margin-bottom: 24px; padding: 20px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; animation: slideDown 0.3s ease-out;">
+                                    <div class="form-group">
+                                        <label class="form-label" for="qr_agency_client_id">Select Site</label>
+                                        <div style="display: flex; gap: 10px; align-items: center;">
+                                            <select id="qr_agency_client_id" name="agency_client_id" class="form-control" required onchange="updateLimitForm()" style="flex: 1;">
+                                                <option value="" disabled selected>-- Choose Site --</option>
+                                            </select>
+                                            <button type="button" id="deleteSiteBtn" class="btn btn-danger" style="display: none; padding: 10px; background: #fef2f2; color: #ef4444; border: 1px solid #fee2e2; min-width: 44px; height: 44px; justify-content: center; align-items: center;" title="Remove Site" onclick="confirmDeleteSite()">
+                                                <span style="font-size: 1.2rem;">🗑️</span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div id="add_site_section" style="margin-top: 20px; padding-top: 15px; border-top: 1px dashed #86efac;">
+                                        <label class="form-label">Add New Site</label>
+                                        <div style="display: flex; gap: 10px;">
+                                            <input type="text" id="new_site_name_input" class="form-control" placeholder="Enter Site Name (e.g. East Warehouse)">
+                                            <button type="button" id="btn_add_site" class="btn btn-primary" onclick="addNewSite()" style="white-space: nowrap;">Add Site</button>
+                                        </div>
+                                        <p id="site_limit_warning" style="display: none; color: #ef4444; font-size: 0.8rem; margin-top: 8px; font-weight: 600;"></p>
+                                    </div>
+                                </div>
+
+                                <div id="site_config_details" style="display: none; border-top: 2px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
+
+                                <style>
+                                    @keyframes slideDown {
+                                        from { opacity: 0; transform: translateY(-10px); }
+                                        to { opacity: 1; transform: translateY(0); }
+                                    }
+                                </style>
                                 <div class="form-group">
                                     <label class="form-label" for="site_name">Site Name / Description</label>
                                     <input type="text" id="site_name" name="site_name" class="form-control" placeholder="e.g. Main Factory, West Wing" required>
@@ -1025,10 +1259,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                         <!-- Shift inputs populated here -->
                                     </div>
                                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
-                                        <button type="button" class="btn" style="background:#f3f4f6; color:#374151;" onclick="addShiftInput()">+ Add Shift</button>
+                                         <button type="button" class="btn" style="background:#f3f4f6; color:#374151;" onclick="addShiftInput()">+ Add Shift</button>
+                                         <span id="shift-total-duration" style="font-size: 0.85rem; color: #64748b; font-weight: 600;">Total Duration: 0h / 24h</span>
                                     </div>
                                 </div>
-                                <button type="submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px;">Site Configuration</button>
+                                </div> <!-- end site_config_details -->
+                                <button type="submit" id="main_config_submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px; display: none;">Site Configuration</button>
                             </form>
                         <?php endif; ?>
                     </div>
@@ -1036,42 +1272,52 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     <!-- Client Usage Stats -->
                     <div class="card">
                         <h3 class="card-header">Client Limits & Usage</h3>
-                        <?php if (empty($clients_data)): ?>
-                            <p style="color: #6b7280;">No data to display.</p>
-                        <?php else: ?>
-                            <?php foreach($clients_data as $client): ?>
+                        <div class="card-body">
+                            <?php if (empty($clients_data)): ?>
+                                <p style="color: #6b7280;">No data to display.</p>
+                            <?php else: ?>
                                 <?php 
-                                    $limit = $client['qr_limit'];
-                                    $current = $client['current_qrs'];
-                                    $percent = ($limit > 0) ? ($current / $limit) * 100 : 0;
-                                    
-                                    $fill_class = '';
-                                    if ($percent >= 100) $fill_class = 'danger';
-                                    else if ($percent >= 80) $fill_class = 'warning';
+                                    $unique_orgs = [];
+                                    foreach($clients_data as $client) {
+                                        if(!in_array($client['client_id'], $unique_orgs)) {
+                                            $unique_orgs[] = $client['client_id'];
+                                            $limit = (int)$client['qr_limit'];
+                                            $current = (int)$client['total_used_qrs'];
+                                            $percent = ($limit > 0) ? ($current / $limit) * 100 : 0;
+                                            
+                                            $fill_class = '';
+                                            if ($percent >= 100) $fill_class = 'danger';
+                                            else if ($percent >= 80) $fill_class = 'warning';
                                 ?>
-                                <div class="client-status-card">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                                        <strong style="color: #111827;">
-                                            <?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?>
-                                            <?php if ($client['site_name']): ?>
-                                                <span style="font-weight: normal; color: #6b7280; font-size: 0.85rem;"> - <?php echo htmlspecialchars($client['site_name']); ?></span>
-                                            <?php endif; ?>
-                                        </strong>
-                                        <span style="font-size: 0.85rem; color: #4b5563;">
-                                            <?php if($client['is_disabled']): ?>
-                                                <span style="color: #ef4444; font-weight: bold;">DISABLED</span>
-                                            <?php else: ?>
-                                                <?php echo $current; ?> / <?php echo $limit; ?> QRs
-                                                <?php if($client['qr_override']) echo "<span style='color:#10b981; margin-left:5px;'>(Override)</span>"; ?>
-                                            <?php endif; ?>
-                                        </span>
+                                    <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #f1f5f9;">
+                                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+                                            <div>
+                                                <strong style="color: #1e293b; font-size: 0.9rem;"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?></strong>
+                                                <div style="font-size: 0.7rem; color: #64748b; margin-top: 2px;">
+                                                    Shared pool across <?php echo $client['site_count']; ?> site<?php echo $client['site_count'] > 1 ? 's' : ''; ?>
+                                                </div>
+                                            </div>
+                                            <span style="font-size: 0.85rem; color: #64748b; font-weight: 600;">
+                                                <?php if($client['is_disabled']): ?>
+                                                    <span style="color: #ef4444;">SUSPENDED</span>
+                                                <?php else: ?>
+                                                    <?php echo $current; ?> / <?php echo $limit; ?> QRs
+                                                <?php endif; ?>
+                                            </span>
+                                        </div>
+                                        <div class="progress-bar" style="height: 8px; background: #f1f5f9; border-radius: 4px; overflow: hidden; margin-bottom: 6px;">
+                                            <div class="progress-fill <?php echo $fill_class; ?>" style="width: <?php echo min(100, $percent); ?>%; height: 100%; background: <?php echo $percent > 90 ? '#ef4444' : ($percent > 75 ? '#f59e0b' : '#10b981'); ?>; border-radius: 4px; transition: width 0.3s ease;"></div>
+                                        </div>
+                                        <?php if($client['qr_override']): ?>
+                                            <div style="font-size: 0.65rem; color: #10b981; font-weight: 700; text-transform: uppercase;">✓ Admin Override Active</div>
+                                        <?php endif; ?>
                                     </div>
-                                    <div class="progress-bar">
-                                        <div class="progress-fill <?php echo $fill_class; ?>" style="width: <?php echo min(100, $percent); ?>%;"></div>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
+                                <?php 
+                                        }
+                                    } 
+                                ?>
+                            <?php endif; ?>
+                        </div>
                     </div>
                 </div>
 
@@ -1161,8 +1407,45 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     </main>
 
+    <script src="js/modal_system.js"></script>
     <script>
+        async function confirmDeleteSite() {
+            const select = document.getElementById('qr_agency_client_id');
+            const sid = select.value;
+            if (!sid) return;
+            
+            const siteName = select.options[select.selectedIndex].text;
+            
+            const confirmed = await CustomModal.confirm(
+                `Are you sure you want to permanently remove ${siteName}? This will wipe all associated checkpoints, shifts, assignments, and historical reports for this location. You cannot delete the last site for a client.`,
+                'Delete Site & Wipe History?'
+            );
+
+            if (confirmed) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = 'agency_patrol_management.php';
+                
+                const idInput = document.createElement('input');
+                idInput.type = 'hidden';
+                idInput.name = 'mapping_id';
+                idInput.value = sid;
+                
+                const actionInput = document.createElement('input');
+                actionInput.type = 'hidden';
+                actionInput.name = 'delete_site';
+                actionInput.value = '1';
+                
+                form.appendChild(idInput);
+                form.appendChild(actionInput);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
+
+
         const clientsData = <?php echo json_encode($clients_data); ?>;
+        const orgsData = <?php echo json_encode(array_values($orgs_data)); ?>;
         const currentShifts = <?php echo json_encode($client_shifts ?? []); ?>;
         let elementToFocusAfterAlert = null;
         
@@ -1179,24 +1462,179 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         });
 
         function switchTab(tabId) {
+            if (tabId === 'patrol') {
+                // When switching to patrol, do a full reload carrying the selected mapping_id
+                // so PHP can render the correct patrol pattern server-side.
+                const siteSelect = document.getElementById('qr_agency_client_id');
+                const mappingId = siteSelect ? siteSelect.value : '';
+                const url = new URL(window.location);
+                url.searchParams.set('tab', 'patrol');
+                if (mappingId) url.searchParams.set('mapping_id', mappingId);
+                else url.searchParams.delete('mapping_id');
+                window.location.href = url.toString();
+                return;
+            }
+
             // Update buttons
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
+            const matchingBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.innerText.toLowerCase().includes(tabId));
+            if (matchingBtn) matchingBtn.classList.add('active');
 
             // Update panes
             document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
-            document.getElementById('tab-' + tabId).classList.add('active');
+            const pane = document.getElementById('tab-' + tabId);
+            if (pane) pane.classList.add('active');
             
-            // Update URL to prevent losing history/state on refresh if wanted
+            // Update URL
             const url = new URL(window.location);
             url.searchParams.set('tab', tabId);
             window.history.pushState({}, '', url);
         }
 
-        // QR Limits Update Form Logic
+        function onOrganizationChange() {
+            const orgSelect = document.getElementById('client_org_id');
+            const siteSelect = document.getElementById('qr_agency_client_id');
+            const siteContainer = document.getElementById('site_selection_container');
+            const deleteBtn = document.getElementById('deleteSiteBtn');
+            
+            if (deleteBtn) deleteBtn.style.display = 'none';
+            const btnAddSite = document.getElementById('btn_add_site');
+            const limitWarning = document.getElementById('site_limit_warning');
+            const nameInput = document.getElementById('new_site_name_input');
+            
+            const orgId = parseInt(orgSelect.value);
+            if (!orgId) {
+                siteContainer.style.display = 'none';
+                return;
+            }
+
+            const org = orgsData.find(o => String(o.id) === String(orgId));
+            if (!org) {
+                console.warn('Organization not found in orgsData:', orgId);
+                return;
+            }
+
+            const sites = clientsData.filter(c => String(c.client_id) === String(orgId));
+            
+            // Populate sites
+            siteSelect.innerHTML = '<option value="" disabled selected>-- Choose Site --</option>';
+            sites.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.mapping_id;
+                opt.text = s.site_name || 'Primary Site';
+                siteSelect.add(opt);
+            });
+
+            // Check limits
+            const limit = parseInt(org.client_limit) || 0;
+            const currentCount = sites.length;
+            
+            if (limit > 0 && currentCount >= limit) {
+                btnAddSite.disabled = true;
+                btnAddSite.style.opacity = '0.5';
+                limitWarning.innerText = `Limit reached (${currentCount}/${limit} sites). Contact Admin to increase limit.`;
+                limitWarning.style.display = 'block';
+                nameInput.disabled = true;
+            } else {
+                btnAddSite.disabled = false;
+                btnAddSite.style.opacity = '1';
+                limitWarning.style.display = 'none';
+                nameInput.disabled = false;
+            }
+
+            siteContainer.style.display = 'block';
+        }
+
+        async function addNewSite() {
+            const orgSelect = document.getElementById('client_org_id');
+            const nameInput = document.getElementById('new_site_name_input');
+            const siteName = nameInput.value.trim();
+            const orgId = orgSelect.value;
+            
+            if (!orgId || !siteName) {
+                showAlert('Please select an organization and enter a site name.');
+                return;
+            }
+
+            const org = orgsData.find(o => String(o.id) === String(orgId));
+            const parentMappingId = org.first_mapping_id;
+
+            const confirmed = await CustomModal.confirm(`Are you sure you want to add the site "${siteName}" to this organization?`);
+            if (!confirmed) return;
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = 'agency_patrol_management.php?tab=qr';
+            
+            const input1 = document.createElement('input');
+            input1.type = 'hidden';
+            input1.name = 'add_new_site';
+            input1.value = '1';
+            form.appendChild(input1);
+            
+            const input2 = document.createElement('input');
+            input2.type = 'hidden';
+            input2.name = 'parent_mapping_id';
+            input2.value = parentMappingId;
+            form.appendChild(input2);
+            
+            const input3 = document.createElement('input');
+            input3.type = 'hidden';
+            input3.name = 'new_site_name';
+            input3.value = siteName;
+            form.appendChild(input3);
+            
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        // Handle URL mapping_id or PHP-injected mapping_id on load
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const mid = urlParams.get('mapping_id') || '<?php echo $selected_mapping_id ?? ""; ?>';
+            if (mid) {
+                const client = clientsData.find(c => String(c.mapping_id) === String(mid));
+                if (client) {
+                    const orgSelect = document.getElementById('client_org_id');
+                    if (orgSelect) {
+                        orgSelect.value = client.client_id;
+                        onOrganizationChange();
+                        
+                        const siteSelect = document.getElementById('qr_agency_client_id');
+                        if (siteSelect) {
+                            siteSelect.value = mid;
+                            updateLimitForm();
+                        }
+                    }
+                }
+            } else {
+                // Check if any organization is pre-selected
+                const orgSelect = document.getElementById('client_org_id');
+                if (orgSelect && orgSelect.value) {
+                    onOrganizationChange();
+                }
+            }
+        });
+
         async function updateLimitForm() {
             const select = document.getElementById('qr_agency_client_id');
             const mappingId = parseInt(select.value);
+            const siteDetails = document.getElementById('site_config_details');
+            const submitBtn = document.getElementById('main_config_submit');
+            const deleteBtn = document.getElementById('deleteSiteBtn');
+
+            if (!mappingId) {
+                if (siteDetails) siteDetails.style.display = 'none';
+                if (submitBtn) submitBtn.style.display = 'none';
+                if (deleteBtn) deleteBtn.style.display = 'none';
+                return;
+            }
+            
+            if (deleteBtn) deleteBtn.style.display = 'flex';
+
+            if (siteDetails) siteDetails.style.display = 'block';
+            if (submitBtn) submitBtn.style.display = 'block';
+
             const siteNameInput = document.getElementById('site_name');
             const container = document.getElementById('checkpoints-container');
             const shiftContainer = document.getElementById('shifts-container');
@@ -1237,7 +1675,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                     if (data.checkpoints && data.checkpoints.length > 0) {
                         data.checkpoints.forEach(cp => {
-                            if (cp.isStart) return; // Skip Starting Point for regular checkpoint list
+                            if (cp.isStart || cp.isEnd) return; // Skip Starting Point and End Point
                             addCheckpointInput(cp.name, cp.id);
                         });
                     } else {
@@ -1246,12 +1684,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                     if (data.shifts && data.shifts.length > 0) {
                         data.shifts.forEach(sh => {
-                            addShiftInput(sh.shift_name, sh.id);
+                            addShiftInput(sh.shift_name, sh.id, sh.start_time, sh.end_time);
                         });
                     } else {
                         // Default shifts if none exist
-                        addShiftInput('Day Shift');
-                        addShiftInput('Night Shift');
+                        addShiftInput('Day Shift', '', '06:00', '18:00');
+                        addShiftInput('Night Shift', '', '18:00', '06:00');
                     }
                 } catch (e) {
                     console.error('Error fetching site data:', e);
@@ -1261,17 +1699,71 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         }
 
-        function addShiftInput(value = '', id = '') {
+        function calculateTotalShiftMinutes() {
+            const starts = document.querySelectorAll('input[name="shift_starts[]"]');
+            const ends = document.querySelectorAll('input[name="shift_ends[]"]');
+            let total = 0;
+
+            for (let i = 0; i < starts.length; i++) {
+                const s = starts[i].value;
+                const e = ends[i].value;
+                if (!s || !e) continue;
+
+                const [sH, sM] = s.split(':').map(Number);
+                const [eH, eM] = e.split(':').map(Number);
+                const sTotal = sH * 60 + sM;
+                const eTotal = eH * 60 + eM;
+
+                if (eTotal > sTotal) {
+                    total += (eTotal - sTotal);
+                } else if (eTotal < sTotal) {
+                    total += (1440 - sTotal + eTotal);
+                } else {
+                    total += 1440; // 24h shift
+                }
+            }
+            return total;
+        }
+
+        function updateDurationDisplay() {
+            const total = calculateTotalShiftMinutes();
+            const hours = (total / 60).toFixed(1);
+            const display = document.getElementById('shift-total-duration');
+            if (display) {
+                display.innerText = `Total Duration: ${hours}h / 24h`;
+                display.style.color = total > 1440 ? '#ef4444' : '#64748b';
+            }
+        }
+
+        function addShiftInput(value = '', id = '', startTime = '', endTime = '') {
             const container = document.getElementById('shifts-container');
             const row = document.createElement('div');
             row.className = 'shift-input-row';
             row.style.display = 'flex';
             row.style.gap = '10px';
+            row.style.alignItems = 'center';
+            row.style.marginBottom = '8px';
+            
+            // Format time strings HH:MM:SS -> HH:MM for HTML5 time picker
+            const formattedStart = startTime ? startTime.substring(0, 5) : '';
+            const formattedEnd = endTime ? endTime.substring(0, 5) : '';
+
             row.innerHTML = `
-                <input type="text" name="shifts[]" class="form-control" placeholder="Shift Name (e.g. Day Shift)" value="${value.replace(/"/g, '&quot;')}" required>
-                <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; padding: 0 16px;" onclick="this.parentElement.remove()">✕</button>
+                <div style="flex: 2;">
+                    <input type="text" name="shifts[]" class="form-control" placeholder="Shift Name (Day Shift)" value="${value.replace(/"/g, '&quot;')}" required>
+                </div>
+                <div style="flex: 1; display: flex; align-items: center; gap: 5px;">
+                    <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">FROM</span>
+                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" style="padding: 10px 8px;" onchange="updateDurationDisplay()">
+                </div>
+                <div style="flex: 1; display: flex; align-items: center; gap: 5px;">
+                    <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">TO</span>
+                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" style="padding: 10px 8px;" onchange="updateDurationDisplay()">
+                </div>
+                <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border-radius: 8px; border: none; flex-shrink: 0;" onclick="this.parentElement.remove(); updateDurationDisplay();">✕</button>
             `;
             container.appendChild(row);
+            updateDurationDisplay();
         }
 
         function addCheckpointInput(value = '', id = '') {

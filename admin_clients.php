@@ -69,6 +69,29 @@ if (isset($_GET['ajax_qrs']) && isset($_GET['mapping_id'])) {
     exit;
 }
 
+// ── AJAX: Load all sites for an organization ──────────────────────────────
+if (isset($_GET['ajax_sites']) && isset($_GET['client_id'])) {
+    header('Content-Type: application/json');
+    $client_id = (int)$_GET['client_id'];
+    $agency_id = isset($_GET['agency_id']) ? (int)$_GET['agency_id'] : 0;
+
+    $where = "WHERE ac.client_id = $client_id";
+    if ($agency_id > 0) $where .= " AND ac.agency_id = $agency_id";
+
+    $sites_res = $conn->query("
+        SELECT ac.id, ac.site_name, ac.company_name
+        FROM agency_clients ac
+        $where
+        ORDER BY ac.site_name ASC
+    ");
+    $sites = [];
+    while ($row = $sites_res->fetch_assoc()) {
+        $sites[] = $row;
+    }
+    echo json_encode($sites);
+    exit;
+}
+
 // ── POST: Save QR edits from admin ──────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
     $mapping_id  = (int)$_POST['mapping_id'];
@@ -202,22 +225,87 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['handle_sequence_reques
     }
 }
 
+// Handle Add Client Branch
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
+    $agency_id = (int)$_POST['agency_id'];
+    $client_username = $conn->real_escape_string($_POST['client_username']);
+    $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
+    $company_name = $conn->real_escape_string($_POST['site_name']); // Use Site Name as Company Name primary display
+    $company_address = $conn->real_escape_string($_POST['company_address'] ?? '');
+    $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
+
+    $conn->begin_transaction();
+    try {
+        // 1. Check if username exists
+        $user_check = $conn->query("SELECT id FROM users WHERE username = '$client_username'");
+        if ($user_check && $user_check->num_rows > 0) {
+            throw new Exception("Username '$client_username' is already taken.");
+        }
+
+        // 2. Check Agency Limit
+        $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id AND user_level = 'agency'");
+        if (!$limit_res || $limit_res->num_rows === 0) {
+            throw new Exception("Selected agency not found.");
+        }
+        $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
+
+        $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+        $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
+
+        if ($client_limit > 0 && $current_clients >= $client_limit) {
+            throw new Exception("This agency has reached its maximum client limit ($client_limit). Increase their limit first.");
+        }
+
+        // 3. Create User Account
+        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
+            throw new Exception("Error creating user: " . $conn->error);
+        }
+        $new_client_id = $conn->insert_id;
+
+        // 4. Create Agency-Client Assignment
+        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, qr_limit, client_limit, guard_limit, inspector_limit, supervisor_limit) 
+                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', 1, 1, 0, 0, 0)")) {
+            throw new Exception("Error creating client profile: " . $conn->error);
+        }
+
+        $conn->commit();
+        $message = "Client site created and assigned successfully!";
+        $message_type = "success";
+        $show_status_modal = true;
+    } catch (Exception $e) {
+        $conn->rollback();
+        $message = "Error: " . $e->getMessage();
+        $message_type = "error";
+        $show_status_modal = true;
+    }
+}
+
 // Fetch all agencies
 $agencies_res = $conn->query("SELECT id, username, agency_name, client_limit FROM users WHERE user_level = 'agency' ORDER BY agency_name ASC");
 $agencies = [];
 while ($a = $agencies_res->fetch_assoc()) $agencies[] = $a;
 
-// Fetch all clients with agency info
+// Fetch all clients with agency info, grouped by organization
 $clients_sql = "
     SELECT u.id as user_id, u.username, u.status,
-           ac.id as mapping_id, ac.company_name, ac.company_address, ac.contact_no, ac.email_address, ac.contact_person,
-           ac.is_sequence_fixed, ac.sequence_change_request,
+           COUNT(ac.id) as site_count,
+           GROUP_CONCAT(ac.id) as mapping_ids,
+           GROUP_CONCAT(ac.site_name SEPARATOR ' || ') as all_site_names,
+           MAX(ac.id) as primary_mapping_id, 
+           MAX(ac.company_name) as company_name, 
+           MAX(ac.company_address) as company_address, 
+           MAX(ac.contact_no) as contact_no, 
+           MAX(ac.email_address) as email_address, 
+           MAX(ac.contact_person) as contact_person,
+           MAX(ac.is_sequence_fixed) as is_sequence_fixed, 
+           MAX(ac.sequence_change_request) as sequence_change_request,
            ag.id as agency_id, ag.agency_name, ag.username as agency_username
     FROM users u
     JOIN agency_clients ac ON u.id = ac.client_id
     JOIN users ag ON ac.agency_id = ag.id
     WHERE u.user_level = 'client'
-    ORDER BY ag.agency_name ASC, ac.id ASC
+    GROUP BY u.id, ag.id
+    ORDER BY ag.agency_name ASC, u.username ASC
 ";
 $clients_res = $conn->query($clients_sql);
 $clients = [];
@@ -289,19 +377,22 @@ include 'admin_layout/sidebar.php';
             <?php endif; ?>
 
             <!-- Filter Bar -->
-            <div style="display: flex; align-items: flex-end; gap: 16px; margin-bottom: 28px;">
-                <div style="flex: 1;">
+            <div style="display: flex; align-items: flex-end; gap: 16px; margin-bottom: 28px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 250px;">
                     <label style="display: block; font-size: 0.8rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px;">Filter by Agency</label>
                     <select id="agencyFilter" onchange="filterByAgency()" class="form-control" style="font-weight: 600; font-size: 0.95rem; border-radius: 10px; cursor: pointer;">
                         <option value="">— All Agencies —</option>
-                        <?php foreach ($agencies as $ag):
-                            $ag_count = count(array_filter($clients, fn($c) => $c['agency_id'] == $ag['id']));
-                        ?>
+                        <?php foreach ($agencies as $ag): ?>
                             <option value="<?php echo $ag['id']; ?>" data-name="<?php echo htmlspecialchars($ag['agency_name'] ?: $ag['username']); ?>">
                                 <?php echo htmlspecialchars($ag['agency_name'] ?: $ag['username']); ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+                <div>
+                    <button type="button" onclick="openAddClientModal()" class="btn btn-success" style="height: 48px; padding: 0 24px; display: flex; align-items: center; gap: 8px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+                        <span style="font-size: 1.2rem;">+</span> Add Client Site
+                    </button>
                 </div>
             </div>
 
@@ -349,9 +440,11 @@ include 'admin_layout/sidebar.php';
                                 <td>
                                     <a href="agency_maintenance.php?highlight_id=<?php echo $c['agency_id']; ?>" style="text-decoration: none; color: inherit; display: block;">
                                         <strong><?php echo htmlspecialchars($c['company_name'] ?: '—'); ?></strong>
-                                        <?php if ($c['company_address']): ?>
-                                            <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;"><?php echo htmlspecialchars($c['company_address']); ?></div>
-                                        <?php endif; ?>
+                                        <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px; display: flex; align-items: center; gap: 6px;">
+                                            <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-weight: 700; color: #475569; border: 1px solid #e2e8f0;">
+                                                <?php echo $c['site_count']; ?> Site<?php echo $c['site_count'] > 1 ? 's' : ''; ?>
+                                            </span>
+                                        </div>
                                     </a>
                                 </td>
                                 <td>
@@ -374,7 +467,7 @@ include 'admin_layout/sidebar.php';
                                     <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                                         <!-- Manage QRs Button -->
                                         <button type="button"
-                                            onclick="openQrModal(<?php echo $c['mapping_id']; ?>, '<?php echo addslashes(htmlspecialchars($c['company_name'] ?: $c['username'])); ?>')"
+                                            onclick="openQrModal(<?php echo $c['user_id']; ?>, <?php echo $c['agency_id']; ?>, '<?php echo addslashes(htmlspecialchars($c['company_name'] ?: $c['username'])); ?>')"
                                             style="padding: 5px 12px; background: #6366f1; color: white; border: none; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer; display:flex; align-items:center; gap:4px;">
                                             🔲 Manage QRs
                                         </button>
@@ -448,6 +541,44 @@ include 'admin_layout/sidebar.php';
             if (table) table.style.display = visible === 0 ? 'none' : '';
             noMsg.style.display = visible === 0 ? 'block' : 'none';
         }
+
+        function openAddClientModal() {
+            document.getElementById('addClientModal').classList.add('show');
+        }
+
+        function closeAddClientModal() {
+            document.getElementById('addClientModal').classList.remove('show');
+        }
+
+        // Handle URL parameters for filtering and auto-alerts
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const agencyId = urlParams.get('agency_id');
+            const error = urlParams.get('error');
+
+            if (agencyId) {
+                const filter = document.getElementById('agencyFilter');
+                if (filter) {
+                    filter.value = agencyId;
+                    filterByAgency();
+                }
+            }
+
+            if (error === 'limit_low') {
+                const diff = urlParams.get('diff') || 'some';
+                const msg = `To reduce the limit, you must first delete ${diff} more client(s) from this agency.`;
+                if (typeof CustomModal !== 'undefined' && CustomModal.alert) {
+                    CustomModal.alert(msg, 'Limit Constraint', 'warning');
+                }
+
+                // Clear the error and diff from URL to prevent re-triggering on refresh or post-back
+                urlParams.delete('error');
+                urlParams.delete('diff');
+                const newParams = urlParams.toString();
+                const newUrl = window.location.pathname + (newParams ? '?' + newParams : '');
+                window.history.replaceState({path: newUrl}, '', newUrl);
+            }
+        });
     </script>
 
     <!-- ════════════════════════════════════════════
@@ -686,10 +817,23 @@ include 'admin_layout/sidebar.php';
                 </h3>
                 <button id="qrModalCloseBtn" onclick="closeQrModal()" title="Close">✕</button>
             </div>
-            <div id="qrModalMeta">
-                <span>Client: <strong id="qrMetaClient">—</strong></span>
-                <span>QR Limit: <strong id="qrMetaLimit">—</strong></span>
-                <span>Used: <strong id="qrMetaUsed">—</strong></span>
+            <div id="qrModalMeta" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 15px;">
+                <div style="flex: 1; min-width: 200px;">
+                    <label style="display: block; font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">Select Site Location</label>
+                    <select id="qrSiteSelector" class="form-control" style="height: 44px; font-size: 0.95rem; font-weight: 600; padding: 0 12px; background-color: #f8fafc;" onchange="loadSiteQRs(this.value)">
+                        <option value="">Loading sites...</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 15px;">
+                    <div style="text-align: center; background: #f8fafc; padding: 5px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <div style="font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase;">QR Limit</div>
+                        <strong id="qrMetaLimit" style="color: #0f172a;">—</strong>
+                    </div>
+                    <div style="text-align: center; background: #f8fafc; padding: 5px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <div style="font-size: 0.65rem; font-weight: 700; color: #64748b; text-transform: uppercase;">Usage</div>
+                        <strong id="qrMetaUsed" style="color: #0f172a;">—</strong>
+                    </div>
+                </div>
             </div>
             <div id="qrModalBody">
                 <div class="qr-spinner">Loading QR data…</div>
@@ -711,15 +855,47 @@ include 'admin_layout/sidebar.php';
     <script>
         let _qrMappingId = null;
 
-        function openQrModal(mappingId, clientName) {
-            _qrMappingId = mappingId;
+        function openQrModal(clientId, agencyId, clientName) {
             document.getElementById('qrModal').classList.add('show');
             document.getElementById('qrClientBadge').textContent = clientName;
-            document.getElementById('qrMetaClient').textContent  = clientName;
-            document.getElementById('qrMetaLimit').textContent   = '…';
-            document.getElementById('qrMetaUsed').textContent    = '…';
-            document.getElementById('qrModalBody').innerHTML     = '<div class="qr-spinner">Loading QR data…</div>';
+            document.getElementById('qrModalBody').innerHTML     = '<div class="qr-spinner">Loading sites…</div>';
             document.getElementById('qrSaveBtn').disabled        = true;
+
+            const siteSelector = document.getElementById('qrSiteSelector');
+            siteSelector.innerHTML = '<option value="">Loading sites...</option>';
+
+            fetch(`admin_clients.php?ajax_sites=1&client_id=${clientId}&agency_id=${agencyId}`)
+                .then(r => r.json())
+                .then(sites => {
+                    siteSelector.innerHTML = '';
+                    if (sites.length === 0) {
+                        siteSelector.innerHTML = '<option value="">No sites found</option>';
+                        document.getElementById('qrModalBody').innerHTML = '<div class="qr-no-limit">No sites configured for this client.</div>';
+                        return;
+                    }
+                    sites.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        opt.textContent = s.site_name || 'Primary Site';
+                        siteSelector.appendChild(opt);
+                    });
+                    
+                    // Load the first site by default
+                    loadSiteQRs(sites[0].id);
+                })
+                .catch(() => {
+                    document.getElementById('qrModalBody').innerHTML = '<div class="qr-no-limit">Failed to load sites.</div>';
+                });
+        }
+
+        function loadSiteQRs(mappingId) {
+            if (!mappingId) return;
+            _qrMappingId = mappingId;
+            
+            document.getElementById('qrModalBody').innerHTML = '<div class="qr-spinner">Loading QR data…</div>';
+            document.getElementById('qrMetaLimit').textContent = '…';
+            document.getElementById('qrMetaUsed').textContent  = '…';
+            document.getElementById('qrSaveBtn').disabled      = true;
 
             fetch('admin_clients.php?ajax_qrs=1&mapping_id=' + mappingId)
                 .then(r => r.json())
@@ -939,6 +1115,61 @@ include 'admin_layout/sidebar.php';
                 <button class="btn" style="background: #f1f5f9; color: #475569; flex: 1;" onclick="document.getElementById('logoutModal').classList.remove('show')">Cancel</button>
                 <a href="logout.php" class="btn btn-primary" style="flex: 1; text-decoration: none; background: #ef4444;">Log Out</a>
             </div>
+        </div>
+    </div>
+
+    <!-- Add Client Modal -->
+    <div id="addClientModal" class="modal">
+        <div class="modal-content" style="max-width: 500px; padding: 0; overflow: hidden;">
+            <div style="padding: 24px; background: #1e293b; color: white;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 10px;">
+                    <span style="background: rgba(255,255,255,0.1); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">➕</span>
+                    Add New Client Site
+                </h3>
+                <p style="margin: 8px 0 0; font-size: 0.85rem; color: #94a3b8;">Create a new branch and assign it to an agency.</p>
+            </div>
+            
+            <form method="POST" style="padding: 24px;">
+                <input type="hidden" name="add_client" value="1">
+                
+                <div style="margin-bottom: 18px;">
+                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Assign to Agency</label>
+                    <select name="agency_id" class="form-control" required style="font-weight: 600;">
+                        <option value="" disabled selected>-- Select Agency --</option>
+                        <?php foreach ($agencies as $ag): ?>
+                            <option value="<?php echo $ag['id']; ?>">
+                                <?php echo htmlspecialchars($ag['agency_name'] ?: $ag['username']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px;">
+                    <div>
+                        <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Account Username</label>
+                        <input type="text" name="client_username" class="form-control" placeholder="e.g. lbc_main" required>
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Account Password</label>
+                        <input type="password" name="client_password" class="form-control" placeholder="••••••••" required>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 18px;">
+                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Site / Company Name</label>
+                    <input type="text" name="site_name" class="form-control" placeholder="e.g. LBC Express - Main Branch" required>
+                </div>
+
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Site Address / Location</label>
+                    <textarea name="company_address" class="form-control" rows="2" placeholder="Street, City, Province"></textarea>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-top: 10px;">
+                    <button type="button" class="btn" style="flex: 1; background: #f1f5f9; color: #475569; font-weight: 600;" onclick="closeAddClientModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 2; font-weight: 700;">Create Site Account</button>
+                </div>
+            </form>
         </div>
     </div>
 

@@ -9,7 +9,7 @@ if (isset($_GET['ajax_agency_data'])) {
 
     if ($type === 'clients') {
         $sql = "SELECT ac.id, c.id as user_id, c.username as name, ac.company_name, c.status, 
-                ac.client_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit,
+                ac.client_limit as site_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit,
                 (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qr_count,
                 (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guard_count,
                 (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspector_count
@@ -115,38 +115,41 @@ if (isset($_GET['ajax_agency_data'])) {
     } elseif ($type === 'update_agency_limit') {
         $agency_id = (int)($_GET['agency_id'] ?? 0);
         $limit = (int)($_GET['limit'] ?? 0);
-        
-        $sql = "UPDATE users SET client_limit = $limit WHERE id = $agency_id AND LOWER(user_level) = 'agency'";
-        if ($conn->query($sql)) {
-            // Auto-create placeholder clients up to the new limit
-            if ($limit > 0) {
-                // Fetch agency username for prefix
-                $agRes = $conn->query("SELECT username FROM users WHERE id = $agency_id");
-                $agRow = $agRes ? $agRes->fetch_assoc() : null;
-                $agPrefix = $agRow ? preg_replace('/[^a-z0-9_]/i', '', strtolower($agRow['username'])) : 'agency' . $agency_id;
 
-                // Step 1: Re-number all auto-placeholder clients.
-                // A client is considered auto-named if its company_name is NULL, empty,
-                // or matches the pattern "Client N". Named clients (e.g. "Acme Corp") are skipped.
-                // The counter only increments for auto-named slots, so the first unnamed client
-                // is always "Client 1", second is "Client 2", etc., regardless of named clients.
-                $existingRes = $conn->query(
-                    "SELECT ac.id, ac.company_name FROM agency_clients ac WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC"
-                );
-                $clientNum = 1;
-                if ($existingRes) {
-                    while ($row = $existingRes->fetch_assoc()) {
-                        $name = $row['company_name'];
-                        $isAutoPlaceholder = is_null($name)
-                            || trim($name) === ''
-                            || preg_match('/^Client\s*\d+$/i', trim($name));
-                        if ($isAutoPlaceholder) {
-                            $autoName = $conn->real_escape_string('Client ' . $clientNum);
-                            $conn->query("UPDATE agency_clients SET company_name = '$autoName' WHERE id = {$row['id']}");
-                            $clientNum++;
+        // Check current count of clients (including placeholders)
+        $currRes = $conn->query("SELECT COUNT(*) as cnt FROM agency_clients WHERE agency_id = $agency_id");
+        $currCount = $currRes ? (int)$currRes->fetch_assoc()['cnt'] : 0;
+
+        if ($limit < $currCount) {
+            $response = ['success' => false, 'redirect' => true, 'agency_id' => $agency_id, 'curr' => $currCount, 'target' => $limit];
+        } else {
+            $sql = "UPDATE users SET client_limit = $limit WHERE id = $agency_id AND LOWER(user_level) = 'agency'";
+            if ($conn->query($sql)) {
+                // Auto-create placeholder clients up to the new limit
+                if ($limit > 0) {
+                    // Fetch agency username for prefix
+                    $agRes = $conn->query("SELECT username FROM users WHERE id = $agency_id");
+                    $agRow = $agRes ? $agRes->fetch_assoc() : null;
+                    $agPrefix = $agRow ? preg_replace('/[^a-z0-9_]/i', '', strtolower($agRow['username'])) : 'agency' . $agency_id;
+
+                    // Step 1: Re-number all auto-placeholder clients.
+                    $existingRes = $conn->query(
+                        "SELECT ac.id, ac.company_name FROM agency_clients ac WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC"
+                    );
+                    $clientNum = 1;
+                    if ($existingRes) {
+                        while ($row = $existingRes->fetch_assoc()) {
+                            $name = $row['company_name'];
+                            $isAutoPlaceholder = is_null($name)
+                                || trim($name) === ''
+                                || preg_match('/^Client\s*\d+$/i', trim($name));
+                            if ($isAutoPlaceholder) {
+                                $autoName = $conn->real_escape_string('Client ' . $clientNum);
+                                $conn->query("UPDATE agency_clients SET company_name = '$autoName' WHERE id = {$row['id']}");
+                                $clientNum++;
+                            }
                         }
                     }
-                }
 
                 // Step 2: Count existing clients and create new placeholder slots for any gap
                 $existRes = $conn->query("SELECT COUNT(DISTINCT client_id) as cnt FROM agency_clients WHERE agency_id = $agency_id");
@@ -175,6 +178,7 @@ if (isset($_GET['ajax_agency_data'])) {
             $response = ['success' => false, 'message' => "SQL Error: " . $conn->error];
         }
     }
+}
 
     if (ob_get_length()) ob_clean();
     header('Content-Type: application/json');
@@ -310,6 +314,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, address, contact_person, contact_no) 
                 VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, '$address', '$contact_person', '$contact_no')";
         if ($conn->query($sql) === TRUE) {
+            $new_agency_id = $conn->insert_id;
+            
+            // Create placeholders if limit > 0
+            if ($client_limit > 0) {
+                // Fetch username for prefix
+                $agRes = $conn->query("SELECT username FROM users WHERE id = $new_agency_id");
+                $agRow = $agRes ? $agRes->fetch_assoc() : null;
+                $agPrefix = $agRow ? preg_replace('/[^a-z0-9_]/i', '', strtolower($agRow['username'])) : 'agency' . $new_agency_id;
+
+                for ($slot = 1; $slot <= $client_limit; $slot++) {
+                    $tryUsername = $agPrefix . '_client' . $slot;
+                    $suffix = 1;
+                    while ($conn->query("SELECT id FROM users WHERE username = '" . $conn->real_escape_string($tryUsername) . "' LIMIT 1")->num_rows > 0) {
+                        $tryUsername = $agPrefix . '_client' . $slot . '_' . $suffix++;
+                    }
+                    $placeholderPw = password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT);
+                    if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('" . $conn->real_escape_string($tryUsername) . "', '$placeholderPw', 'client')")) {
+                        $pid = $conn->insert_id;
+                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name) VALUES ($new_agency_id, $pid, 'Client $slot')");
+                    }
+                }
+            }
+
             $message = "Agency added successfully!";
             $message_type = "success";
             $show_status_modal = true;
@@ -807,6 +834,10 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group"><label class="form-label">Contact Person</label><input type="text" name="contact_person" class="form-control" placeholder="Full Name"></div>
                     <div class="form-group"><label class="form-label">Contact No.</label><input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX"></div>
                 </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label class="form-label">Total Client Slots</label>
+                    <input type="number" name="client_limit" class="form-control" value="1" min="1" required>
+                </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" onclick="closeModal('addAgencyModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
                     <button type="submit" name="add_agency" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Create Agency Profile</button>
@@ -985,12 +1016,18 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group" style="text-align: left;"><label class="form-label">Contact Person</label><input type="text" name="contact_person" id="edit_agency_contact_person" class="form-control"></div>
                     <div class="form-group" style="text-align: left;"><label class="form-label">Contact No.</label><input type="text" name="contact_no" id="edit_agency_contact_no" class="form-control"></div>
                 </div>
-                <div class="form-group" style="text-align: left; margin-bottom: 20px;">
-                    <label class="form-label">Account Status</label>
-                    <select name="status" id="edit_agency_status" class="form-control">
-                        <option value="active">Active</option>
-                        <option value="suspended">Suspended</option>
-                    </select>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Account Status</label>
+                        <select name="status" id="edit_agency_status" class="form-control">
+                            <option value="active">Active</option>
+                            <option value="suspended">Suspended</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="text-align: left;">
+                        <label class="form-label">Total Client Slots</label>
+                        <input type="number" name="client_limit" id="edit_agency_client_limit" class="form-control" min="1" required>
+                    </div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;" onclick="closeModal('editAgencyModal')">Cancel</button>
@@ -1102,7 +1139,8 @@ include 'admin_layout/sidebar.php';
             document.getElementById('edit_agency_address').value = agency.address;
             document.getElementById('edit_agency_contact_person').value = agency.contact_person;
             document.getElementById('edit_agency_contact_no').value = agency.contact_no;
-            document.getElementById('edit_agency_status').value = agency.status;
+            document.getElementById('edit_agency_status').value = agency.status || 'active';
+            document.getElementById('edit_agency_client_limit').value = agency.client_limit || 0;
             document.getElementById('editAgencyModal').classList.add('show');
         }
 
@@ -1232,12 +1270,13 @@ include 'admin_layout/sidebar.php';
         let qlAgencyFullData = null;
 
         function openQuickLinksModal(full_agency) {
+            console.log("Opening Quick Links for Agency:", full_agency);
             qlAgencyData = full_agency;
             qlAgencyFullData = full_agency;
             
             const agency_name = full_agency.agency_name || full_agency.username;
-            const currentClients = full_agency.current_clients || 0;
-            const clientLimit = full_agency.client_limit || 0;
+            const currentClients = parseInt(full_agency.current_clients) || 0;
+            const clientLimit = parseInt(full_agency.client_limit) || 0;
             
             document.getElementById('ql_agency_name').innerHTML = `
                 <div style="display: flex; flex-direction: column; width: 100%;">
@@ -1249,6 +1288,7 @@ include 'admin_layout/sidebar.php';
                                 <input type="number" id="ql_agency_client_limit_input" value="${clientLimit}" 
                                        style="width: 50px; border: none; font-weight: 800; color: var(--primary); outline: none; text-align: center; font-size: 1rem; background: transparent;">
                             </div>
+                            <span style="font-size: 0.6rem; color: var(--primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 5px;">Subscribed</span>
                             <button onclick="saveAgencyClientLimit(${full_agency.id}, event)" 
                                     style="background: var(--primary); color: white; border: none; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; transition: background 0.2s;"
                                     title="Save Limit"
@@ -1503,15 +1543,30 @@ include 'admin_layout/sidebar.php';
                 const data = await response.json();
                 if (data.success) {
                     const displayLimit = newLimit;
-                    const tableDisplayLimit = newLimit;
 
-                    document.getElementById('ql_header_limit_display').innerText = displayLimit;
+                    // Update header text in modal
+                    const headerLimit = document.getElementById('ql_header_limit_display');
+                    if (headerLimit) headerLimit.innerText = displayLimit;
+
+                    // Update "Currently Assigned" display efficiently
+                    const headerFullDisplay = document.querySelector('#ql_agency_name strong');
+                    if (headerFullDisplay) {
+                        // We use the new limit as numerator because placeholders were created to fill all slots
+                        headerFullDisplay.innerHTML = `${displayLimit} / <span id="ql_header_limit_display">${displayLimit}</span>`;
+                    }
                     
                     // Update the background table row instantly
                     const tableMax = document.getElementById('table_max_' + agencyId);
-                    if (tableMax) tableMax.innerText = tableDisplayLimit;
+                    if (tableMax) tableMax.innerText = displayLimit;
 
-                    if(qlAgencyFullData) qlAgencyFullData.client_limit = newLimit;
+                    // Update the current usage as well because placeholders were created to fill the gap
+                    const tableCurrent = document.getElementById('table_current_' + agencyId);
+                    if (tableCurrent) tableCurrent.innerText = displayLimit;
+
+                    if(qlAgencyFullData) {
+                        qlAgencyFullData.client_limit = newLimit;
+                        qlAgencyFullData.current_clients = newLimit;
+                    }
                     
                     // Show a quick visual success feedback on the button if exists
                     if (btn) {
@@ -1528,6 +1583,9 @@ include 'admin_layout/sidebar.php';
                         loadQuickLinkTab('clients');
                     }
 
+                } else if (data.redirect) {
+                    const diff = data.curr - data.target;
+                    window.location.href = `admin_clients.php?agency_id=${data.agency_id}&error=limit_low&diff=${diff}`;
                 } else {
                     CustomModal.alert('Error: ' + data.message, 'Update Error', 'error');
                 }
