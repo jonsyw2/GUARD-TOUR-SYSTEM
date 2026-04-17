@@ -145,7 +145,7 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
             FROM checkpoints cp
             LEFT JOIN tour_assignments ta ON cp.id = ta.checkpoint_id AND ta.agency_client_id = $m_id
             WHERE cp.agency_client_id = $m_id
-            ORDER BY cp.is_zero_checkpoint DESC, ta.sort_order ASC, cp.id ASC
+            ORDER BY CASE cp.is_zero_checkpoint WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 2 THEN 2 ELSE 3 END ASC, ta.sort_order ASC, cp.id ASC
         ");
 
         $checkpoints = [];
@@ -461,7 +461,7 @@ $qrs_sql = "
     LEFT JOIN scans s ON c.id = s.checkpoint_id
     WHERE c.agency_client_id IN ($mapping_ids_str)
     GROUP BY c.id, c.shift_name
-    ORDER BY c.is_zero_checkpoint DESC, c.id ASC
+    ORDER BY CASE c.is_zero_checkpoint WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 2 THEN 2 ELSE 3 END ASC, c.id ASC
 ";
 $qrs_result = $conn->query($qrs_sql);
 

@@ -58,7 +58,7 @@ if ($mapping_ids_str !== '0') {
             (SELECT scan_time FROM scans WHERE checkpoint_id = cp.id AND DATE(scan_time) = CURDATE() ORDER BY scan_time DESC LIMIT 1) as last_scan_today
             FROM checkpoints cp
             WHERE cp.agency_client_id = $selected_mapping_id
-            ORDER BY cp.is_zero_checkpoint DESC, (SELECT ta.sort_order FROM tour_assignments ta WHERE ta.checkpoint_id = cp.id AND ta.agency_client_id = $selected_mapping_id LIMIT 1) ASC
+            ORDER BY CASE cp.is_zero_checkpoint WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 2 THEN 2 ELSE 3 END ASC, (SELECT ta.sort_order FROM tour_assignments ta WHERE ta.checkpoint_id = cp.id AND ta.agency_client_id = $selected_mapping_id LIMIT 1) ASC
         ");
         if ($cp_res) {
             while ($row = $cp_res->fetch_assoc()) {

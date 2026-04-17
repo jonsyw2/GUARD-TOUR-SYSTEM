@@ -60,11 +60,22 @@ if (isset($_GET['ajax_qrs']) && isset($_GET['mapping_id'])) {
     ");
     $zero_cp = ($zero_res && $zero_res->num_rows > 0) ? $zero_res->fetch_assoc() : null;
 
+    // Pull the End Point Checkpoint
+    $end_res = $conn->query("
+        SELECT id, name, checkpoint_code
+        FROM checkpoints
+        WHERE agency_client_id = $mapping_id
+          AND is_zero_checkpoint = 2
+        LIMIT 1
+    ");
+    $end_cp = ($end_res && $end_res->num_rows > 0) ? $end_res->fetch_assoc() : null;
+
     echo json_encode([
         'qr_limit'    => $qr_limit,
         'client_name' => $info['company_name'] ?: $info['username'],
         'checkpoints' => $checkpoints,
-        'zero_checkpoint' => $zero_cp
+        'zero_checkpoint' => $zero_cp,
+        'end_checkpoint' => $end_cp
     ]);
     exit;
 }
@@ -1031,6 +1042,45 @@ include 'admin_layout/sidebar.php';
                         ` : ''}
                     </td>
                     <td style="text-align:center;" id="qr-status-${i}">${statusHtml}</td>
+                </tr>`;
+            }
+
+            // Append Row for End Point
+            if (data.end_checkpoint) {
+                const ecp = data.end_checkpoint;
+                const escEName = escHtml(ecp.name);
+                const escECode = escHtml(ecp.checkpoint_code);
+                
+                html += `<tr style="background: #fff5f5;">
+                    <td class="slot-num" style="background:#fee2e2; color:#991b1b; font-weight:800;">E</td>
+                    <td>
+                        <input type="text" class="qr-slot-input"
+                            data-idx="end"
+                            data-cpid="${ecp.id}"
+                            data-field="name"
+                            value="${escEName}"
+                            placeholder="End Point"
+                            oninput="syncRow('end')"
+                        />
+                    </td>
+                    <td style="display: flex; align-items: center; gap: 8px;">
+                        <input type="text" class="qr-slot-input code-input"
+                            data-idx="end"
+                            data-cpid="${ecp.id}"
+                            data-field="code"
+                            value="${escECode}"
+                            oninput="syncRow('end')"
+                        />
+                        <button type="button" 
+                            onclick="CustomModal.showQRCode('${escJs(ecp.checkpoint_code)}', '${escJs(ecp.name)}', '${escJs(data.client_name)}')"
+                            title="View QR Code"
+                            style="width: 32px; height: 32px; flex-shrink:0; background: #fff1f2; border: 1.5px solid #fecaca; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #dc2626; transition: all 0.2s;"
+                            onmouseover="this.style.background='#fecaca'; this.style.color='#991b1b'"
+                            onmouseout="this.style.background='#fff1f2'; this.style.color='#dc2626'">
+                            👁️
+                        </button>
+                    </td>
+                    <td style="text-align:center;"><span class="qr-slot-status" style="background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">✓ End</span></td>
                 </tr>`;
             }
 
