@@ -607,7 +607,7 @@ if ($selected_mapping_id) {
         JOIN agency_clients ac ON cp.agency_client_id = ac.id
         JOIN users c ON ac.client_id = c.id
         WHERE ac.id = $selected_mapping_id
-        ORDER BY cp.is_zero_checkpoint DESC, cp.created_at DESC
+        ORDER BY CASE cp.is_zero_checkpoint WHEN 1 THEN 0 WHEN 0 THEN 1 WHEN 2 THEN 2 ELSE 3 END ASC, cp.created_at DESC
     ";
     $checkpoints_result = $conn->query($checkpoints_sql);
 }
