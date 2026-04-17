@@ -8,7 +8,7 @@ if (isset($_GET['ajax_agency_data'])) {
     $response = [];
 
     if ($type === 'clients') {
-        $sql = "SELECT ac.id, c.id as user_id, c.username as name, ac.company_name, c.status, 
+        $sql = "SELECT ac.id, c.id as user_id, c.username as name, ac.company_name, ac.site_name, c.status, 
                 ac.client_limit as site_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit,
                 (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qr_count,
                 (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guard_count,
@@ -834,10 +834,7 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group"><label class="form-label">Contact Person</label><input type="text" name="contact_person" class="form-control" placeholder="Full Name"></div>
                     <div class="form-group"><label class="form-label">Contact No.</label><input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX"></div>
                 </div>
-                <div class="form-group" style="margin-top: 12px;">
-                    <label class="form-label">Total Client Slots</label>
-                    <input type="number" name="client_limit" class="form-control" value="1" min="1" required>
-                </div>
+                <input type="hidden" name="client_limit" value="1">
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" onclick="closeModal('addAgencyModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
                     <button type="submit" name="add_agency" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Create Agency Profile</button>
@@ -1268,6 +1265,7 @@ include 'admin_layout/sidebar.php';
         // --- Agency Quick Links ---
         let qlAgencyData = null;
         let qlAgencyFullData = null;
+        let qlSiteDataMap = {};
 
         function openQuickLinksModal(full_agency) {
             console.log("Opening Quick Links for Agency:", full_agency);
@@ -1338,56 +1336,77 @@ include 'admin_layout/sidebar.php';
 
             let html = '<ul class="ql-data-list">';
             if (type === 'clients') {
+                // Group by user_id so each company appears only once
+                qlSiteDataMap = {};
+                const groups = {};
+                const groupOrder = [];
                 data.forEach(item => {
-                    const isSuspended = item.status === 'suspended';
+                    qlSiteDataMap[item.id] = item; // store by mapping id
+                    if (!groups[item.user_id]) {
+                        groups[item.user_id] = { user_id: item.user_id, name: item.company_name || item.name, status: item.status, sites: [] };
+                        groupOrder.push(item.user_id);
+                    }
+                    groups[item.user_id].sites.push(item);
+                });
+
+                groupOrder.forEach(uid => {
+                    const group = groups[uid];
+                    const isSuspended = group.status === 'suspended';
                     const statusTag = isSuspended ? `<span style="color:#ef4444; font-size: 0.7rem; font-weight:700;">[SUSPENDED]</span>` : '';
+
+                    // Aggregate stats across all sites
+                    const totQrUsed  = group.sites.reduce((s,x) => s + parseInt(x.current_qr_count   || 0), 0);
+                    const totQrLim   = group.sites.reduce((s,x) => s + parseInt(x.qr_limit           || 0), 0);
+                    const totGrdUsed = group.sites.reduce((s,x) => s + parseInt(x.current_guard_count || 0), 0);
+                    const totGrdLim  = group.sites.reduce((s,x) => s + parseInt(x.guard_limit         || 0), 0);
+                    const totInspUsed= group.sites.reduce((s,x) => s + parseInt(x.current_inspector_count || 0), 0);
+                    const totInspLim = group.sites.reduce((s,x) => s + parseInt(x.inspector_limit     || 0), 0);
+                    const totSiteLim = group.sites.reduce((s,x) => s + parseInt(x.site_limit         || 0), 0);
+                    const siteCount  = group.sites.length;
+
+                    // Build inner content: dropdown (multi-site) or direct fields (single)
+                    let innerContent = '';
+                    if (siteCount > 1) {
+                        const siteOptions = group.sites.map(s =>
+                            `<option value="${s.id}">${s.site_name || ('Site #' + s.id)}</option>`
+                        ).join('');
+                        innerContent = `
+                            <div style="margin-bottom:10px;">
+                                <label style="font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:5px;display:block;">Select Site to Manage</label>
+                                <select id="site_sel_${uid}" style="width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;font-size:0.85rem;margin-bottom:4px;" onchange="onSiteSelected(${uid}, this.value)">
+                                    <option value="">-- Choose a site --</option>
+                                    ${siteOptions}
+                                </select>
+                            </div>
+                            <div id="site_adj_fields_${uid}"></div>`;
+                    } else {
+                        const s = group.sites[0];
+                        innerContent = buildSiteAdjFields(s) + `<button class="btn-save-adj" onclick="saveAdj(${s.id})">Save Changes</button>`;
+                    }
 
                     html += `
                         <li class="ql-data-item" style="flex-direction: column; align-items: stretch; gap: 4px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                                 <div style="display:flex; flex-direction: column; gap:4px;">
                                     <div style="display:flex; align-items:center; gap:8px;">
-                                        <span class="ql-label" style="font-size: 1rem;">${item.company_name || item.name}</span>
+                                        <span class="ql-label" style="font-size: 1rem;">${group.name}</span>
                                         ${statusTag}
+                                        ${siteCount > 1 ? `<span style="font-size:0.7rem;background:#e0f2fe;color:#0369a1;padding:1px 7px;border-radius:10px;font-weight:700;">${siteCount} sites</span>` : ''}
                                     </div>
                                     <div style="display:flex; gap:12px; font-size: 0.75rem; color: #64748b; font-weight: 500;">
-                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">QR:</strong> ${item.current_qr_count}/${item.qr_limit || 0}</span>
-                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">Guards:</strong> ${item.current_guard_count}/${item.guard_limit || 0}</span>
-                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">Inspectors:</strong> ${item.current_inspector_count}/${item.inspector_limit || 0}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">QR:</strong> ${totQrUsed}/${totQrLim}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">Guards:</strong> ${totGrdUsed}/${totGrdLim}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">Inspectors:</strong> ${totInspUsed}/${totInspLim}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">Sites:</strong> ${totSiteLim}</span>
                                     </div>
                                 </div>
                                 <div style="display:flex; align-items:center; gap: 4px;">
-                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Manage Limits</button>
+                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm('grp_${uid}')">Manage Limits</button>
                                 </div>
                             </div>
-                            <div id="adj_form_${item.id}" class="ql-adj-container">
+                            <div id="adj_form_grp_${uid}" class="ql-adj-container">
                                 <p style="font-size: 0.7rem; color: #94a3b8; margin: 0 0 10px 0; font-weight:600; text-transform:uppercase;">Client Site Limits</p>
-
-                                <div class="ql-adj-row">
-                                    <span class="ql-adj-label">QR Checkpoints</span>
-                                    <div class="ql-adj-ctrl">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'qr', -1)">-</button>
-                                        <input type="number" id="adj_qr_${item.id}" class="ql-adj-input" value="${item.qr_limit || 0}">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'qr', 1)">+</button>
-                                    </div>
-                                </div>
-                                <div class="ql-adj-row">
-                                    <span class="ql-adj-label">Security Guards</span>
-                                    <div class="ql-adj-ctrl">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'guard', -1)">-</button>
-                                        <input type="number" id="adj_guard_${item.id}" class="ql-adj-input" value="${item.guard_limit || 0}">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'guard', 1)">+</button>
-                                    </div>
-                                </div>
-                                <div class="ql-adj-row">
-                                    <span class="ql-adj-label">Inspectors</span>
-                                    <div class="ql-adj-ctrl">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', -1)">-</button>
-                                        <input type="number" id="adj_insp_${item.id}" class="ql-adj-input" value="${item.inspector_limit || 0}">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', 1)">+</button>
-                                    </div>
-                                </div>
-                                <button class="btn-save-adj" onclick="saveAdj(${item.id})">Save Changes</button>
+                                ${innerContent}
                             </div>
                         </li>`;
                 });
@@ -1464,6 +1483,50 @@ include 'admin_layout/sidebar.php';
         }
 
         // --- Incremental Limit Logic ---
+        function buildSiteAdjFields(s) {
+            return `
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">Sites</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'client', -1)">-</button>
+                        <input type="number" id="adj_client_${s.id}" class="ql-adj-input" value="${s.site_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'client', 1)">+</button>
+                    </div>
+                </div>
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">QR Checkpoints</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'qr', -1)">-</button>
+                        <input type="number" id="adj_qr_${s.id}" class="ql-adj-input" value="${s.qr_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'qr', 1)">+</button>
+                    </div>
+                </div>
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">Security Guards</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'guard', -1)">-</button>
+                        <input type="number" id="adj_guard_${s.id}" class="ql-adj-input" value="${s.guard_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'guard', 1)">+</button>
+                    </div>
+                </div>
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">Inspectors</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'insp', -1)">-</button>
+                        <input type="number" id="adj_insp_${s.id}" class="ql-adj-input" value="${s.inspector_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'insp', 1)">+</button>
+                    </div>
+                </div>`;
+        }
+
+        function onSiteSelected(uid, mappingId) {
+            const fieldsContainer = document.getElementById(`site_adj_fields_${uid}`);
+            if (!mappingId) { fieldsContainer.innerHTML = ''; return; }
+            const s = qlSiteDataMap[mappingId];
+            if (!s) return;
+            fieldsContainer.innerHTML = buildSiteAdjFields(s) + `<button class="btn-save-adj" onclick="saveAdj(${mappingId})">Save Changes</button>`;
+        }
+
         function toggleAdjForm(id) {
             const form = document.getElementById(`adj_form_${id}`);
             const isVisible = form.style.display === 'block';
