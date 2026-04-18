@@ -12,32 +12,35 @@ $client_id = $_SESSION['user_id'];
 $conn->query("UPDATE scans SET scan_time = CURRENT_TIMESTAMP WHERE scan_time = '0000-00-00 00:00:00' OR scan_time IS NULL");
 
 // Get all agency_client mapping IDs for this client
-$maps_sql = "SELECT id, site_name, agency_id FROM agency_clients WHERE client_id = $client_id";
+$maps_sql = "SELECT id, site_name, agency_id FROM agency_clients WHERE client_id = $client_id ORDER BY site_name ASC";
 $maps_res = $conn->query($maps_sql);
 $mapping_ids = [];
 $agency_ids = [];
+$client_sites = []; // [ ['mapping_id' => X, 'site_name' => 'Y'], ... ]
 if ($maps_res && $maps_res->num_rows > 0) {
     while($r = $maps_res->fetch_assoc()) {
         $mapping_ids[] = (int)$r['id'];
         if ($r['agency_id']) $agency_ids[] = (int)$r['agency_id'];
+        $client_sites[] = [
+            'mapping_id' => (int)$r['id'],
+            'site_name'  => !empty($r['site_name']) ? $r['site_name'] : 'Main Site'
+        ];
     }
 }
 $mapping_ids_str = !empty($mapping_ids) ? implode(',', $mapping_ids) : '0';
 $agency_ids_str = !empty($agency_ids) ? implode(',', array_unique($agency_ids)) : '0';
+$site_count = count($client_sites);
 
 // Handle Filter Submissions
 $filter_date = $_GET['date'] ?? date('Y-m-d');
-$filter_guard = $_GET['guard_id'] ?? '';
 $filter_client = $_GET['mapping_id'] ?? '';
 $filter_checkpoint = $_GET['checkpoint_id'] ?? '';
 $filter_shift = $_GET['shift'] ?? '';
 
-// Fetch guards for filtering (Scope to site if selected, otherwise all assigned agency guards)
-$g_scope_sql = !empty($filter_client) ? 
-    "agency_id = (SELECT agency_id FROM agency_clients WHERE id = " . (int)$filter_client . ")" : 
-    "agency_id IN ($agency_ids_str)";
-$guards_sql = "SELECT id, name FROM guards WHERE $g_scope_sql ORDER BY name ASC";
-$guards_res = $conn->query($guards_sql);
+// Auto-select the only site if client has exactly 1 site and none is selected yet
+if (empty($filter_client) && $site_count === 1) {
+    $filter_client = (string)$client_sites[0]['mapping_id'];
+}
 
 // Fetch checkpoints for filtering (Scope to site if selected)
 $cp_scope_sql = !empty($filter_client) ? "agency_client_id = " . (int)$filter_client : "agency_client_id IN ($mapping_ids_str)";
@@ -53,10 +56,6 @@ if (!empty($filter_date)) {
     // Capture the 24-hour shift window: 6 AM today to 6 AM tomorrow
     $where_clauses[] = "s.scan_time >= '$target_date 06:00:00'";
     $where_clauses[] = "s.scan_time < '$next_date 06:00:00'";
-}
-if (!empty($filter_guard)) {
-    $g_id = (int)$filter_guard;
-    $where_clauses[] = "s.guard_id = $g_id";
 }
 if (!empty($filter_client)) {
     $m_id = (int)$filter_client;
@@ -412,24 +411,30 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
             
             <div class="card">
                 <div class="card-header">Filter Patrol History</div>
-                <form class="filter-form" method="GET" action="client_patrol_history.php">
+                <form class="filter-form" method="GET" action="client_patrol_history.php" id="filterForm">
                     <div class="form-group">
                         <label class="form-label" for="date">Select Date</label>
                         <input type="date" id="date" name="date" class="form-control" value="<?php echo htmlspecialchars($filter_date); ?>" onchange="this.form.submit()">
                     </div>
 
+                    <?php if ($site_count > 1): ?>
                     <div class="form-group">
-                        <label class="form-label" for="guard_id">Guard</label>
-                        <select id="guard_id" name="guard_id" class="form-control" onchange="this.form.submit()">
-                            <option value="">-- All Guards --</option>
-                            <?php if ($guards_res && $guards_res->num_rows > 0): ?>
-                                <?php mysqli_data_seek($guards_res, 0); ?>
-                                <?php while($g = $guards_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $g['id']; ?>" <?php if($filter_guard == $g['id']) echo 'selected'; ?>><?php echo htmlspecialchars($g['name']); ?></option>
-                                <?php endwhile; ?>
-                            <?php endif; ?>
+                        <label class="form-label" for="mapping_id">Select A Site</label>
+                        <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
+                            <option value="">-- All Sites --</option>
+                            <?php foreach ($client_sites as $site): ?>
+                                <option value="<?php echo $site['mapping_id']; ?>" <?php if ($filter_client == $site['mapping_id']) echo 'selected'; ?>>
+                                    <?php echo htmlspecialchars($site['site_name']); ?>
+                                </option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
+                    <?php else: ?>
+                        <?php if ($site_count === 1): ?>
+                        <input type="hidden" name="mapping_id" value="<?php echo $client_sites[0]['mapping_id']; ?>">
+                        <?php endif; ?>
+                    <?php endif; ?>
+
                     <div class="form-group">
                         <label class="form-label" for="shift">Shift</label>
                         <select id="shift" name="shift" class="form-control" onchange="this.form.submit()">
