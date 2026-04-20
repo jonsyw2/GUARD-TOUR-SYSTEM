@@ -22,6 +22,16 @@ if (!$agency_id && isset($_SESSION['username'])) {
     }
 }
 
+$message = $_SESSION['status_message'] ?? '';
+$message_type = $_SESSION['status_type'] ?? '';
+$show_status_modal = !empty($message);
+unset($_SESSION['status_message'], $_SESSION['status_type']);
+
+function setStatusMessage($msg, $type = 'success') {
+    $_SESSION['status_message'] = $msg;
+    $_SESSION['status_type'] = $type;
+}
+
 // Helper function for safer migrations
 if (!function_exists('addColumnSafely')) {
     function addColumnSafely($conn, $table, $column, $definition, $after = '') {
@@ -173,9 +183,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_site'])) {
         $site_count = $count_res->fetch_assoc()['site_count'];
 
         if ($site_count <= 1) {
-            $message = "Deletion blocked: Every client must have at least one site location.";
-            $message_type = "error";
-            $show_status_modal = true;
+            setStatusMessage("Deletion blocked: Every client must have at least one site location.", "error");
+            header("Location: agency_patrol_management.php?tab=qr&mapping_id=$mapping_id");
+            exit();
         } else {
             $conn->begin_transaction();
             try {
@@ -193,21 +203,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_site'])) {
                 $conn->query("DELETE FROM agency_clients WHERE id = $mapping_id");
 
                 $conn->commit();
-                $message = "Site '$site_name' and all its historical records have been permanently removed.";
-                $message_type = "success";
-                $show_status_modal = true;
-                $preselect_org_id = $client_id; // Added to persist selection
+                setStatusMessage("Site '$site_name' and all its historical records have been permanently removed.");
+                header("Location: agency_patrol_management.php?tab=qr");
+                exit();
             } catch (Exception $e) {
                 $conn->rollback();
-                $message = "Deletion failed: " . $e->getMessage();
-                $message_type = "error";
-                $show_status_modal = true;
+                setStatusMessage("Deletion failed: " . $e->getMessage(), "error");
+                header("Location: agency_patrol_management.php?tab=qr&mapping_id=$mapping_id");
+                exit();
             }
         }
     } else {
-        $message = "Unauthorized deletion attempt.";
-        $message_type = "error";
-        $show_status_modal = true;
+        setStatusMessage("Unauthorized deletion attempt.", "error");
+        header("Location: agency_patrol_management.php?tab=qr");
+        exit();
     }
 }
 
@@ -232,6 +241,94 @@ if (isset($_POST['ajax_delete_checkpoint']) && isset($_POST['cp_id'])) {
     exit();
 }
 
+// AJAX Handler: Update Site Name
+if (isset($_POST['ajax_update_site_name']) && isset($_POST['mapping_id'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+    $new_name = $conn->real_escape_string($_POST['site_name'] ?? '');
+    
+    $stmt = $conn->prepare("UPDATE agency_clients SET site_name = ? WHERE id = ? AND agency_id = ?");
+    $stmt->bind_param("sii", $new_name, $mapping_id, $agency_id);
+    $stmt->execute();
+    
+    echo json_encode(['success' => true]);
+    exit();
+}
+
+// AJAX Handler: Update Checkpoint Name
+if (isset($_POST['ajax_update_checkpoint_name']) && isset($_POST['cp_id'])) {
+    $cp_id = (int)$_POST['cp_id'];
+    $new_name = $conn->real_escape_string($_POST['name'] ?? '');
+    
+    $stmt = $conn->prepare("
+        UPDATE checkpoints cp
+        JOIN agency_clients ac ON cp.agency_client_id = ac.id
+        SET cp.name = ? 
+        WHERE cp.id = ? AND ac.agency_id = ?
+    ");
+    $stmt->bind_param("sii", $new_name, $cp_id, $agency_id);
+    $stmt->execute();
+    
+    echo json_encode(['success' => true]);
+    exit();
+}
+
+// AJAX Handler: Add New Checkpoint
+if (isset($_POST['ajax_add_checkpoint']) && isset($_POST['mapping_id'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+    $name = $conn->real_escape_string($_POST['name'] ?? 'New Checkpoint');
+    
+    // Security: Verify mapping belongs to agency
+    $verify = $conn->query("SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id");
+    if ($verify && $verify->num_rows > 0) {
+        $code = strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
+        $stmt = $conn->prepare("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code) VALUES (?, ?, ?)");
+        $stmt->bind_param("iss", $mapping_id, $name, $code);
+        $stmt->execute();
+        
+        echo json_encode(['success' => true, 'id' => $conn->insert_id, 'name' => $name]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+    }
+    exit();
+}
+
+// AJAX Handler: Sync Shifts
+if (isset($_POST['ajax_sync_shifts']) && isset($_POST['mapping_id'])) {
+    $mapping_id = (int)$_POST['mapping_id'];
+    $shifts = $_POST['shifts'] ?? [];
+    $starts = $_POST['shift_starts'] ?? [];
+    $ends = $_POST['shift_ends'] ?? [];
+    
+    // Security check
+    $verify = $conn->query("SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id");
+    if (!$verify || $verify->num_rows == 0) {
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit();
+    }
+
+    $conn->begin_transaction();
+    try {
+        $conn->query("DELETE FROM shifts WHERE agency_client_id = $mapping_id");
+        foreach ($shifts as $i => $s_name) {
+            $name = trim($conn->real_escape_string($s_name));
+            $s_start = $conn->real_escape_string($starts[$i] ?? '');
+            $s_end = $conn->real_escape_string($ends[$i] ?? '');
+            
+            if (!empty($name)) {
+                $stmt = $conn->prepare("INSERT INTO shifts (agency_client_id, shift_name, start_time, end_time) VALUES (?, ?, ?, ?)");
+                $stmt->bind_param("isss", $mapping_id, $name, $s_start, $s_end);
+                $stmt->execute();
+            }
+        }
+        $conn->commit();
+        echo json_encode(['success' => true]);
+    } catch (Exception $e) {
+        $conn->rollback();
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit();
+}
+
 $message = '';
 $message_type = '';
 $show_status_modal = false;
@@ -244,9 +341,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $vs_check = $conn->query("SELECT visual_saved FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id LIMIT 1");
     $vs_row   = $vs_check ? $vs_check->fetch_assoc() : null;
     if (!$vs_row || !(int)$vs_row['visual_saved']) {
-        $message      = "Please open the Visual Map Designer and save the layout before configuring patrol patterns.";
-        $message_type = "error";
-        $show_status_modal = true;
+        setStatusMessage("Please open the Visual Map Designer and save the layout before configuring patrol patterns.", "error");
+        header("Location: agency_patrol_management.php?tab=patrol&mapping_id=$mapping_id");
+        exit();
     } else {
 
     $checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
@@ -263,42 +360,42 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     }
     
     $conn->begin_transaction();
-    try {
-        // Update Lock Status
-        $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ? WHERE id = ? AND agency_id = ?");
-        $stmt->bind_param("iii", $is_locked, $mapping_id, $agency_id);
-        $stmt->execute();
+        try {
+            // Update Lock Status
+            $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ? WHERE id = ? AND agency_id = ?");
+            $stmt->bind_param("iii", $is_locked, $mapping_id, $agency_id);
+            $stmt->execute();
 
-        // Clear existing and save new assignments
-        $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id");
-        
-        for ($i = 0; $i < count($checkpoint_ids); $i++) {
-            $final_checkpoint_ids[] = (int)$checkpoint_ids[$i];
-            $final_intervals[] = (int)($intervals[$i] ?? 0);
-            $final_durations[] = (int)($durations[$i] ?? 0);
-            $final_shifts[] = $conn->real_escape_string($assignment_shifts[$i] ?? '');
-        }
+            // Clear existing and save new assignments
+            $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id");
+            
+            for ($i = 0; $i < count($checkpoint_ids); $i++) {
+                $final_checkpoint_ids[] = (int)$checkpoint_ids[$i];
+                $final_intervals[] = (int)($intervals[$i] ?? 0);
+                $final_durations[] = (int)($durations[$i] ?? 0);
+                $final_shifts[] = $conn->real_escape_string($assignment_shifts[$i] ?? '');
+            }
 
-        for ($i = 0; $i < count($final_checkpoint_ids); $i++) {
-            $cp_id = $final_checkpoint_ids[$i];
-            $interval = $final_intervals[$i];
-            $duration = $final_durations[$i];
-            $as_shift = $final_shifts[$i];
-            $order = $i + 1;
-            $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes, shift_name) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt_ins->bind_param("iiiiis", $mapping_id, $cp_id, $order, $interval, $duration, $as_shift);
-            $stmt_ins->execute();
+            for ($i = 0; $i < count($final_checkpoint_ids); $i++) {
+                $cp_id = $final_checkpoint_ids[$i];
+                $interval = $final_intervals[$i];
+                $duration = $final_durations[$i];
+                $as_shift = $final_shifts[$i];
+                $order = $i + 1;
+                $stmt_ins = $conn->prepare("INSERT INTO tour_assignments (agency_client_id, checkpoint_id, sort_order, interval_minutes, duration_minutes, shift_name) VALUES (?, ?, ?, ?, ?, ?)");
+                $stmt_ins->bind_param("iiiiis", $mapping_id, $cp_id, $order, $interval, $duration, $as_shift);
+                $stmt_ins->execute();
+            }
+            $conn->commit();
+            setStatusMessage("Patrol configuration saved successfully!");
+            header("Location: agency_patrol_management.php?tab=patrol&mapping_id=$mapping_id");
+            exit();
+        } catch (Exception $e) {
+            $conn->rollback();
+            setStatusMessage("Error saving patrol: " . $e->getMessage(), "error");
+            header("Location: agency_patrol_management.php?tab=patrol&mapping_id=$mapping_id");
+            exit();
         }
-        $conn->commit();
-        $message = "Patrol configuration saved successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
-    } catch (Exception $e) {
-        $conn->rollback();
-        $message = "Error saving patrol: " . $e->getMessage();
-        $message_type = "error";
-        $show_status_modal = true;
-    }
     } // end visual_saved gate
 }
 
@@ -478,9 +575,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_new_site'])) {
         }
 
     } catch (Exception $e) {
-        $message = $e->getMessage();
-        $message_type = "error";
-        $show_status_modal = true;
+        setStatusMessage($e->getMessage(), "error");
+        header("Location: agency_patrol_management.php?tab=qr&mapping_id=$parent_mapping_id");
+        exit();
     }
 }
 
@@ -495,11 +592,18 @@ $clients_sql = "
         ac.shift_type,
         ac.company_name,
         ac.qr_limit, 
+        ac.guard_limit,
+        ac.inspector_limit,
         ac.client_limit,
         ac.qr_override, 
         ac.is_disabled,
         ac.visual_saved,
+        (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id = ac.id) as site_used_qrs,
         (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_used_qrs,
+        (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as site_used_guards,
+        (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_used_guards,
+        (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as site_used_inspectors,
+        (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_used_inspectors,
         (SELECT COUNT(*) FROM agency_clients WHERE client_id = ac.client_id) as site_count
     FROM agency_clients ac 
     JOIN users u ON ac.client_id = u.id 
@@ -613,11 +717,7 @@ if ($selected_mapping_id) {
 }
 
 // Determine active tab
-$active_tab = isset($_GET['tab']) && $_GET['tab'] === 'patrol' ? 'patrol' : 'qr';
-if ($_SERVER["REQUEST_METHOD"] == "POST") {
-    if (isset($_POST['save_patrol'])) $active_tab = 'patrol';
-    if (isset($_POST['update_limit'])) $active_tab = 'qr';
-}
+$active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'qr';
 
 ?>
 <!DOCTYPE html>
@@ -635,7 +735,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     <script src="js/modal_system.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0; gap: 0; overflow-x: hidden; }
 
         .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
@@ -646,10 +746,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
 
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
-        .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
-        .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
-        .badge { background: #d1fae5; color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; transition: margin-left 0.3s ease; width: 100%; }
+        .topbar { background: white; padding: 15px 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; gap: 10px; }
+        .topbar h2 { font-size: 1.15rem; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .badge { background: #d1fae5; color: #10b981; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        
+        .hamburger { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #374151; padding: 5px; z-index: 1001; }
+        .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; backdrop-filter: blur(2px); }
 
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
@@ -709,7 +812,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .lock-label { font-weight: 600; color: #9a3412; cursor: pointer; }
 
         /* QR Management Tab Styles */
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px;}
+        .grid-container { display: grid; grid-template-columns: 1.6fr 1.1fr; gap: 24px; margin-bottom: 32px;}
         @media (max-width: 768px) { .grid-container { grid-template-columns: 1fr; } }
         
         .table-container { overflow-x: auto; }
@@ -907,15 +1010,61 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             100% { filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4)); opacity: 0.7; }
         }
 
+        .download-mode .checkpoint-circle { animation: none !important; box-shadow: none !important; }
+
+        .visual-world {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 3000px;
+            height: 3000px;
+            transform-origin: 0 0;
+            will-change: transform;
+            /* Allow lines to be seen outside world bounds (fixes clipping) */
+            overflow: visible;
+        }
+
         .visual-svg {
             position: absolute;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
+            width: 3000px;
+            height: 3000px;
             pointer-events: none;
             z-index: 1;
+            overflow: visible;
         }
+
+        /* Floating Controls */
+        .visual-controls {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 1000;
+        }
+        .ctrl-btn {
+            width: 38px;
+            height: 38px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #1e293b;
+            cursor: pointer;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s;
+            backdrop-filter: blur(4px);
+        }
+        .ctrl-btn:hover { background: #ffffff; color: #6366f1; transform: translateY(-1px); }
+        .ctrl-btn:active { transform: translateY(0); scale: 0.95; }
+        .ctrl-btn.fit { font-size: 0.9rem; }
 
         .visual-path {
             stroke: #6366f1;
@@ -959,6 +1108,54 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .card-header-flex { display: flex; justify-content: space-between; align-items: center; }
         .close-modal-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; }
         .close-modal-btn:hover { color: #1f2937; }
+
+        /* Modern Responsive Scaling Classes */
+        .shift-input-row, .checkpoint-input-row {
+            display: flex; gap: 10px; align-items: center; margin-bottom: 8px;
+        }
+        
+        @media (max-width: 1024px) {
+            .sidebar { position: fixed; left: -250px; height: 100%; z-index: 1000; }
+            .sidebar.show { left: 0; }
+            .hamburger { display: block; }
+            .sidebar-overlay.show { display: block; }
+            .content-area { padding: 16px; }
+            .topbar { padding: 15px; }
+        }
+
+        @media (max-width: 768px) {
+            .topbar h2 { font-size: 1rem; }
+            .user-info span:first-child { display: none; }
+            .card { padding: 20px; }
+            .content-area { padding: 12px; }
+            
+            /* Aggressive Scaling for Inputs */
+            .shift-input-row, .setting-inputs { 
+                gap: 6px; 
+                font-size: 0.85rem;
+            }
+            .form-control { padding: 8px 10px; font-size: 0.85rem; }
+            .input-group { padding: 2px 6px; gap: 4px; }
+            .input-group input { width: 35px; font-size: 0.85rem; }
+            .btn { padding: 8px 14px; font-size: 0.85rem; }
+            .tab-btn { padding: 10px 16px; font-size: 0.85rem; }
+            
+            .shift-input-row span { font-size: 0.65rem !important; }
+            .shift-input-row input[type="time"] { padding: 6px 4px !important; font-size: 0.8rem; }
+        }
+
+        @media (max-width: 480px) {
+            .shift-input-row { 
+                gap: 4px; 
+            }
+            .shift-input-row > div:first-child { flex: 1.5 !important; min-width: 60px; }
+            .shift-input-row span { display: none; } /* Hide "FROM"/"TO" text to save space */
+            .input-group label { display: none; } /* Hide labels in patrol items */
+            .checkpoint-name { font-size: 0.8rem; }
+            .setting-inputs { gap: 4px; }
+            .input-group { min-width: 45px; }
+            .handle { font-size: 1rem; }
+        }
     </style>
 </head>
 <body>
@@ -982,8 +1179,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         </div>
     </aside>
 
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
     <main class="main-content">
         <header class="topbar">
+            <button class="hamburger" onclick="toggleSidebar()">☰</button>
             <h2>Patrol & QR Management</h2>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['username']); ?></strong></span>
@@ -1194,7 +1393,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <?php if (empty($clients_data)): ?>
                             <p style="color: #6b7280;">You have not been assigned any clients yet.</p>
                         <?php else: ?>
-                            <form action="agency_patrol_management.php?tab=qr" method="POST" id="qrLimitForm" onsubmit="const total = calculateTotalShiftMinutes(); if (total > 1440) { const hours = (total / 60).toFixed(1); showAlert('Total shift duration cannot exceed 24 hours (Currently: ' + hours + ' hours).'); return false; } return true;">
+                            <form action="agency_patrol_management.php?tab=qr" method="POST" id="qrLimitForm" onsubmit="handleQrConfigSubmit(event)">
                                 <div class="form-group">
                                     <label class="form-label" for="client_org_id">Select Client</label>
                                     <select id="client_org_id" class="form-control" onchange="onOrganizationChange()">
@@ -1240,7 +1439,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                 </style>
                                 <div class="form-group">
                                     <label class="form-label" for="site_name">Site Name / Description</label>
-                                    <input type="text" id="site_name" name="site_name" class="form-control" placeholder="e.g. Main Factory, West Wing" required>
+                                    <input type="text" id="site_name" name="site_name" class="form-control" placeholder="e.g. Main Factory, West Wing" required onchange="markQrConfigDirty()">
                                 </div>
                                 <div class="form-group" style="margin-top: 24px;">
                                     <label class="form-label">Checkpoints</label>
@@ -1263,8 +1462,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                                          <span id="shift-total-duration" style="font-size: 0.85rem; color: #64748b; font-weight: 600;">Total Duration: 0h / 24h</span>
                                     </div>
                                 </div>
+                                <button type="submit" class="btn btn-success" style="width: 100%; margin-top: 32px; height: 50px; font-weight: 600; font-size: 1rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);">Save Configuration</button>
                                 </div> <!-- end site_config_details -->
-                                <button type="submit" id="main_config_submit" name="update_limit" class="btn btn-success" style="width:100%; margin-top: 20px; display: none;">Site Configuration</button>
                             </form>
                         <?php endif; ?>
                     </div>
@@ -1272,51 +1471,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     <!-- Client Usage Stats -->
                     <div class="card">
                         <h3 class="card-header">Client Limits & Usage</h3>
-                        <div class="card-body">
-                            <?php if (empty($clients_data)): ?>
-                                <p style="color: #6b7280;">No data to display.</p>
-                            <?php else: ?>
-                                <?php 
-                                    $unique_orgs = [];
-                                    foreach($clients_data as $client) {
-                                        if(!in_array($client['client_id'], $unique_orgs)) {
-                                            $unique_orgs[] = $client['client_id'];
-                                            $limit = (int)$client['qr_limit'];
-                                            $current = (int)$client['total_used_qrs'];
-                                            $percent = ($limit > 0) ? ($current / $limit) * 100 : 0;
-                                            
-                                            $fill_class = '';
-                                            if ($percent >= 100) $fill_class = 'danger';
-                                            else if ($percent >= 80) $fill_class = 'warning';
-                                ?>
-                                    <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #f1f5f9;">
-                                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-                                            <div>
-                                                <strong style="color: #1e293b; font-size: 0.9rem;"><?php echo htmlspecialchars($client['company_name'] ?: $client['client_name']); ?></strong>
-                                                <div style="font-size: 0.7rem; color: #64748b; margin-top: 2px;">
-                                                    Shared pool across <?php echo $client['site_count']; ?> site<?php echo $client['site_count'] > 1 ? 's' : ''; ?>
-                                                </div>
-                                            </div>
-                                            <span style="font-size: 0.85rem; color: #64748b; font-weight: 600;">
-                                                <?php if($client['is_disabled']): ?>
-                                                    <span style="color: #ef4444;">SUSPENDED</span>
-                                                <?php else: ?>
-                                                    <?php echo $current; ?> / <?php echo $limit; ?> QRs
-                                                <?php endif; ?>
-                                            </span>
-                                        </div>
-                                        <div class="progress-bar" style="height: 8px; background: #f1f5f9; border-radius: 4px; overflow: hidden; margin-bottom: 6px;">
-                                            <div class="progress-fill <?php echo $fill_class; ?>" style="width: <?php echo min(100, $percent); ?>%; height: 100%; background: <?php echo $percent > 90 ? '#ef4444' : ($percent > 75 ? '#f59e0b' : '#10b981'); ?>; border-radius: 4px; transition: width 0.3s ease;"></div>
-                                        </div>
-                                        <?php if($client['qr_override']): ?>
-                                            <div style="font-size: 0.65rem; color: #10b981; font-weight: 700; text-transform: uppercase;">✓ Admin Override Active</div>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php 
-                                        }
-                                    } 
-                                ?>
-                            <?php endif; ?>
+                        <div id="usage-sidebar-content" class="card-body">
+                            <div style="text-align: center; padding: 20px; color: #64748b;">
+                                <div style="font-size: 2rem; margin-bottom: 10px;">📊</div>
+                                <p style="font-size: 0.85rem;">Select a client and site to view usage statistics.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1389,13 +1548,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     Draggable overview of checkpoints. <strong>Green (S)</strong> is Start, <strong>Orange (E)</strong> is End, and <strong>White</strong> are checkpoints.
                 </p>
                 <div id="visual-canvas" class="visual-container">
-                    <svg id="visual-svg" class="visual-svg">
-                        <defs>
-                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                                <polygon points="0 0, 10 3.5, 0 7" fill="#6366f1" />
-                            </marker>
-                        </defs>
-                    </svg>
+                    <div class="visual-controls">
+                        <button class="ctrl-btn" onclick="zoomMap(1.2)" title="Zoom In">+</button>
+                        <button class="ctrl-btn" onclick="zoomMap(0.8)" title="Zoom Out">−</button>
+                        <button class="ctrl-btn fit" onclick="fitMapToScreen()" title="Fit to Screen">FIT</button>
+                    </div>
+                    <div id="visual-world" class="visual-world" oncontextmenu="return false;">
+                        <svg id="visual-svg" class="visual-svg">
+                            <defs>
+                                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 10 3.5, 0 7" fill="#6366f1" />
+                                </marker>
+                            </defs>
+                        </svg>
+                    </div>
                 </div>
                 <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
                     <button id="saveVisualBtn" class="btn-modal btn-success" style="max-width: 200px;" onclick="saveVisualLayout()">Save Layout</button>
@@ -1448,7 +1614,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         const orgsData = <?php echo json_encode(array_values($orgs_data)); ?>;
         const currentShifts = <?php echo json_encode($client_shifts ?? []); ?>;
         let elementToFocusAfterAlert = null;
+        let isQrConfigDirty = false;
+
+        function markQrConfigDirty() {
+            if (!isQrConfigDirty) {
+                console.log('QR Configuration marked as DIRTY');
+                isQrConfigDirty = true;
+            }
+        }
+
+        async function checkQrConfigClean() {
+            if (isQrConfigDirty) {
+                const stay = await CustomModal.confirm(
+                    "You have unsaved changes in QR & Checkpoints. Save first?",
+                    "Unsaved Changes"
+                );
+                if (stay) {
+                    return false; // User wants to stay and save
+                }
+                // User clicked "Cancel" (in user's words) or chooses to discard/proceed
+                isQrConfigDirty = false; 
+            }
+            return true;
+        }
         
+        // Sidebar Toggle Logic
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
         // Initialize Sortable for drag-and-drop reordering
         document.addEventListener('DOMContentLoaded', function() {
             const tourList = document.getElementById('tour-list');
@@ -1461,7 +1656,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         });
 
-        function switchTab(tabId) {
+        async function switchTab(tabId) {
+            // Guard: If leaving QR tab with unsaved changes
+            const currentTab = document.querySelector('.tab-pane.active').id.replace('tab-', '');
+            if (currentTab === 'qr' && tabId !== 'qr') {
+                const canProceed = await checkQrConfigClean();
+                if (!canProceed) return;
+            }
+
             if (tabId === 'patrol') {
                 // When switching to patrol, do a full reload carrying the selected mapping_id
                 // so PHP can render the correct patrol pattern server-side.
@@ -1491,7 +1693,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             window.history.pushState({}, '', url);
         }
 
-        function onOrganizationChange() {
+        function onOrganizationChange(skipUpdateLimit = false) {
             const orgSelect = document.getElementById('client_org_id');
             const siteSelect = document.getElementById('qr_agency_client_id');
             const siteContainer = document.getElementById('site_selection_container');
@@ -1524,6 +1726,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 opt.text = s.site_name || 'Primary Site';
                 siteSelect.add(opt);
             });
+
+            // Auto-select if only one site exists
+            if (sites.length === 1) {
+                siteSelect.value = sites[0].mapping_id;
+                if (!skipUpdateLimit) updateLimitForm();
+            } else {
+                updateUsageSidebar(null);
+            }
 
             // Check limits
             const limit = parseInt(org.client_limit) || 0;
@@ -1598,7 +1808,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     const orgSelect = document.getElementById('client_org_id');
                     if (orgSelect) {
                         orgSelect.value = client.client_id;
-                        onOrganizationChange();
+                        onOrganizationChange(true); // Skip updateLimitForm as we call it explicitly below
                         
                         const siteSelect = document.getElementById('qr_agency_client_id');
                         if (siteSelect) {
@@ -1616,24 +1826,83 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             }
         });
 
+        function updateUsageSidebar(mappingId) {
+            const container = document.getElementById('usage-sidebar-content');
+            if (!container) return;
+
+            if (!mappingId) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: #64748b;">
+                        <div style="font-size: 2rem; margin-bottom: 10px;">📊</div>
+                        <p style="font-size: 0.85rem;">Select a client and site to view usage statistics.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const client = clientsData.find(c => String(c.mapping_id) === String(mappingId));
+            if (!client) return;
+
+            // QR Calculations
+            const qrLimit = parseInt(client.qr_limit) || 0;
+            const qrSiteUsed = parseInt(client.site_used_qrs) || 0;
+            const qrTotalUsed = parseInt(client.total_used_qrs) || 0;
+            const qrPercent = qrLimit > 0 ? (qrTotalUsed / qrLimit) * 100 : 0;
+            
+            // Guard Calculations
+            const grdLimit = parseInt(client.guard_limit) || 0;
+            const grdSiteUsed = parseInt(client.site_used_guards) || 0;
+            const grdTotalUsed = parseInt(client.total_used_guards) || 0;
+            const grdPercent = grdLimit > 0 ? (grdTotalUsed / grdLimit) * 100 : 0;
+
+            // Inspector Calculations
+            const inspLimit = parseInt(client.inspector_limit) || 0;
+            const inspSiteUsed = parseInt(client.site_used_inspectors) || 0;
+            const inspTotalUsed = parseInt(client.total_used_inspectors) || 0;
+            const inspPercent = inspLimit > 0 ? (inspTotalUsed / inspLimit) * 100 : 0;
+
+            const getFillColor = (p) => p > 90 ? '#ef4444' : (p > 75 ? '#f59e0b' : '#10b981');
+
+            container.innerHTML = `
+                <div style="margin-bottom: 24px; padding-bottom: 20px;">
+                    <div style="font-weight: 700; color: #1e293b; font-size: 0.9rem; margin-bottom: 18px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                        ${client.site_name || 'Primary Site'}
+                    </div>
+                    
+                    <!-- QR Usage -->
+                    <div style="margin-bottom: 18px;">
+                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
+                             <span style="font-size: 0.72rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">QR Checkpoints</span>
+                             <span style="font-size: 0.85rem; color: #1e293b; font-weight: 700;">${qrTotalUsed} / ${qrLimit}</span>
+                        </div>
+                        <div class="progress-bar" style="height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden; margin-bottom: 4px;">
+                            <div style="width: ${Math.min(100, qrPercent)}%; height: 100%; background: ${getFillColor(qrPercent)}; border-radius: 3px; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+
+
+                    ${client.is_disabled == 1 ? '<div style="margin-top: 15px; padding: 10px; background: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; color: #ef4444; font-size: 0.75rem; font-weight: 700; text-align: center; text-transform: uppercase; letter-spacing: 0.05em;">Account Suspended</div>' : ''}
+                    ${client.qr_override == 1 ? '<div style="margin-top:12px; font-size: 0.65rem; color: #10b981; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">✓ Admin Override Active</div>' : ''}
+                </div>
+            `;
+        }
+
         async function updateLimitForm() {
             const select = document.getElementById('qr_agency_client_id');
             const mappingId = parseInt(select.value);
             const siteDetails = document.getElementById('site_config_details');
-            const submitBtn = document.getElementById('main_config_submit');
             const deleteBtn = document.getElementById('deleteSiteBtn');
 
             if (!mappingId) {
                 if (siteDetails) siteDetails.style.display = 'none';
-                if (submitBtn) submitBtn.style.display = 'none';
                 if (deleteBtn) deleteBtn.style.display = 'none';
+                updateUsageSidebar(null);
                 return;
             }
             
+            updateUsageSidebar(mappingId);
             if (deleteBtn) deleteBtn.style.display = 'flex';
-
             if (siteDetails) siteDetails.style.display = 'block';
-            if (submitBtn) submitBtn.style.display = 'block';
 
             const siteNameInput = document.getElementById('site_name');
             const container = document.getElementById('checkpoints-container');
@@ -1645,8 +1914,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             container.innerHTML = '';
             shiftContainer.innerHTML = '';
             limitText.textContent = '';
-            
-            if (!mappingId) return;
+            isQrConfigDirty = false; // Reset when switching sites
 
             // Store current mappingId to handle race conditions
             select.dataset.currentLoading = mappingId;
@@ -1676,20 +1944,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     if (data.checkpoints && data.checkpoints.length > 0) {
                         data.checkpoints.forEach(cp => {
                             if (cp.isStart || cp.isEnd) return; // Skip Starting Point and End Point
-                            addCheckpointInput(cp.name, cp.id);
+                            addCheckpointInput(cp.name, cp.id, true); // true = skipDirty
                         });
                     } else {
-                        addCheckpointInput(); // Add at least one empty row
+                        addCheckpointInput('', '', true); // Add at least one empty row, skipDirty
                     }
 
                     if (data.shifts && data.shifts.length > 0) {
                         data.shifts.forEach(sh => {
-                            addShiftInput(sh.shift_name, sh.id, sh.start_time, sh.end_time);
+                            addShiftInput(sh.shift_name, sh.id, sh.start_time, sh.end_time, true); // true = skipDirty
                         });
-                    } else {
-                        // Default shifts if none exist
-                        addShiftInput('Day Shift', '', '06:00', '18:00');
-                        addShiftInput('Night Shift', '', '18:00', '06:00');
                     }
                 } catch (e) {
                     console.error('Error fetching site data:', e);
@@ -1725,7 +1989,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             return total;
         }
 
-        function updateDurationDisplay() {
+        function updateDurationDisplay(skipDirty = false) {
             const total = calculateTotalShiftMinutes();
             const hours = (total / 60).toFixed(1);
             const display = document.getElementById('shift-total-duration');
@@ -1733,44 +1997,55 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 display.innerText = `Total Duration: ${hours}h / 24h`;
                 display.style.color = total > 1440 ? '#ef4444' : '#64748b';
             }
+            if (!skipDirty) markQrConfigDirty();
         }
 
-        function addShiftInput(value = '', id = '', startTime = '', endTime = '') {
+        function addShiftInput(value = '', id = '', startTime = '', endTime = '', skipDirty = false) {
             const container = document.getElementById('shifts-container');
+            
+            // If adding a new empty row (Manual user click)
+            if (value === '') {
+                const total = calculateTotalShiftMinutes();
+                if (total >= 1440) {
+                    showAlert("You have already allocated 24 hours of shifts. Please adjust or remove an existing shift before adding a new one.");
+                    return;
+                }
+            }
+
             const row = document.createElement('div');
             row.className = 'shift-input-row';
-            row.style.display = 'flex';
-            row.style.gap = '10px';
-            row.style.alignItems = 'center';
-            row.style.marginBottom = '8px';
             
             // Format time strings HH:MM:SS -> HH:MM for HTML5 time picker
             const formattedStart = startTime ? startTime.substring(0, 5) : '';
             const formattedEnd = endTime ? endTime.substring(0, 5) : '';
 
             row.innerHTML = `
-                <div style="flex: 2;">
-                    <input type="text" name="shifts[]" class="form-control" placeholder="Shift Name (Day Shift)" value="${value.replace(/"/g, '&quot;')}" required>
+                <div style="flex: 1.2; min-width: 70px;">
+                    <input type="text" name="shifts[]" class="form-control" placeholder="e.g. Morning Shift" value="${value.replace(/"/g, '&quot;')}" required>
                 </div>
-                <div style="flex: 1; display: flex; align-items: center; gap: 5px;">
-                    <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">FROM</span>
-                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" style="padding: 10px 8px;" onchange="updateDurationDisplay()">
+                <div style="flex: 1; display: flex; align-items: center; gap: 4px; min-width: 125px; flex-shrink: 0;">
+                    <span style="font-size: 0.7rem; color: #64748b; font-weight: 700;">FROM</span>
+                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" style="padding: 8px 4px; font-size: 0.85rem;" onchange="updateDurationDisplay()">
                 </div>
-                <div style="flex: 1; display: flex; align-items: center; gap: 5px;">
-                    <span style="font-size: 0.75rem; color: #64748b; font-weight: 600;">TO</span>
-                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" style="padding: 10px 8px;" onchange="updateDurationDisplay()">
+                <div style="flex: 1; display: flex; align-items: center; gap: 4px; min-width: 125px; flex-shrink: 0;">
+                    <span style="font-size: 0.7rem; color: #64748b; font-weight: 700;">TO</span>
+                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" style="padding: 8px 4px; font-size: 0.85rem;" onchange="updateDurationDisplay()">
                 </div>
                 <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border-radius: 8px; border: none; flex-shrink: 0;" onclick="this.parentElement.remove(); updateDurationDisplay();">✕</button>
             `;
             container.appendChild(row);
-            updateDurationDisplay();
+            updateDurationDisplay(skipDirty);
         }
 
-        function addCheckpointInput(value = '', id = '') {
+        async function addCheckpointInput(value = '', id = '', skipDirty = false) {
             const container = document.getElementById('checkpoints-container');
+            const select = document.getElementById('qr_agency_client_id');
+            const mappingId = select.value;
             
-            // If adding a new empty input, verify existing ones are filled
+            // If adding a new empty input (User Manual Click)
             if (value === '') {
+                if (!mappingId) return;
+
                 const existingInputs = container.querySelectorAll('input[name="checkpoints[]"]');
                 for (let i = 0; i < existingInputs.length; i++) {
                     if (existingInputs[i].value.trim() === '') {
@@ -1778,15 +2053,36 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         return;
                     }
                 }
-            }
 
-            const limitText = document.getElementById('qr-limit-text');
-            const currentInputs = container.querySelectorAll('.cp-input-row').length;
-            
-            if (limitText.dataset.limit !== 'unlimited') {
-                const limit = parseInt(limitText.dataset.limit || 0);
-                if (limit > 0 && currentInputs >= limit) {
-                    showAlert(`Cannot add more checkpoints. The limit for this client is ${limit}.`);
+                const limitText = document.getElementById('qr-limit-text');
+                const currentInputs = container.querySelectorAll('.cp-input-row').length;
+                
+                if (limitText.dataset.limit !== 'unlimited') {
+                    const limit = parseInt(limitText.dataset.limit || 0);
+                    if (limit > 0 && currentInputs >= limit) {
+                        showAlert(`Cannot add more checkpoints. The limit for this client is ${limit}.`);
+                        return;
+                    }
+                }
+
+                // Hit Server to create record first
+                const formData = new FormData();
+                formData.append('ajax_add_checkpoint', '1');
+                formData.append('mapping_id', mappingId);
+                formData.append('name', 'New Checkpoint');
+
+                try {
+                    const res = await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    if (data.success) {
+                        value = data.name;
+                        id = data.id;
+                    } else {
+                        showAlert('Error creating checkpoint: ' + (data.message || 'Unknown error'));
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Error adding checkpoint:', e);
                     return;
                 }
             }
@@ -1795,12 +2091,78 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             row.className = 'cp-input-row';
             row.style.display = 'flex';
             row.style.gap = '10px';
+            
+            // If the value is the database default, treat it as empty for UI (to show placeholder)
+            const displayValue = (value === 'New Checkpoint') ? '' : value;
+            
             row.innerHTML = `
                 <input type="hidden" name="checkpoint_ids[]" value="${id}">
-                <input type="text" name="checkpoints[]" class="form-control" placeholder="Checkpoint Name (e.g. Front Gate)" value="${value.replace(/"/g, '&quot;')}" required>
+                <input type="text" name="checkpoints[]" class="form-control" placeholder="New Checkpoint" value="${displayValue.replace(/"/g, '&quot;')}" required onchange="markQrConfigDirty()">
                 <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; padding: 0 16px;" onclick="removeCheckpoint(this, '${id}')">✕</button>
             `;
             container.appendChild(row);
+            if (!skipDirty) markQrConfigDirty();
+        }
+
+        async function saveSiteName() {
+            const select = document.getElementById('qr_agency_client_id');
+            const mappingId = select.value;
+            const siteName = document.getElementById('site_name').value;
+            if (!mappingId) return;
+
+            const formData = new FormData();
+            formData.append('ajax_update_site_name', '1');
+            formData.append('mapping_id', mappingId);
+            formData.append('site_name', siteName);
+
+            try {
+                await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
+            } catch (e) { console.error('Error saving site name:', e); }
+        }
+
+        async function saveCheckpointName(input, id) {
+            if (!id || id === '') return;
+            const formData = new FormData();
+            formData.append('ajax_update_checkpoint_name', '1');
+            formData.append('cp_id', id);
+            formData.append('name', input.value);
+
+            try {
+                await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
+            } catch (e) { console.error('Error saving checkpoint name:', e); }
+        }
+
+        async function syncShifts() {
+            const select = document.getElementById('qr_agency_client_id');
+            const mappingId = select.value;
+            if (!mappingId) return;
+
+            const total = calculateTotalShiftMinutes();
+            if (total > 1440) {
+                const hours = (total / 60).toFixed(1);
+                showAlert(`Total shift duration cannot exceed 24 hours (Currently: ${hours} hours). Data not saved.`);
+                return false;
+            }
+
+            const shifts = Array.from(document.querySelectorAll('input[name="shifts[]"]')).map(i => i.value);
+            const starts = Array.from(document.querySelectorAll('input[name="shift_starts[]"]')).map(i => i.value);
+            const ends = Array.from(document.querySelectorAll('input[name="shift_ends[]"]')).map(i => i.value);
+
+            const formData = new FormData();
+            formData.append('ajax_sync_shifts', '1');
+            formData.append('mapping_id', mappingId);
+            shifts.forEach(s => formData.append('shifts[]', s));
+            starts.forEach(s => formData.append('shift_starts[]', s));
+            ends.forEach(s => formData.append('shift_ends[]', s));
+
+            try {
+                const response = await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
+                updateDurationDisplay();
+                return true;
+            } catch (e) { 
+                console.error('Error syncing shifts:', e); 
+                return false;
+            }
         }
 
         async function removeCheckpoint(btn, id, isDirectTableDelete = false) {
@@ -1827,7 +2189,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
                         // Remove from QR Management tab if it exists there
                         const qrRow = document.querySelector(`input[name="checkpoint_ids[]"][value="${id}"]`)?.closest('.cp-input-row');
-                        if (qrRow) qrRow.remove();
+                        if (qrRow) {
+                            qrRow.remove();
+                            markQrConfigDirty();
+                        }
+
+                        // Update Usage Sidebar
+                        const mappingId = document.getElementById('qr_agency_client_id').value;
+                        const client = clientsData.find(c => String(c.mapping_id) === String(mappingId));
+                        if (client) {
+                            client.site_used_qrs = Math.max(0, parseInt(client.site_used_qrs || 0) - 1);
+                            updateUsageSidebar(mappingId);
+                        }
                     }
                 } catch (e) {
                     console.error('Error deleting checkpoint:', e);
@@ -1836,8 +2209,93 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
             }
             
-            if (btn) btn.parentElement.remove();
+            if (btn) {
+                btn.parentElement.remove();
+                markQrConfigDirty();
+            }
         }
+
+        async function handleQrConfigSubmit(e) {
+            if (e) e.preventDefault();
+            
+            const btn = document.querySelector('#qrLimitForm button[type="submit"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Saving...';
+            btn.disabled = true;
+
+            try {
+                // 1. Sync Site Name
+                await saveSiteName();
+
+                // 2. Sync Shifts (includes 24h validation)
+                const shiftsOk = await syncShifts();
+                if (!shiftsOk) {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    return;
+                }
+
+                // 3. Sync all checkpoint names (to catch unsaved changes)
+                const cpRows = document.querySelectorAll('.cp-input-row');
+                const cpPromises = Array.from(cpRows).map(row => {
+                    const input = row.querySelector('input[name="checkpoints[]"]');
+                    const id = row.querySelector('input[name="checkpoint_ids[]"]').value;
+                    return saveCheckpointName(input, id);
+                });
+                await Promise.all(cpPromises);
+
+                // 4. Update the "Select Site" dropdown text to match the new site name
+                const siteSelect = document.getElementById('qr_agency_client_id');
+                const siteNameInput = document.getElementById('site_name');
+                if (siteSelect && siteSelect.selectedIndex >= 0 && siteNameInput) {
+                    siteSelect.options[siteSelect.selectedIndex].text = siteNameInput.value || 'Primary Site';
+                }
+
+                isQrConfigDirty = false; // RESET DIRTY FLAG
+
+                // Update Usage Sidebar in memory and UI
+                const currentMid = siteSelect.value;
+                const client = clientsData.find(c => String(c.mapping_id) === String(currentMid));
+                if (client) {
+                    client.site_used_qrs = document.getElementById('checkpoints-container').querySelectorAll('.cp-input-row').length;
+                    updateUsageSidebar(currentMid);
+                }
+
+                showAlert('Configuration saved successfully!', 'success');
+            } catch (err) {
+                console.error('Save failed:', err);
+                showAlert('Failed to save configuration. Please try again.', 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // Global Navigation Guards
+        document.addEventListener('click', async (e) => {
+            const anchor = e.target.closest('a');
+            // If it's a link leading away from the current page/hash
+            if (anchor && anchor.href && !anchor.href.includes('javascript:') && !anchor.href.includes('#')) {
+                // If it's not a tab switch (handled by switchTab)
+                const onclick = anchor.getAttribute('onclick') || '';
+                if (!onclick.includes('switchTab')) {
+                    if (isQrConfigDirty) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const canProceed = await checkQrConfigClean();
+                        if (canProceed) {
+                            window.location.href = anchor.href;
+                        }
+                    }
+                }
+            }
+        }, true);
+
+        window.onbeforeunload = function() {
+            if (isQrConfigDirty) {
+                return "You have unsaved changes. Are you sure you want to leave?";
+            }
+        };
 
         // Patrol Add Checkpoint Logic
         function addCheckpoint() {
@@ -1851,7 +2309,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             if (currentShifts.length > 0) {
                 shiftOptions = currentShifts.map(s => `<option value="${s.replace(/"/g, '&quot;')}">${s}</option>`).join('');
             } else {
-                shiftOptions = '<option value="Day Shift">Day Shift</option><option value="Night Shift">Night Shift</option>';
+                shiftOptions = '<option value="" disabled selected>No shifts defined</option>';
             }
 
             const list = document.getElementById('tour-list');
@@ -2051,6 +2509,75 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         const selectedMappingId = '<?php echo $selected_mapping_id; ?>';
         let visualCheckpoints = [];
         let isVisualLocked = false;
+        
+        // State for Zoom & Pan
+        let visualScale = 1;
+        let translateX = 0;
+        let translateY = 0;
+        let lastPinchDist = 0;
+
+        function applyTransform() {
+            const world = document.getElementById('visual-world');
+            if (world) {
+                world.style.transform = `translate(${translateX}px, ${translateY}px) scale(${visualScale})`;
+            }
+        }
+
+        function zoomMap(factor, focalX = null, focalY = null) {
+            const container = document.getElementById('visual-canvas');
+            if (!container) return;
+
+            const oldScale = visualScale;
+            visualScale = Math.max(0.05, Math.min(2.5, visualScale * factor));
+            
+            // If no focal point (buttons), zoom toward container center
+            if (focalX === null) focalX = container.offsetWidth / 2;
+            if (focalY === null) focalY = container.offsetHeight / 2;
+
+            // Maintain focal point
+            translateX = focalX - (focalX - translateX) * (visualScale / oldScale);
+            translateY = focalY - (focalY - translateY) * (visualScale / oldScale);
+
+            applyTransform();
+        }
+
+        function fitMapToScreen() {
+            const world = document.getElementById('visual-world');
+            const container = document.getElementById('visual-canvas');
+            if (!world || !container) return;
+
+            const circles = world.querySelectorAll('.checkpoint-circle');
+            if (circles.length === 0) {
+                translateX = 0;
+                translateY = 0;
+                visualScale = 1;
+                applyTransform();
+                return;
+            }
+
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            circles.forEach(c => {
+                const x = parseInt(c.style.left);
+                const y = parseInt(c.style.top);
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x + 44);
+                maxY = Math.max(maxY, y + 44);
+            });
+
+            const padding = 60;
+            const contentWidth = maxX - minX + (padding * 2);
+            const contentHeight = maxY - minY + (padding * 2);
+
+            const containerWidth = container.offsetWidth;
+            const containerHeight = container.offsetHeight;
+
+            visualScale = Math.min(1.5, Math.min(containerWidth / contentWidth, containerHeight / contentHeight));
+            translateX = (containerWidth / 2) - ((minX + maxX) / 2) * visualScale;
+            translateY = (containerHeight / 2) - ((minY + maxY) / 2) * visualScale;
+
+            applyTransform();
+        }
 
         function closeVisualDesigner() {
             document.getElementById('visualDesignerModal').classList.remove('show');
@@ -2196,15 +2723,91 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             const modal = document.getElementById('visualDesignerModal');
             const canvas = document.getElementById('visual-canvas');
-            const svg = document.getElementById('visual-svg');
+            const world = document.getElementById('visual-world');
             
             modal.classList.add('show');
-            canvas.querySelectorAll('.checkpoint-circle').forEach(c => c.remove());
+            world.querySelectorAll('.checkpoint-circle').forEach(c => c.remove());
             const loadingDiv = document.createElement('div');
             loadingDiv.id = 'visual-loading';
-            loadingDiv.style.cssText = 'display:flex; align-items:center; justify-content:center; height:100%; color:#64748b;';
+            loadingDiv.style.cssText = 'position:absolute; top:0; left:0; width:100%; display:flex; align-items:center; justify-content:center; height:100%; color:#64748b; z-index: 100;';
             loadingDiv.textContent = 'Loading checkpoints...';
             canvas.appendChild(loadingDiv);
+
+            // Mouse Zoom Support
+            canvas.onwheel = (e) => {
+                e.preventDefault();
+                const factor = e.deltaY > 0 ? 0.9 : 1.1;
+                const rect = canvas.getBoundingClientRect();
+                zoomMap(factor, e.clientX - rect.left, e.clientY - rect.top);
+            };
+
+            // Background Panning
+            let isPanning = false;
+            let panStartX, panStartY;
+
+            canvas.onmousedown = (e) => {
+                if (e.target.id === 'visual-world' || e.target.id === 'visual-svg' || e.target.id === 'visual-canvas') {
+                    isPanning = true;
+                    panStartX = e.clientX - translateX;
+                    panStartY = e.clientY - translateY;
+                    canvas.style.cursor = 'grabbing';
+                }
+            };
+
+            const stopAllGestures = () => {
+                isPanning = false;
+                lastPinchDist = 0;
+                canvas.style.cursor = '';
+            };
+
+            document.addEventListener('mousemove', (e) => {
+                if (isPanning) {
+                    translateX = e.clientX - panStartX;
+                    translateY = e.clientY - panStartY;
+                    applyTransform();
+                }
+            });
+            document.addEventListener('mouseup', stopAllGestures);
+
+            // Touch Support (Pinch & Pan)
+            canvas.ontouchstart = (e) => {
+                if (e.touches.length === 1) {
+                    if (e.target.id === 'visual-world' || e.target.id === 'visual-svg' || e.target.id === 'visual-canvas') {
+                        isPanning = true;
+                        panStartX = e.touches[0].clientX - translateX;
+                        panStartY = e.touches[0].clientY - translateY;
+                    }
+                } else if (e.touches.length === 2) {
+                    isPanning = false;
+                    lastPinchDist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                }
+            };
+
+            canvas.ontouchmove = (e) => {
+                if (e.touches.length === 1 && isPanning) {
+                    translateX = e.touches[0].clientX - panStartX;
+                    translateY = e.touches[0].clientY - panStartY;
+                    applyTransform();
+                } else if (e.touches.length === 2) {
+                    const dist = Math.hypot(
+                        e.touches[0].clientX - e.touches[1].clientX,
+                        e.touches[0].clientY - e.touches[1].clientY
+                    );
+                    if (lastPinchDist > 0) {
+                        const factor = dist / lastPinchDist;
+                        const rect = canvas.getBoundingClientRect();
+                        const focalX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+                        const focalY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+                        zoomMap(factor, focalX, focalY);
+                    }
+                    lastPinchDist = dist;
+                    e.preventDefault();
+                }
+            };
+            canvas.ontouchend = stopAllGestures;
 
             fetch(`agency_patrol_management.php?ajax_checkpoints=1&mapping_id=${selectedMappingId}`)
                 .then(response => response.json())
@@ -2274,10 +2877,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             circle.style.zIndex = 1000;
                             
                             function moveAt(pageX, pageY) {
-                                let newX = pageX - canvas.getBoundingClientRect().left - shiftX;
-                                let newY = pageY - canvas.getBoundingClientRect().top - shiftY;
-                                newX = Math.max(0, Math.min(newX, canvas.offsetWidth - circle.offsetWidth));
-                                newY = Math.max(0, Math.min(newY, canvas.offsetHeight - circle.offsetHeight));
+                                const canvasRect = canvas.getBoundingClientRect();
+                                const worldRect = world.getBoundingClientRect();
+
+                                // Calculate current viewport bounds in World Units
+                                // account for current translateX/translateY
+                                const visMinX = (canvasRect.left - worldRect.left) / visualScale;
+                                const visMaxX = (canvasRect.right - worldRect.left) / visualScale;
+                                const visMinY = (canvasRect.top - worldRect.top) / visualScale;
+                                const visMaxY = (canvasRect.bottom - worldRect.top) / visualScale;
+
+                                let newX = (pageX - worldRect.left) / visualScale - shiftX;
+                                let newY = (pageY - worldRect.top) / visualScale - shiftY;
+                                
+                                // Clamp precisely to visible viewport edges
+                                newX = Math.max(visMinX, Math.min(newX, visMaxX - 44));
+                                newY = Math.max(visMinY, Math.min(newY, visMaxY - 44));
+                                
                                 circle.style.left = newX + 'px';
                                 circle.style.top = newY + 'px';
                                 drawArrows();
@@ -2319,10 +2935,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         circle.ontouchstart = startDrag;
                         
                         circle.ondragstart = function() { return false; };
-                        canvas.appendChild(circle);
+                        world.appendChild(circle);
                     });
 
                     drawArrows();
+                    setTimeout(fitMapToScreen, 50); // Slight delay for rendering
                 })
                 .catch(err => {
                     const loader = document.getElementById('visual-loading');

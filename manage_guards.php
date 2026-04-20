@@ -73,24 +73,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     
     $can_create = true;
     if ($client_mapping_id) {
-        // Check Agency's Pooled Guard Assignment Limit
+        // Check Client's Organizational (Pooled) Guard Limit
         $limit_sql = "
-            SELECT u.agency_guard_limit, 
-                   (SELECT COUNT(*) FROM guard_assignments ga 
-                    JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id 
-                    WHERE ac_inner.agency_id = u.id) as total_assigned
-            FROM users u 
-            WHERE u.id = $agency_id
+            SELECT ac.guard_limit,
+                   (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_guards
+            FROM agency_clients ac 
+            WHERE ac.id = $client_mapping_id
         ";
         $limit_res = $conn->query($limit_sql);
         if ($limit_res && $row = $limit_res->fetch_assoc()) {
-            $max_assigned = (int)$row['agency_guard_limit'];
-            $current_assigned = (int)$row['total_assigned'];
+            $max_assigned = (int)$row['guard_limit'];
+            $total_assigned = (int)$row['total_guards'];
             
-            if ($max_assigned > 0 && $current_assigned >= $max_assigned) {
-                // If agency total assignment limit is reached, don't assign but allow creation
+            if ($max_assigned > 0 && $total_assigned >= $max_assigned) {
+                // If organizational assignment limit is reached
                 $client_mapping_id = 0; 
-                $message = "Guard account created. Note: Agency total assignment limit reached.";
+                $message = "Guard account created. Note: This client organization has reached its total organizational limit of $max_assigned guards.";
             }
         }
     }
@@ -244,10 +242,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
     $guard_id = (int)$_POST['guard_id'];
     $mapping_id = (int)$_POST['agency_client_id'];
     
-    // Check Client's Guard Limit
+    // Check Client's Organizational (Pooled) Guard Limit
     $limit_sql = "
         SELECT ac.guard_limit, 
-               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards
+               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_guards
         FROM agency_clients ac 
         WHERE ac.id = $mapping_id
     ";
@@ -255,10 +253,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
     $can_assign = true;
     if ($limit_res && $row = $limit_res->fetch_assoc()) {
         $max_guards = (int)$row['guard_limit'];
-        $current_guards = (int)$row['current_guards'];
+        $total_guards = (int)$row['total_guards'];
         
-        if ($max_guards > 0 && $current_guards >= $max_guards) {
-            $message = "Assignment failed: This client site has reached its limit of $max_guards guards.";
+        if ($max_guards > 0 && $total_guards >= $max_guards) {
+            $message = "Assignment failed: This client organization has reached its total organizational limit of $max_guards guards across all sites.";
             $message_type = "error";
             $show_limit_modal = true;
             $can_assign = false;
@@ -301,19 +299,23 @@ $guards_sql = "SELECT g.id, g.name, g.gender, g.contact_no, g.police_clearance_n
 $guards_res = $conn->query($guards_sql);
 
 // Fetch assigned clients for the dropdown
-$clients_sql = "SELECT ac.id as mapping_id, COALESCE(NULLIF(ac.company_name, ''), u.username) as client_name, ac.site_name FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
+$clients_sql = "SELECT ac.id as mapping_id, COALESCE(NULLIF(ac.company_name, ''), u.username) as client_name, ac.site_name, ac.client_limit FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.agency_id = $agency_id";
 $clients_res = $conn->query($clients_sql);
 $clients_data = [];
 if ($clients_res) {
     while($row = $clients_res->fetch_assoc()) $clients_data[] = $row;
 }
 
-// Calculate total allowed guards: Use the agency resource pool limit (from users table) + 2 extra personnel per client site
+// Calculate total allowed guards: Sum of organizational limits of all clients + 2 extra personnel
 $limit_sql = "
     SELECT 
-        (u.agency_guard_limit + (SELECT COUNT(*) * 2 FROM agency_clients WHERE agency_id = u.id)) as total_allowed 
-    FROM users u 
-    WHERE u.id = $agency_id
+        (COALESCE(SUM(client_guard_limit), 0) + 2) as total_allowed 
+    FROM (
+        SELECT MAX(guard_limit) as client_guard_limit 
+        FROM agency_clients 
+        WHERE agency_id = $agency_id 
+        GROUP BY client_id
+    ) as subq
 ";
 $limit_res = $conn->query($limit_sql);
 $total_guard_limit = 0;
@@ -327,7 +329,7 @@ $current_guard_count = 0;
 if ($guard_count_res) {
     $current_guard_count = (int)$guard_count_res->fetch_assoc()['total'];
 }
-$guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total_guard_limit);
+$guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $total_guard_limit);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -820,7 +822,9 @@ $guard_limit_reached = ($total_guard_limit > 0 && $current_guard_count >= $total
                     <label class="form-label">Change Assigned Client</label>
                     <select name="client_mapping_id" id="vcm_client_select" class="form-control">
                         <option value="">-- No Assignment --</option>
-                        <?php foreach($clients_data as $client): ?>
+                        <?php foreach($clients_data as $client): 
+                            if ((int)$client['client_limit'] <= 0) continue;
+                        ?>
                             <option value="<?php echo $client['mapping_id']; ?>"><?php echo htmlspecialchars($client['client_name']); ?></option>
                         <?php endforeach; ?>
                     </select>

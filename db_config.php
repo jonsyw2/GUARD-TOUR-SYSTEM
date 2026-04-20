@@ -4,7 +4,7 @@ $is_local = (strpos($_SERVER['HTTP_HOST'] ?? '', 'localhost') !== false || PHP_S
 
 if ($is_local) {
     // --- Local XAMPP credentials ---
-    $host     = 'localhost';
+    $host     = '127.0.0.1';
     $dbname   = 'ojt';
     $username = 'root';
     $password = '';
@@ -12,8 +12,8 @@ if ($is_local) {
     // --- Live cPanel credentials (update these!) ---
     $host     = 'localhost';
     $dbname   = 'ccbisphi_guardtour';   // ← change to your cPanel DB name
-    $username = 'ccbisphi_guarduser';    // ← change to your cPanel DB username
-    $password = 'YOUR_DB_PASSWORD_HERE'; // ← change to your cPanel DB password
+    $username = 'ccbisphi_guardtour';    // ← change to your cPanel DB username
+    $password = 'i{Pn{_FkI+*ddkLH'; // ← change to your cPanel DB password
 }
 
 // Set default timezone (e.g., Asia/Manila for UTC+8)

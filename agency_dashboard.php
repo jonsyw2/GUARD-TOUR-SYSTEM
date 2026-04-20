@@ -9,7 +9,7 @@ if ($_SESSION['user_level'] !== 'agency') {
 $agency_id = $_SESSION['user_id'];
 
 // Fetch Stats
-$total_clients = $conn->query("SELECT COUNT(*) as count FROM agency_clients WHERE agency_id = $agency_id")->fetch_assoc()['count'];
+$total_clients = $conn->query("SELECT COUNT(DISTINCT client_id) as count FROM agency_clients WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 $total_guards = $conn->query("SELECT COUNT(*) as count FROM guards WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 $total_supervisors = $conn->query("SELECT COUNT(*) as count FROM supervisors WHERE agency_id = $agency_id")->fetch_assoc()['count'];
 $total_inspector_visits = $conn->query("

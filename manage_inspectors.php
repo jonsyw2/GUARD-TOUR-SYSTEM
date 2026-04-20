@@ -71,20 +71,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
     $can_create = true;
     
     if (!empty($assigned_clients)) {
-        foreach ($assigned_clients as $client_id) {
-            $client_id = (int)$client_id;
+        foreach ($assigned_clients as $client_mapping_id) {
+            $client_mapping_id = (int)$client_mapping_id;
             $limit_sql = "
                 SELECT ac.inspector_limit, 
-                       (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors
+                       (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_inspectors
                 FROM agency_clients ac 
-                WHERE ac.id = $client_id
+                WHERE ac.id = $client_mapping_id
             ";
             $res = $conn->query($limit_sql);
             if ($res && $row = $res->fetch_assoc()) {
                 $max = (int)$row['inspector_limit'];
-                $current = (int)$row['current_inspectors'];
-                if ($max > 0 && $current >= $max) {
-                    $message = "Creation failed: One or more selected clients have reached their inspector limit.";
+                $total = (int)$row['total_inspectors'];
+                if ($max > 0 && $total >= $max) {
+                    $message = "Creation failed: The client organization has reached its total organizational limit of $max inspectors across all sites.";
                     $message_type = "error";
                     $show_limit_modal = true;
                     $can_create = false;
@@ -138,7 +138,37 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_inspector'])) {
     
     $conn->begin_transaction();
     try {
+    if ($assigned_client) {
+        $limit_sql = "
+            SELECT ac.inspector_limit, 
+                   (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_inspectors
+            FROM agency_clients ac 
+            WHERE ac.id = $assigned_client
+        ";
+        $limit_res = $conn->query($limit_sql);
+        if ($limit_res && $limit_row = $limit_res->fetch_assoc()) {
+            $max_insp = (int)$limit_row['inspector_limit'];
+            $total_insp = (int)$limit_row['total_inspectors'];
+            
+            // Note: We don't need to subtract '1' if the inspector was already assigned to THIS site, 
+            // but the UI only allows one site per inspector anyway (based on the dropdown).
+            // However, the INSERT happens AFTER the DELETE below, so 'total_inspectors' will be correct.
+        }
+    }
+
         $conn->query("UPDATE inspectors SET name = '$fullname', contact_no = '$contact_no' WHERE id = $inspector_id");
+        
+        if ($assigned_client) {
+            // Check if limit reached
+            if (isset($max_insp) && $max_insp > 0 && $total_insp >= $max_insp) {
+                // Check if they were already assigned to this site to allow "saving" without changes
+                $check_prev = $conn->query("SELECT id FROM inspector_assignments WHERE inspector_id = $inspector_id AND agency_client_id = $assigned_client");
+                if ($check_prev && $check_prev->num_rows == 0) {
+                     throw new Exception("This client organization has reached its limit of $max_insp inspectors.");
+                }
+            }
+        }
+
         $conn->query("DELETE FROM inspector_assignments WHERE inspector_id = $inspector_id");
         if ($assigned_client) {
             $conn->query("INSERT INTO inspector_assignments (inspector_id, agency_client_id) VALUES ($inspector_id, $assigned_client)");
@@ -178,11 +208,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_inspector'])) {
     }
 }
 
-// Fetch Agency Clients for assignment
-$clients_res = $conn->query("SELECT id, company_name, (SELECT username FROM users WHERE id = client_id) as client_username FROM agency_clients WHERE agency_id = $agency_id ORDER BY company_name ASC");
+// Fetch Agency Clients for assignment (Excluding those with 0 site limit)
+$clients_res = $conn->query("SELECT id, company_name, client_limit, (SELECT username FROM users WHERE id = client_id) as client_username FROM agency_clients WHERE agency_id = $agency_id ORDER BY company_name ASC");
 $all_clients = [];
 if ($clients_res) {
-    while($c = $clients_res->fetch_assoc()) $all_clients[] = $c;
+    while($c = $clients_res->fetch_assoc()) {
+        if ((int)$c['client_limit'] > 0) {
+            $all_clients[] = $c;
+        }
+    }
 }
 
 // Fetch Inspectors created by this agency with assigned clients
