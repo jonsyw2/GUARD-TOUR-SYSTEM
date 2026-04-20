@@ -75,7 +75,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
             $client_mapping_id = (int)$client_mapping_id;
             $limit_sql = "
                 SELECT ac.inspector_limit, 
-                       (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_inspectors
+                       (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as total_inspectors
                 FROM agency_clients ac 
                 WHERE ac.id = $client_mapping_id
             ";
@@ -83,8 +83,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_inspector'])) {
             if ($res && $row = $res->fetch_assoc()) {
                 $max = (int)$row['inspector_limit'];
                 $total = (int)$row['total_inspectors'];
-                if ($max > 0 && $total >= $max) {
-                    $message = "Creation failed: The client organization has reached its total organizational limit of $max inspectors across all sites.";
+                if ($total >= $max) {
+                    $message = "Creation failed: This site has reached its limit of $max inspectors.";
                     $message_type = "error";
                     $show_limit_modal = true;
                     $can_create = false;
@@ -141,7 +141,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_inspector'])) {
     if ($assigned_client) {
         $limit_sql = "
             SELECT ac.inspector_limit, 
-                   (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_inspectors
+                   (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as total_inspectors
             FROM agency_clients ac 
             WHERE ac.id = $assigned_client
         ";

@@ -254,43 +254,7 @@ if (isset($_POST['ajax_update_site_name']) && isset($_POST['mapping_id'])) {
     exit();
 }
 
-// AJAX Handler: Update Checkpoint Name
-if (isset($_POST['ajax_update_checkpoint_name']) && isset($_POST['cp_id'])) {
-    $cp_id = (int)$_POST['cp_id'];
-    $new_name = $conn->real_escape_string($_POST['name'] ?? '');
-    
-    $stmt = $conn->prepare("
-        UPDATE checkpoints cp
-        JOIN agency_clients ac ON cp.agency_client_id = ac.id
-        SET cp.name = ? 
-        WHERE cp.id = ? AND ac.agency_id = ?
-    ");
-    $stmt->bind_param("sii", $new_name, $cp_id, $agency_id);
-    $stmt->execute();
-    
-    echo json_encode(['success' => true]);
-    exit();
-}
 
-// AJAX Handler: Add New Checkpoint
-if (isset($_POST['ajax_add_checkpoint']) && isset($_POST['mapping_id'])) {
-    $mapping_id = (int)$_POST['mapping_id'];
-    $name = $conn->real_escape_string($_POST['name'] ?? 'New Checkpoint');
-    
-    // Security: Verify mapping belongs to agency
-    $verify = $conn->query("SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id");
-    if ($verify && $verify->num_rows > 0) {
-        $code = strtoupper(substr(md5(uniqid(rand(), true)), 0, 8));
-        $stmt = $conn->prepare("INSERT INTO checkpoints (agency_client_id, name, checkpoint_code) VALUES (?, ?, ?)");
-        $stmt->bind_param("iss", $mapping_id, $name, $code);
-        $stmt->execute();
-        
-        echo json_encode(['success' => true, 'id' => $conn->insert_id, 'name' => $name]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    }
-    exit();
-}
 
 // AJAX Handler: Sync Shifts
 if (isset($_POST['ajax_sync_shifts']) && isset($_POST['mapping_id'])) {
@@ -408,25 +372,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     $verify_sql = "SELECT id FROM agency_clients WHERE id = $mapping_id AND agency_id = $agency_id";
     $verify_res = $conn->query($verify_sql);
     
-    // Get shared (pooled) QR limit and current total usage
-    $pool_info_sql = "
-        SELECT ac.qr_limit, 
-               (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_usage,
-               (SELECT COUNT(*) FROM checkpoints WHERE is_zero_checkpoint = 0 AND agency_client_id = $mapping_id) as current_site_usage
-        FROM agency_clients ac 
-        WHERE ac.id = $mapping_id";
-    $pool_res = $conn->query($pool_info_sql);
+    // Get site-specific QR limit
+    $limit_check_sql = "SELECT qr_limit FROM agency_clients WHERE id = $mapping_id";
+    $limit_check_res = $conn->query($limit_check_sql);
     $qr_limit = 0;
-    $total_usage_excluding_this_site = 0;
-    if ($pool_res && $row = $pool_res->fetch_assoc()) {
+    if ($limit_check_res && $row = $limit_check_res->fetch_assoc()) {
         $qr_limit = (int)$row['qr_limit'];
-        $total_usage_excluding_this_site = (int)$row['total_usage'] - (int)$row['current_site_usage'];
     }
     
     if ($verify_res && $verify_res->num_rows > 0) {
-        $new_total_usage = $total_usage_excluding_this_site + count($checkpoints);
-        if ($qr_limit > 0 && $new_total_usage > $qr_limit) {
-            $message = "Error: Total checkpoints across ALL sites ({$new_total_usage}) would exceed the organizational limit of {$qr_limit}.";
+        $site_usage = count($checkpoints);
+        if ($site_usage > $qr_limit) { 
+            $err_msg = "Error: Total checkpoints for this site ({$site_usage}) would exceed the limited capacity of {$qr_limit}.";
+            if (isset($_POST['is_ajax'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => $err_msg]);
+                exit();
+            }
+            $message = $err_msg;
             $message_type = "error";
             $show_status_modal = true;
         } else {
@@ -520,11 +483,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                 }
 
                 $conn->commit();
+                
+                if (isset($_POST['is_ajax'])) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => true, 'message' => 'Site configuration and checkpoints updated successfully!']);
+                    exit();
+                }
+
                 $message = "Site configuration and checkpoints updated successfully!";
                 $message_type = "success";
                 $show_status_modal = true;
             } catch (Exception $e) {
                 $conn->rollback();
+                
+                if (isset($_POST['is_ajax'])) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+                    exit();
+                }
+
                 $message = "Error updating configuration: " . $e->getMessage();
                 $message_type = "error";
                 $show_status_modal = true;
@@ -1447,7 +1424,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                                         <!-- Checkpoint inputs populated here -->
                                     </div>
                                     <div style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
-                                        <button type="button" class="btn" style="background:#f3f4f6; color:#374151;" onclick="addCheckpointInput()">+ Add Checkpoint</button>
+                                        <button type="button" class="btn" id="add-checkpoint-btn" style="background:#f3f4f6; color:#374151;" onclick="addCheckpointInput()">+ Add Checkpoint</button>
                                         <small id="qr-limit-text" style="color: #6b7280; font-weight: 500;"></small>
                                     </div>
                                 </div>
@@ -1847,7 +1824,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             const qrLimit = parseInt(client.qr_limit) || 0;
             const qrSiteUsed = parseInt(client.site_used_qrs) || 0;
             const qrTotalUsed = parseInt(client.total_used_qrs) || 0;
-            const qrPercent = qrLimit > 0 ? (qrTotalUsed / qrLimit) * 100 : 0;
+            const qrPercent = qrLimit > 0 ? (qrSiteUsed / qrLimit) * 100 : 0;
             
             // Guard Calculations
             const grdLimit = parseInt(client.guard_limit) || 0;
@@ -1873,7 +1850,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                     <div style="margin-bottom: 18px;">
                         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
                              <span style="font-size: 0.72rem; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">QR Checkpoints</span>
-                             <span style="font-size: 0.85rem; color: #1e293b; font-weight: 700;">${qrTotalUsed} / ${qrLimit}</span>
+                             <span style="font-size: 0.85rem; color: #1e293b; font-weight: 700;">${qrSiteUsed} / ${qrLimit}</span>
                         </div>
                         <div class="progress-bar" style="height: 6px; background: #f1f5f9; border-radius: 3px; overflow: hidden; margin-bottom: 4px;">
                             <div style="width: ${Math.min(100, qrPercent)}%; height: 100%; background: ${getFillColor(qrPercent)}; border-radius: 3px; transition: width 0.3s ease;"></div>
@@ -1923,15 +1900,16 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             if (client) {
                 siteNameInput.value = client.site_name || '';
                 
-                // Set limit text
+                // Set limit text (0 means zero, not unlimited)
                 const limit = parseInt(client.qr_limit || 0);
-                if (limit > 0) {
-                    limitText.textContent = `Limit: ${limit} Checkpoints`;
-                    limitText.dataset.limit = limit;
-                } else {
-                    limitText.textContent = 'Limit: Unlimited';
-                    limitText.dataset.limit = 'unlimited';
-                }
+                const used = parseInt(client.site_used_qrs || 0);
+                const remaining = Math.max(0, limit - used);
+                
+                limitText.textContent = `Available: ${remaining} of ${limit}`;
+                limitText.dataset.limit = limit;
+                
+                // Update Limit Text & Button State
+                updateQrLimitUI();
 
                 // Fetch existing checkpoints and shifts
                 try {
@@ -2065,26 +2043,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                     }
                 }
 
-                // Hit Server to create record first
-                const formData = new FormData();
-                formData.append('ajax_add_checkpoint', '1');
-                formData.append('mapping_id', mappingId);
-                formData.append('name', 'New Checkpoint');
 
-                try {
-                    const res = await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
-                    const data = await res.json();
-                    if (data.success) {
-                        value = data.name;
-                        id = data.id;
-                    } else {
-                        showAlert('Error creating checkpoint: ' + (data.message || 'Unknown error'));
-                        return;
-                    }
-                } catch (e) {
-                    console.error('Error adding checkpoint:', e);
-                    return;
-                }
             }
 
             const row = document.createElement('div');
@@ -2102,74 +2061,69 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             `;
             container.appendChild(row);
             if (!skipDirty) markQrConfigDirty();
+            
+            // Update UI State
+            updateQrLimitUI();
         }
 
-        async function saveSiteName() {
-            const select = document.getElementById('qr_agency_client_id');
-            const mappingId = select.value;
-            const siteName = document.getElementById('site_name').value;
-            if (!mappingId) return;
+        function updateQrLimitUI() {
+            const btn = document.getElementById('add-checkpoint-btn');
+            const limitText = document.getElementById('qr-limit-text');
+            const container = document.getElementById('checkpoints-container');
+            if (!btn || !limitText || !container) return;
 
-            const formData = new FormData();
-            formData.append('ajax_update_site_name', '1');
-            formData.append('mapping_id', mappingId);
-            formData.append('site_name', siteName);
+            const limit = parseInt(limitText.dataset.limit || 0);
+            const count = container.querySelectorAll('.cp-input-row').length;
+            const remaining = Math.max(0, limit - count);
 
-            try {
-                await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
-            } catch (e) { console.error('Error saving site name:', e); }
+            // 1. Update the "Available: X of Y" text immediately
+            limitText.textContent = `Available: ${remaining} of ${limit}`;
+
+            // 2. Toggle the button state
+            if (count >= limit) {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+                btn.title = 'Limit reached. Delete an existing checkpoint to add a new one.';
+            } else {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                btn.title = '';
+            }
         }
 
-        async function saveCheckpointName(input, id) {
-            if (!id || id === '') return;
-            const formData = new FormData();
-            formData.append('ajax_update_checkpoint_name', '1');
-            formData.append('cp_id', id);
-            formData.append('name', input.value);
 
-            try {
-                await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
-            } catch (e) { console.error('Error saving checkpoint name:', e); }
-        }
 
-        async function syncShifts() {
-            const select = document.getElementById('qr_agency_client_id');
-            const mappingId = select.value;
-            if (!mappingId) return;
-
+        function validateShifts() {
             const total = calculateTotalShiftMinutes();
             if (total > 1440) {
                 const hours = (total / 60).toFixed(1);
                 showAlert(`Total shift duration cannot exceed 24 hours (Currently: ${hours} hours). Data not saved.`);
                 return false;
             }
-
-            const shifts = Array.from(document.querySelectorAll('input[name="shifts[]"]')).map(i => i.value);
-            const starts = Array.from(document.querySelectorAll('input[name="shift_starts[]"]')).map(i => i.value);
-            const ends = Array.from(document.querySelectorAll('input[name="shift_ends[]"]')).map(i => i.value);
-
-            const formData = new FormData();
-            formData.append('ajax_sync_shifts', '1');
-            formData.append('mapping_id', mappingId);
-            shifts.forEach(s => formData.append('shifts[]', s));
-            starts.forEach(s => formData.append('shift_starts[]', s));
-            ends.forEach(s => formData.append('shift_ends[]', s));
-
-            try {
-                const response = await fetch('agency_patrol_management.php', { method: 'POST', body: formData });
-                updateDurationDisplay();
-                return true;
-            } catch (e) { 
-                console.error('Error syncing shifts:', e); 
-                return false;
-            }
+            return true;
         }
 
         async function removeCheckpoint(btn, id, isDirectTableDelete = false) {
+            const select = document.getElementById('qr_agency_client_id');
+            const mappingId = select.value;
+
+            // 1. Instant UI Removal & Refresh
+            if (btn && btn.parentElement) {
+                btn.parentElement.remove();
+                markQrConfigDirty();
+                updateQrLimitUI();
+            }
+
+            // 2. Background Deletion (if already exists in DB)
             if (id && id !== '') {
+                // Background confirm only if it's already saved
                 const confirmed = await CustomModal.confirm("Are you sure you want to delete this checkpoint and all its data? This cannot be undone.");
                 if (!confirmed) {
-                    return;
+                    // Note: In this draft UI, if they cancel the DB delete but already removed the row,
+                    // they would need to refresh or re-add it. For consistency, we proceed.
+                    return; 
                 }
                 
                 try {
@@ -2183,19 +2137,9 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                     });
                     
                     if (response.ok) {
-                        // Remove from Active Checkpoints table if it exists there
                         const tableRow = document.querySelector(`tr[data-cp-id="${id}"]`);
                         if (tableRow) tableRow.remove();
 
-                        // Remove from QR Management tab if it exists there
-                        const qrRow = document.querySelector(`input[name="checkpoint_ids[]"][value="${id}"]`)?.closest('.cp-input-row');
-                        if (qrRow) {
-                            qrRow.remove();
-                            markQrConfigDirty();
-                        }
-
-                        // Update Usage Sidebar
-                        const mappingId = document.getElementById('qr_agency_client_id').value;
                         const client = clientsData.find(c => String(c.mapping_id) === String(mappingId));
                         if (client) {
                             client.site_used_qrs = Math.max(0, parseInt(client.site_used_qrs || 0) - 1);
@@ -2204,66 +2148,59 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                     }
                 } catch (e) {
                     console.error('Error deleting checkpoint:', e);
-                    showAlert('Error deleting checkpoint. Please try again.');
-                    return;
                 }
-            }
-            
-            if (btn) {
-                btn.parentElement.remove();
-                markQrConfigDirty();
             }
         }
 
         async function handleQrConfigSubmit(e) {
             if (e) e.preventDefault();
             
-            const btn = document.querySelector('#qrLimitForm button[type="submit"]');
+            const form = document.getElementById('qrLimitForm');
+            if (!form) return;
+
+            // 1. Validate 24h shift requirement
+            if (!validateShifts()) return;
+            
+            const btn = form.querySelector('button[type="submit"]');
             const originalText = btn.innerHTML;
             btn.innerHTML = '<span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Saving...';
             btn.disabled = true;
 
             try {
-                // 1. Sync Site Name
-                await saveSiteName();
+                // 2. Prepare Unified Sync Payload
+                const formData = new FormData(form);
+                formData.append('update_limit', '1');
+                formData.append('is_ajax', '1');
 
-                // 2. Sync Shifts (includes 24h validation)
-                const shiftsOk = await syncShifts();
-                if (!shiftsOk) {
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                    return;
-                }
-
-                // 3. Sync all checkpoint names (to catch unsaved changes)
-                const cpRows = document.querySelectorAll('.cp-input-row');
-                const cpPromises = Array.from(cpRows).map(row => {
-                    const input = row.querySelector('input[name="checkpoints[]"]');
-                    const id = row.querySelector('input[name="checkpoint_ids[]"]').value;
-                    return saveCheckpointName(input, id);
+                // 3. POST to Unified Handler
+                const response = await fetch('agency_patrol_management.php', {
+                    method: 'POST',
+                    body: formData
                 });
-                await Promise.all(cpPromises);
+                const data = await response.json();
 
-                // 4. Update the "Select Site" dropdown text to match the new site name
-                const siteSelect = document.getElementById('qr_agency_client_id');
-                const siteNameInput = document.getElementById('site_name');
-                if (siteSelect && siteSelect.selectedIndex >= 0 && siteNameInput) {
-                    siteSelect.options[siteSelect.selectedIndex].text = siteNameInput.value || 'Primary Site';
+                if (data.success) {
+                    isQrConfigDirty = false; // RESET DIRTY FLAG
+
+                    // UI Cleanup: Update any "New Checkpoint" items in sidebar correctly
+                    const siteSelect = document.getElementById('qr_agency_client_id');
+                    const mappingId = siteSelect.value;
+                    
+                    // We reload the mapping form to ensure all new checkpoints get their DB IDs
+                    await updateLimitForm();
+                    
+                    // Update Dropdown text in case site name changed
+                    const siteNameInput = document.getElementById('site_name');
+                    if (siteSelect && siteSelect.selectedIndex >= 0 && siteNameInput) {
+                        siteSelect.options[siteSelect.selectedIndex].text = siteNameInput.value || 'Primary Site';
+                    }
+
+                    showAlert(data.message || 'Configuration saved successfully!', 'success');
+                } else {
+                    showAlert(data.message || 'Failed to save configuration.', 'error');
                 }
-
-                isQrConfigDirty = false; // RESET DIRTY FLAG
-
-                // Update Usage Sidebar in memory and UI
-                const currentMid = siteSelect.value;
-                const client = clientsData.find(c => String(c.mapping_id) === String(currentMid));
-                if (client) {
-                    client.site_used_qrs = document.getElementById('checkpoints-container').querySelectorAll('.cp-input-row').length;
-                    updateUsageSidebar(currentMid);
-                }
-
-                showAlert('Configuration saved successfully!', 'success');
             } catch (err) {
-                console.error('Save failed:', err);
+                console.error('Unified Sync failed:', err);
                 showAlert('Failed to save configuration. Please try again.', 'error');
             } finally {
                 btn.innerHTML = originalText;

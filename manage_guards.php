@@ -73,10 +73,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
     
     $can_create = true;
     if ($client_mapping_id) {
-        // Check Client's Organizational (Pooled) Guard Limit
+        // Check Client's Site-Specific Guard Limit
         $limit_sql = "
             SELECT ac.guard_limit,
-                   (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_guards
+                   (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as total_guards
             FROM agency_clients ac 
             WHERE ac.id = $client_mapping_id
         ";
@@ -85,10 +85,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_guard'])) {
             $max_assigned = (int)$row['guard_limit'];
             $total_assigned = (int)$row['total_guards'];
             
-            if ($max_assigned > 0 && $total_assigned >= $max_assigned) {
-                // If organizational assignment limit is reached
+            if ($total_assigned >= $max_assigned) {
                 $client_mapping_id = 0; 
-                $message = "Guard account created. Note: This client organization has reached its total organizational limit of $max_assigned guards.";
+                $message = "Guard account created. Note: This site has reached its limit of $max_assigned guards.";
             }
         }
     }
@@ -242,10 +241,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
     $guard_id = (int)$_POST['guard_id'];
     $mapping_id = (int)$_POST['agency_client_id'];
     
-    // Check Client's Organizational (Pooled) Guard Limit
+    // Check Client's Site-Specific Guard Limit
     $limit_sql = "
         SELECT ac.guard_limit, 
-               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = ac.client_id)) as total_guards
+               (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as total_guards
         FROM agency_clients ac 
         WHERE ac.id = $mapping_id
     ";
@@ -255,8 +254,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         $max_guards = (int)$row['guard_limit'];
         $total_guards = (int)$row['total_guards'];
         
-        if ($max_guards > 0 && $total_guards >= $max_guards) {
-            $message = "Assignment failed: This client organization has reached its total organizational limit of $max_guards guards across all sites.";
+        if ($total_guards >= $max_guards) {
+            $message = "Assignment failed: This site has reached its limit of $max_guards guards.";
             $message_type = "error";
             $show_limit_modal = true;
             $can_assign = false;
