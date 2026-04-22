@@ -8,9 +8,9 @@ if (isset($_GET['ajax_agency_data'])) {
     $response = [];
 
     if ($type === 'clients') {
-        $sql = "SELECT ac.id, c.id as user_id, c.username as name, ac.company_name, c.status, 
-                ac.client_limit as site_limit, ac.qr_limit, ac.guard_limit, ac.inspector_limit,
-                (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as current_qr_count,
+        $sql = "SELECT ac.id, c.id as user_id, c.username as name, ac.company_name, ac.site_name, c.status, 
+                ac.client_limit as site_limit, c.qr_limit, c.guard_limit, c.inspector_limit,
+                (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as current_qr_count,
                 (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guard_count,
                 (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspector_count
                 FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
@@ -60,24 +60,59 @@ if (isset($_GET['ajax_agency_data'])) {
 
         $conn->begin_transaction();
         try {
-            // 1. Get the agency_id from this mapping to update the agency pool as well
-            $agency_res = $conn->query("SELECT agency_id FROM agency_clients WHERE id = $mapping_id");
-            if (!$agency_res || $agency_res->num_rows === 0) {
+            // 1. Get the account info from this mapping
+            $client_res = $conn->query("SELECT agency_id, client_id FROM agency_clients WHERE id = $mapping_id");
+            if (!$client_res || $client_res->num_rows === 0) {
                 throw new Exception("Mapping ID $mapping_id not found.");
             }
-            $target_agency_id = (int)$agency_res->fetch_assoc()['agency_id'];
+            $mapping_data = $client_res->fetch_assoc();
+            $target_client_id = (int)$mapping_data['client_id'];
 
-            // 2. Update Client Site Limits (Specific Mapping) - NOW ABSOLUTE
+            // 2. Update Master Shared Limits (Users Table - Global Pool)
+            $sqlUser = "UPDATE users SET 
+                    qr_limit = $add_qr, 
+                    guard_limit = $add_guards, 
+                    inspector_limit = $add_inspectors 
+                    WHERE id = $target_client_id";
+            $conn->query($sqlUser);
+
+            // 3. Keep site records in sync for all site mappings of this client
             $sqlSite = "UPDATE agency_clients SET 
                     client_limit = $add_client,
                     qr_limit = $add_qr, 
                     guard_limit = $add_guards, 
                     inspector_limit = $add_inspectors 
-                    WHERE id = $mapping_id";
+                    WHERE client_id = $target_client_id AND agency_id = {$mapping_data['agency_id']}";
             $conn->query($sqlSite);
+            
+            // 4. Handle auto-deletion if limit is decreased below current usage
+            if ($add_qr > 0) {
+                // Get all user-added checkpoints ordered by creation (most recent first) across all sites
+                $qr_sql = "SELECT id FROM checkpoints 
+                           WHERE is_zero_checkpoint = 0 
+                           AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = $target_client_id)
+                           ORDER BY created_at DESC, id DESC";
+                $qr_res = $conn->query($qr_sql);
+                $all_ids = [];
+                if ($qr_res) {
+                    while ($r = $qr_res->fetch_assoc()) {
+                        $all_ids[] = (int)$r['id'];
+                    }
+                }
 
-            // 3. Sync with Agency Pooled Limits (Users Table) is now skipped 
-            // because site-specific absolute limits shouldn't incrementally affect the pool.
+                $current_total = count($all_ids);
+                if ($current_total > $add_qr) {
+                    $to_delete_count = $current_total - $add_qr;
+                    $to_delete_ids = array_slice($all_ids, 0, $to_delete_count);
+                    $ids_str = implode(',', $to_delete_ids);
+
+                    // Clean up tour assignments and checkpoints
+                    $conn->query("DELETE FROM tour_assignments WHERE checkpoint_id IN ($ids_str)");
+                    $conn->query("DELETE FROM checkpoints WHERE id IN ($ids_str)");
+                    
+                    $response['extra_info'] = "Auto-deleted $to_delete_count excess QR checkpoints to match the updated limit.";
+                }
+            }
 
             $conn->commit();
             $response = ['success' => true, 'message' => 'Limits updated successfully!'];
@@ -86,7 +121,7 @@ if (isset($_GET['ajax_agency_data'])) {
             $response = ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
         }
     } elseif ($type === 'qr') {
-        $sql = "SELECT ac.site_name, c.username as client_name, (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id) as qr_count FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
+        $sql = "SELECT ac.site_name, c.username as client_name, (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count FROM agency_clients ac JOIN users c ON ac.client_id = c.id WHERE ac.agency_id = $agency_id ORDER BY ac.id ASC";
         $res = $conn->query($sql);
         while ($r = $res->fetch_assoc()) $response[] = $r;
     } elseif ($type === 'guards') {
@@ -116,8 +151,8 @@ if (isset($_GET['ajax_agency_data'])) {
         $agency_id = (int)($_GET['agency_id'] ?? 0);
         $limit = (int)($_GET['limit'] ?? 0);
 
-        // Check current count of clients (including placeholders)
-        $currRes = $conn->query("SELECT COUNT(*) as cnt FROM agency_clients WHERE agency_id = $agency_id");
+        // Check current count of organizations (including placeholders)
+        $currRes = $conn->query("SELECT COUNT(DISTINCT client_id) as cnt FROM agency_clients WHERE agency_id = $agency_id");
         $currCount = $currRes ? (int)$currRes->fetch_assoc()['cnt'] : 0;
 
         if ($limit < $currCount) {
@@ -168,7 +203,8 @@ if (isset($_GET['ajax_agency_data'])) {
                     if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('" . $conn->real_escape_string($tryUsername) . "', '$placeholderPw', 'client')")) {
                         $newClientId = $conn->insert_id;
                         $placeholderName = 'Client ' . $clientNum;
-                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name) VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "')");
+                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, qr_limit, guard_limit, inspector_limit, client_limit, supervisor_limit) 
+                                       VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "', 0, 0, 0, 0, 0)");
                         $clientNum++;
                     }
                 }
@@ -336,7 +372,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
                     $placeholderPw = password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT);
                     if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('" . $conn->real_escape_string($tryUsername) . "', '$placeholderPw', 'client')")) {
                         $pid = $conn->insert_id;
-                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name) VALUES ($new_agency_id, $pid, 'Client $slot')");
+                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, qr_limit, guard_limit, inspector_limit, client_limit, supervisor_limit) 
+                                       VALUES ($new_agency_id, $pid, 'Client $slot', 0, 0, 0, 0, 0)");
                     }
                 }
             }
@@ -842,10 +879,7 @@ include 'admin_layout/sidebar.php';
                     <div class="form-group"><label class="form-label">Contact Person</label><input type="text" name="contact_person" class="form-control" placeholder="Full Name"></div>
                     <div class="form-group"><label class="form-label">Contact No.</label><input type="text" name="contact_no" class="form-control" placeholder="09XXXXXXXXX"></div>
                 </div>
-                <div class="form-group" style="margin-top: 12px;">
-                    <label class="form-label">Total Client Slots</label>
-                    <input type="number" name="client_limit" class="form-control" value="1" min="1" required>
-                </div>
+                <input type="hidden" name="client_limit" value="0">
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
                     <button type="button" onclick="closeModal('addAgencyModal')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
                     <button type="submit" name="add_agency" class="btn btn-primary" style="width: auto; padding: 10px 24px;">Create Agency Profile</button>
@@ -1282,6 +1316,7 @@ include 'admin_layout/sidebar.php';
         // --- Agency Quick Links ---
         let qlAgencyData = null;
         let qlAgencyFullData = null;
+        let qlSiteDataMap = {};
 
         function openQuickLinksModal(full_agency) {
             console.log("Opening Quick Links for Agency:", full_agency);
@@ -1352,56 +1387,61 @@ include 'admin_layout/sidebar.php';
 
             let html = '<ul class="ql-data-list">';
             if (type === 'clients') {
+                // Group by user_id so each company appears only once
+                qlSiteDataMap = {};
+                const groups = {};
+                const groupOrder = [];
                 data.forEach(item => {
-                    const isSuspended = item.status === 'suspended';
+                    qlSiteDataMap[item.id] = item; // store by mapping id
+                    if (!groups[item.user_id]) {
+                        groups[item.user_id] = { user_id: item.user_id, name: item.company_name || item.name, status: item.status, sites: [] };
+                        groupOrder.push(item.user_id);
+                    }
+                    groups[item.user_id].sites.push(item);
+                });
+
+                groupOrder.forEach(uid => {
+                    const group = groups[uid];
+                    const isSuspended = group.status === 'suspended';
                     const statusTag = isSuspended ? `<span style="color:#ef4444; font-size: 0.7rem; font-weight:700;">[SUSPENDED]</span>` : '';
+
+                    // Aggregate stats across all sites
+                    const totQrUsed  = group.sites.reduce((s,x) => s + parseInt(x.current_qr_count   || 0), 0);
+                    const totQrLim   = parseInt(group.sites[0].qr_limit || 0);
+                    const totGrdUsed = group.sites.reduce((s,x) => s + parseInt(x.current_guard_count || 0), 0);
+                    const totGrdLim  = parseInt(group.sites[0].guard_limit || 0);
+                    const totInspUsed= group.sites.reduce((s,x) => s + parseInt(x.current_inspector_count || 0), 0);
+                    const totInspLim = parseInt(group.sites[0].inspector_limit || 0);
+                    const totSiteLim = parseInt(group.sites[0].site_limit || 0);
+                    const siteCount  = group.sites.length;
+
+                    // Build inner content: Direct organizational fields (Apply to all sites)
+                    const s = group.sites[0];
+                    innerContent = buildSiteAdjFields(s) + `<button class="btn-save-adj" onclick="saveAdj(${s.id})">Save Changes</button>`;
 
                     html += `
                         <li class="ql-data-item" style="flex-direction: column; align-items: stretch; gap: 4px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                                 <div style="display:flex; flex-direction: column; gap:4px;">
                                     <div style="display:flex; align-items:center; gap:8px;">
-                                        <span class="ql-label" style="font-size: 1rem;">${item.company_name || item.name}</span>
+                                        <span class="ql-label" style="font-size: 1rem;">${group.name}</span>
                                         ${statusTag}
+                                        ${siteCount > 1 ? `<span style="font-size:0.7rem;background:#e0f2fe;color:#0369a1;padding:1px 7px;border-radius:10px;font-weight:700;">${siteCount} sites</span>` : ''}
                                     </div>
                                     <div style="display:flex; gap:12px; font-size: 0.75rem; color: #64748b; font-weight: 500;">
-                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">QR:</strong> ${item.current_qr_count}/${item.qr_limit || 0}</span>
-                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">Guards:</strong> ${item.current_guard_count}/${item.guard_limit || 0}</span>
-                                        <span style="display:flex; align-items:center; gap:4px;"><strong style="color:var(--primary);">Inspectors:</strong> ${item.current_inspector_count}/${item.inspector_limit || 0}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">QR:</strong> ${totQrUsed}/${totQrLim}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">Guards:</strong> ${totGrdUsed}/${totGrdLim}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">Inspectors:</strong> ${totInspUsed}/${totInspLim}</span>
+                                        <span style="display:flex;align-items:center;gap:4px;"><strong style="color:var(--primary);">Sites:</strong> ${totSiteLim}</span>
                                     </div>
                                 </div>
                                 <div style="display:flex; align-items:center; gap: 4px;">
-                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm(${item.id})">Manage Limits</button>
+                                    <button class="btn-sm" style="width: auto; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; font-weight:700;" onclick="toggleAdjForm('grp_${uid}')">Manage Limits</button>
                                 </div>
                             </div>
-                            <div id="adj_form_${item.id}" class="ql-adj-container">
+                            <div id="adj_form_grp_${uid}" class="ql-adj-container">
                                 <p style="font-size: 0.7rem; color: #94a3b8; margin: 0 0 10px 0; font-weight:600; text-transform:uppercase;">Client Site Limits</p>
-
-                                <div class="ql-adj-row">
-                                    <span class="ql-adj-label">QR Checkpoints</span>
-                                    <div class="ql-adj-ctrl">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'qr', -1)">-</button>
-                                        <input type="number" id="adj_qr_${item.id}" class="ql-adj-input" value="${item.qr_limit || 0}">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'qr', 1)">+</button>
-                                    </div>
-                                </div>
-                                <div class="ql-adj-row">
-                                    <span class="ql-adj-label">Security Guards</span>
-                                    <div class="ql-adj-ctrl">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'guard', -1)">-</button>
-                                        <input type="number" id="adj_guard_${item.id}" class="ql-adj-input" value="${item.guard_limit || 0}">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'guard', 1)">+</button>
-                                    </div>
-                                </div>
-                                <div class="ql-adj-row">
-                                    <span class="ql-adj-label">Inspectors</span>
-                                    <div class="ql-adj-ctrl">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', -1)">-</button>
-                                        <input type="number" id="adj_insp_${item.id}" class="ql-adj-input" value="${item.inspector_limit || 0}">
-                                        <button class="btn-adj" onclick="adjVal(${item.id}, 'insp', 1)">+</button>
-                                    </div>
-                                </div>
-                                <button class="btn-save-adj" onclick="saveAdj(${item.id})">Save Changes</button>
+                                ${innerContent}
                             </div>
                         </li>`;
                 });
@@ -1478,6 +1518,50 @@ include 'admin_layout/sidebar.php';
         }
 
         // --- Incremental Limit Logic ---
+        function buildSiteAdjFields(s) {
+            return `
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">Sites</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'client', -1)">-</button>
+                        <input type="number" id="adj_client_${s.id}" class="ql-adj-input" value="${s.site_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'client', 1)">+</button>
+                    </div>
+                </div>
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">QR Limit</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'qr', -1)">-</button>
+                        <input type="number" id="adj_qr_${s.id}" class="ql-adj-input" value="${s.qr_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'qr', 1)">+</button>
+                    </div>
+                </div>
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">Guard Limit</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'guard', -1)">-</button>
+                        <input type="number" id="adj_guard_${s.id}" class="ql-adj-input" value="${s.guard_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'guard', 1)">+</button>
+                    </div>
+                </div>
+                <div class="ql-adj-row">
+                    <span class="ql-adj-label">Inspector Limit</span>
+                    <div class="ql-adj-ctrl">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'insp', -1)">-</button>
+                        <input type="number" id="adj_insp_${s.id}" class="ql-adj-input" value="${s.inspector_limit || 0}">
+                        <button class="btn-adj" onclick="adjVal(${s.id}, 'insp', 1)">+</button>
+                    </div>
+                </div>`;
+        }
+
+        function onSiteSelected(uid, mappingId) {
+            const fieldsContainer = document.getElementById(`site_adj_fields_${uid}`);
+            if (!mappingId) { fieldsContainer.innerHTML = ''; return; }
+            const s = qlSiteDataMap[mappingId];
+            if (!s) return;
+            fieldsContainer.innerHTML = buildSiteAdjFields(s) + `<button class="btn-save-adj" onclick="saveAdj(${mappingId})">Save Changes</button>`;
+        }
+
         function toggleAdjForm(id) {
             const form = document.getElementById(`adj_form_${id}`);
             const isVisible = form.style.display === 'block';

@@ -57,12 +57,57 @@
 
     /* Print Specific Styles */
     @media print {
+        @page { size: auto; margin: 0; }
         body * { visibility: hidden; }
         #globalQRModal, #globalQRModal * { visibility: visible; }
-        #globalQRModal { position: fixed; left: 0; top: 0; width: 100%; height: 100%; display: flex !important; justify-content: center; align-items: center; background: white !important; backdrop-filter: none !important; }
-        .global-modal-content { box-shadow: none !important; border: none !important; width: 100% !important; max-width: 100% !important; padding: 0 !important; }
+        #globalQRModal { 
+            position: fixed; left: 0; top: 0; width: 100%; height: 100%; 
+            display: flex !important; justify-content: center; align-items: center; 
+            background: white !important; backdrop-filter: none !important; 
+        }
+        .global-modal-content { 
+            box-shadow: none !important; border: 1px dashed #94a3b8 !important; 
+            width: 2.125in !important; height: 3.375in !important; 
+            max-width: none !important; padding: 15px 10px !important; 
+            display: flex !important; flex-direction: column !important; 
+            justify-content: space-around !important; align-items: center !important;
+            border-radius: 0 !important;
+            text-align: center !important;
+        }
         .global-modal-btn, button[onclick="CustomModal.closeQR()"] { display: none !important; }
-        #globalQRCodeContainer { border: none !important; padding: 0 !important; }
+        
+        /* Header adjustment for print */
+        .global-modal-content div:first-child { 
+            display: block !important; 
+            margin-bottom: 0 !important; 
+            width: 100% !important;
+        }
+        
+        #qrModalSubtitle { 
+            font-size: 0.95rem !important; 
+            font-weight: 700 !important;
+            margin: 0 !important; 
+            text-align: center !important;
+            word-wrap: break-word !important;
+        }
+        
+        #globalQRCodeContainer { 
+            border: none !important; padding: 0 !important; 
+            margin: 10px 0 !important; min-height: auto !important;
+            display: flex !important; justify-content: center !important;
+        }
+        #globalQRCodeContainer img, #globalQRCodeContainer canvas {
+            width: 1.6in !important; 
+            height: 1.6in !important;
+        }
+        
+        #qrModalTitle { 
+            font-size: 0.95rem !important; 
+            font-weight: 700 !important;
+            margin: 0 !important; 
+            text-align: center !important;
+            word-wrap: break-word !important;
+        }
     }
 </style>
 
@@ -91,25 +136,16 @@
 <!-- Global QR Display Modal -->
 <div id="globalQRModal" class="global-modal-overlay" onclick="if(event.target === this) CustomModal.closeQR()">
     <div class="global-modal-content" style="max-width: 480px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div style="text-align: left;">
-                <h3 id="qrModalTitle" style="margin: 0; color: #111827; font-size: 1.25rem;">QR Checkpoint</h3>
-                <p id="qrModalSubtitle" style="margin: 4px 0 0 0; font-size: 0.85rem; color: #6b7280;"></p>
-            </div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+            <p id="qrModalSubtitle" style="margin: 0; font-size: 1rem; font-weight: 600; color: #111827;"></p>
             <button onclick="CustomModal.closeQR()" style="background: #f3f4f6; border: none; border-radius: 6px; width: 32px; height: 32px; cursor: pointer; color: #64748b; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">&times;</button>
         </div>
         
-        <div id="globalQRCodeContainer" style="background: white; padding: 24px; border-radius: 16px; border: 2px dashed #e2e8f0; display: flex; justify-content: center; align-items: center; margin-bottom: 24px; min-height: 256px;">
+        <div id="globalQRCodeContainer" style="background: white; padding: 24px; border-radius: 16px; border: 2px dashed #e2e8f0; display: flex; justify-content: center; align-items: center; margin-bottom: 12px; min-height: 256px;">
             <!-- QR Code generated here -->
         </div>
 
-        <div style="background: #f8fafc; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: left;">
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                <span id="qrCodeValue" style="font-family: 'Courier New', monospace; font-weight: 700; font-size: 1.1rem; color: #4f46e5; letter-spacing: 0.05em;"></span>
-                <span style="font-size: 0.7rem; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">KEY</span>
-            </div>
-            <p style="font-size: 0.75rem; color: #94a3b8; margin: 0;">This code is uniquely assigned to this checkpoint. Scan this code using the Guard App to record a visit.</p>
-        </div>
+        <h3 id="qrModalTitle" style="margin: 0 0 16px 0; color: #111827; font-size: 1.15rem; font-weight: 700; text-align: center;">QR Checkpoint</h3>
 
         <button class="global-modal-btn global-modal-btn-primary" onclick="window.print()">
             🖨️ Print QR Code

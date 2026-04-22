@@ -51,11 +51,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['remove_client_full']))
         }
         if (!empty($mapping_ids)) {
             $m_in = implode(',', $mapping_ids);
+            
+            // 1. Delete Activity Data (Dependencies first)
+            $conn->query("DELETE FROM scans WHERE checkpoint_id IN (SELECT id FROM checkpoints WHERE agency_client_id IN ($m_in))");
+            $conn->query("DELETE FROM inspector_scans WHERE agency_client_id IN ($m_in)");
+            $conn->query("DELETE FROM incidents WHERE agency_client_id IN ($m_in)");
+            
+            // 2. Delete Configuration Data
             $conn->query("DELETE FROM guard_assignments WHERE agency_client_id IN ($m_in)");
             $conn->query("DELETE FROM inspector_assignments WHERE agency_client_id IN ($m_in)");
             $conn->query("DELETE FROM tour_assignments WHERE agency_client_id IN ($m_in)");
             $conn->query("DELETE FROM shifts WHERE agency_client_id IN ($m_in)");
             $conn->query("DELETE FROM checkpoints WHERE agency_client_id IN ($m_in)");
+            
+            // 3. Delete the Mapping
             $conn->query("DELETE FROM agency_clients WHERE id IN ($m_in)");
         }
         if (!$conn->query("DELETE FROM users WHERE id = $user_id")) {
@@ -90,7 +99,43 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
     $inspector_limit = 0;
     $supervisor_limit = 0;
     
-    // Handle File Upload
+    // Account Updates
+    $new_username = $conn->real_escape_string($_POST['client_username'] ?? '');
+    $new_password = $_POST['client_password'] ?? '';
+    
+    $conn->begin_transaction();
+    try {
+        // 1. Get current client_id and existing username
+        $user_data_res = $conn->query("SELECT ac.client_id, u.username as current_username FROM agency_clients ac JOIN users u ON ac.client_id = u.id WHERE ac.id = $mapping_id");
+        if (!$user_data_res || $user_data_res->num_rows === 0) {
+            throw new Exception("Client mapping not found.");
+        }
+        $user_row = $user_data_res->fetch_assoc();
+        $client_user_id = $user_row['client_id'];
+        $current_username = $user_row['current_username'];
+
+        // 2. Update Account if needed
+        $user_update_fields = [];
+        if (!empty($new_username) && $new_username !== $current_username) {
+            // Check uniqueness
+            $check = $conn->query("SELECT id FROM users WHERE username = '$new_username' AND id != $client_user_id");
+            if ($check && $check->num_rows > 0) {
+                throw new Exception("Username '$new_username' is already taken.");
+            }
+            $user_update_fields[] = "username = '$new_username'";
+        }
+
+        if (!empty($new_password)) {
+            $hashed = password_hash($new_password, PASSWORD_DEFAULT);
+            $user_update_fields[] = "password = '$hashed'";
+        }
+
+        if (!empty($user_update_fields)) {
+            $user_sql = "UPDATE users SET " . implode(', ', $user_update_fields) . " WHERE id = $client_user_id";
+            if (!$conn->query($user_sql)) {
+                throw new Exception("Error updating account: " . $conn->error);
+            }
+        }
     $logo_path = null;
     if (isset($_FILES['company_logo']) && $_FILES['company_logo']['error'] == 0) {
         $target_dir = "uploads/logos/";
@@ -131,14 +176,19 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_details'])) {
             WHERE id = $mapping_id AND agency_id = $agency_id";
     
     if ($conn->query($sql)) {
+        $conn->commit();
         $message = "Client details updated successfully!";
         $message_type = "success";
         $show_status_modal = true;
     } else {
-        $message = "Error updating details: " . $conn->error;
-        $message_type = "error";
-        $show_status_modal = true;
+        throw new Exception("Error updating details: " . $conn->error);
     }
+} catch (Exception $e) {
+    if (isset($conn) && $conn->in_transaction()) $conn->rollback();
+    $message = "Update failed: " . $e->getMessage();
+    $message_type = "error";
+    $show_status_modal = true;
+}
 }
 
 // Handle Add Client
@@ -273,28 +323,38 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_guard'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-    // Check Agency's Pooled Guard Assignment Limit
-    $limit_sql = "
-        SELECT u.agency_guard_limit, 
-               (SELECT COUNT(*) FROM guard_assignments ga 
-                JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id 
-                WHERE ac_inner.agency_id = u.id) as current_assigned
-        FROM users u 
-        WHERE u.id = $agency_id
-    ";
-    $limit_res = $conn->query($limit_sql);
-    $can_assign = true;
-    if ($limit_res && $row = $limit_res->fetch_assoc()) {
-        $max_assigned = (int)$row['agency_guard_limit'];
-        $current_assigned = (int)$row['current_assigned'];
-        
-        if ($max_assigned > 0 && $current_assigned >= $max_assigned) {
-            $message = "Assignment failed: Your agency has reached its total assignment limit of $max_assigned guards.";
-            $message_type = "error";
-            $show_status_modal = true;
-            $can_assign = false;
+        // Check BOTH Agency's Pooled Guard Limit AND Client's Pooled Guard Limit
+        $limit_sql = "
+            SELECT 
+                a.agency_guard_limit as agency_max,
+                (SELECT COUNT(*) FROM guard_assignments ga JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id WHERE ac_inner.agency_id = a.id) as agency_current,
+                IF(u.guard_limit > 0, u.guard_limit, ac.guard_limit) as client_max,
+                (SELECT COUNT(*) FROM guard_assignments ga JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id WHERE ac_inner.client_id = u.id) as client_current
+            FROM agency_clients ac
+            JOIN users u ON ac.client_id = u.id
+            JOIN users a ON ac.agency_id = a.id
+            WHERE ac.id = $mapping_id
+        ";
+        $limit_res = $conn->query($limit_sql);
+        $can_assign = true;
+        if ($limit_res && $row = $limit_res->fetch_assoc()) {
+            $agency_max = (int)$row['agency_max'];
+            $agency_curr = (int)$row['agency_current'];
+            $client_max = (int)$row['client_max'];
+            $client_curr = (int)$row['client_current'];
+
+            if ($agency_max > 0 && $agency_curr >= $agency_max) {
+                $message = "Assignment failed: Your agency has reached its total assignment limit of $agency_max guards.";
+                $message_type = "error";
+                $show_status_modal = true;
+                $can_assign = false;
+            } elseif ($client_max > 0 && $client_curr >= $client_max) {
+                $message = "Assignment failed: This client organization has reached its pooled limit of $client_max guards across all sites.";
+                $message_type = "error";
+                $show_status_modal = true;
+                $can_assign = false;
+            }
         }
-    }
 
     if ($can_assign) {
         if ($conn->query("INSERT INTO guard_assignments (guard_id, agency_client_id) VALUES ($guard_id, $mapping_id)")) {
@@ -321,20 +381,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['assign_inspector'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        // Enforce Client's Inspector Limit
+        // Enforce Shared Inspector Limit (Pooled across all sites)
         $limit_sql = "
-            SELECT ac.inspector_limit, 
-                   (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors
+            SELECT 
+                IF(u.inspector_limit > 0, u.inspector_limit, ac.inspector_limit) as client_max,
+                (SELECT COUNT(*) FROM inspector_assignments ia JOIN agency_clients ac_inner ON ia.agency_client_id = ac_inner.id WHERE ac_inner.client_id = u.id) as client_current
             FROM agency_clients ac 
+            JOIN users u ON ac.client_id = u.id
             WHERE ac.id = $mapping_id
         ";
         $limit_res = $conn->query($limit_sql);
         $can_assign = true;
         if ($limit_res && $row = $limit_res->fetch_assoc()) {
-            $max = (int)$row['inspector_limit'];
-            $current = (int)$row['current_inspectors'];
+            $max = (int)$row['client_max'];
+            $current = (int)$row['client_current'];
             if ($max > 0 && $current >= $max) {
-                $message = "Assignment failed: This client site has reached its limit of $max inspectors.";
+                $message = "Assignment failed: This client organization has reached its pooled limit of $max inspectors across all sites.";
                 $message_type = "error";
                 $show_status_modal = true;
                 $can_assign = false;
@@ -371,13 +433,18 @@ $clients = [];
 
 // Fetch Assigned Clients
 $clients_sql = "
-    SELECT ac.id as mapping_id, u.id as user_id, u.status, u.username as client_username, ac.company_name, ac.company_logo, 
-           ac.qr_limit, ac.guard_limit, ac.inspector_limit, ac.supervisor_limit,
+    SELECT MIN(ac.id) as mapping_id, u.id as user_id, u.status, u.username as client_username, ac.company_name, ac.company_logo, 
+           GROUP_CONCAT(ac.site_name SEPARATOR ' | ') as site_names,
+           COUNT(ac.id) as sites_count,
+           ac.qr_limit, 
+           ac.guard_limit, 
+           ac.inspector_limit, 
+           u.supervisor_limit, ac.client_limit,
            ac.company_address, ac.contact_no, ac.email_address, ac.website_link,
            ac.contact_person, ac.contact_person_position, ac.contact_person_no,
-           (SELECT COUNT(*) FROM guard_assignments WHERE agency_client_id = ac.id) as current_guards,
-           (SELECT COUNT(*) FROM inspector_assignments WHERE agency_client_id = ac.id) as current_inspectors,
-           (SELECT COUNT(*) FROM checkpoints WHERE agency_client_id = ac.id AND is_zero_checkpoint = 0) as qr_count,
+           (SELECT COUNT(*) FROM guard_assignments ga JOIN agency_clients ac_inner ON ga.agency_client_id = ac_inner.id WHERE ac_inner.client_id = u.id) as current_guards,
+           (SELECT COUNT(*) FROM inspector_assignments ia JOIN agency_clients ac_inner ON ia.agency_client_id = ac_inner.id WHERE ac_inner.client_id = u.id) as current_inspectors,
+           (SELECT COUNT(*) FROM checkpoints cp JOIN agency_clients ac_inner ON cp.agency_client_id = ac_inner.id WHERE ac_inner.client_id = u.id AND cp.is_zero_checkpoint = 0) as qr_countByClient,
            (
                SELECT GROUP_CONCAT(g.name SEPARATOR ' | ')
                FROM guard_assignments ga
@@ -388,7 +455,8 @@ $clients_sql = "
     JOIN users u ON ac.client_id = u.id
     JOIN users a ON ac.agency_id = a.id
     WHERE ac.agency_id = $agency_id
-    ORDER BY ac.id ASC
+    GROUP BY u.id
+    ORDER BY mapping_id ASC
 ";
 $clients_res = $conn->query($clients_sql);
 if ($clients_res) {
@@ -533,12 +601,13 @@ if ($inspectors_res) {
                         </thead>
                     <tbody>
                          <?php 
-                            for ($i = 1; $i <= $client_limit; $i++): 
-                                $row = isset($clients[$i-1]) ? $clients[$i-1] : null;
-                                if ($row):
+                            $total_slots_used = 0;
+                            $display_row_index = 1;
+                            foreach ($clients as $client_index => $row): 
+                                $total_slots_used += 1;
                          ?>
                                 <tr onclick='openSummaryModal(<?php echo htmlspecialchars(json_encode($row)); ?>)'>
-                                    <td><?php echo $i; ?></td>
+                                    <td><?php echo $display_row_index++; ?></td>
                                     <td>
                                         <div style="display: flex; align-items: center; gap: 12px;">
                                             <?php if ($row['company_logo']): ?>
@@ -548,7 +617,7 @@ if ($inspectors_res) {
                                             <?php endif; ?>
                                             <div>
                                                 <div style="font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-                                                    <?php echo $row['company_name'] ?: 'Client ' . $i; ?>
+                                                    <?php echo $row['company_name'] ?: 'Client ' . ($client_index + 1); ?>
                                                     <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
                                                         <span style="font-size: 0.65rem; background: #fee2e2; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">Suspended</span>
                                                     <?php endif; ?>
@@ -558,49 +627,70 @@ if ($inspectors_res) {
                                         </div>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['qr_count']; ?> / <?php echo $row['qr_limit']; ?>
-                                        </span>
+                                        <?php if ((int)$row['client_limit'] > 0): ?>
+                                            <span style="font-weight: 600; color: #10b981;">
+                                                Active: <?php echo $row['qr_countByClient']; ?> / <?php echo $row['qr_limit']; ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span style="font-size: 0.75rem; color: #9ca3af; font-style: italic;">No Sites Enabled</span>
+                                        <?php endif; ?>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
-                                        </span>
+                                        <?php if ((int)$row['client_limit'] > 0): ?>
+                                            <span style="font-weight: 600; color: #10b981;">
+                                                Active: <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span style="font-size: 0.75rem; color: #9ca3af; font-style: italic;">---</span>
+                                        <?php endif; ?>
                                     </td>
                                     <td style="white-space: nowrap;">
-                                        <span style="font-weight: 600; color: #10b981;">
-                                            Active: <?php echo $row['current_inspectors']; ?> / <?php echo $row['inspector_limit']; ?>
-                                        </span>
+                                        <?php if ((int)$row['client_limit'] > 0): ?>
+                                            <span style="font-weight: 600; color: #10b981;">
+                                                Active: <?php echo $row['current_inspectors']; ?> / <?php echo $row['inspector_limit']; ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span style="font-size: 0.75rem; color: #9ca3af; font-style: italic;">---</span>
+                                        <?php endif; ?>
                                     </td>
                                      <td>
-                                        <div style="display: flex; gap: 8px; justify-content: flex-start; align-items: center;" onclick="event.stopPropagation()">
-                                            <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
-                                            <button class="btn-sm" style="background:#4f46e5; color:white; border:none;" onclick="openInspectorModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Inspector</button>
+                                         <div style="display: flex; gap: 8px; justify-content: flex-start; align-items: center;" onclick="event.stopPropagation()">
+                                            <?php if ((int)$row['client_limit'] > 0): ?>
+                                                <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
+                                                <button class="btn-sm" style="background:#4f46e5; color:white; border:none;" onclick="openInspectorModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Inspector</button>
+                                            <?php else: ?>
+                                                <button class="btn-sm" style="background:#f1f5f9; color:#94a3b8; border:none; cursor:not-allowed;" disabled title="No Sites Enabled">Assign Guard</button>
+                                                <button class="btn-sm" style="background:#f1f5f9; color:#94a3b8; border:none; cursor:not-allowed;" disabled title="No Sites Enabled">Assign Inspector</button>
+                                            <?php endif; ?>
                                             <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
                                                 <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Restore this client\'s access?');" style="margin:0; display: contents;">
                                                     <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
-                                                    <button type="submit" name="restore_client" class="btn-sm" style="background: #10b981; color: white; border: none;">Restore</button>
+                                                    <input type="hidden" name="restore_client" value="1">
+                                                    <button type="submit" class="btn-sm" style="background: #10b981; color: white; border: none;">Restore</button>
                                                 </form>
                                             <?php else: ?>
                                                 <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Suspend this client\'s access?');" style="margin:0; display: contents;">
                                                     <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
-                                                    <button type="submit" name="suspend_client" class="btn-sm" style="background: #f59e0b; color: white; border: none;">Suspend</button>
+                                                    <input type="hidden" name="suspend_client" value="1">
+                                                    <button type="submit" class="btn-sm" style="background: #f59e0b; color: white; border: none;">Suspend</button>
                                                 </form>
                                             <?php endif; ?>
                                             <form method="POST" action="" onsubmit="CustomModal.confirmForm(event, 'Are you completely sure? This will permanently delete the client and free up all their assigned slots. This cannot be undone.');" style="margin:0; display: contents;">
                                                 <input type="hidden" name="user_id" value="<?php echo $row['user_id']; ?>">
-                                                <button type="submit" name="remove_client_full" class="btn-sm" style="background: #ef4444; color: white; border: none;">Remove</button>
+                                                <input type="hidden" name="remove_client_full" value="1">
+                                                <button type="submit" class="btn-sm" style="background: #ef4444; color: white; border: none;">Remove</button>
                                             </form>
                                         </div>
                                     </td>
                                 </tr>
-                            <?php else: ?>
+                            <?php endforeach; ?>
+
+                            <?php for ($i = $total_slots_used + 1; $i <= $client_limit; $i++): ?>
                                 <tr onclick="openAddClientModal()" style="cursor: pointer;" onmouseover="this.style.background='#f0fdf4'" onmouseout="this.style.background='transparent'">
-                                    <td><?php echo $i; ?></td>
+                                    <td><?php echo $display_row_index++; ?></td>
                                     <td colspan="5" style="color: #10b981; font-style: italic; font-weight: 500;">+ Available Client Slot &nbsp;<span style="font-size:0.75rem; color:#9ca3af; font-weight:400;">(click to add)</span></td>
                                 </tr>
-                            <?php endif; ?>
-                        <?php endfor; ?>
+                            <?php endfor; ?>
                     </tbody>
                 </table>
                 </div>
@@ -821,6 +911,16 @@ if ($inspectors_res) {
                 <input type="hidden" name="mapping_id" id="details_mapping_id">
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Account Username</label>
+                        <input type="text" name="client_username" id="details_client_username" class="form-control" placeholder="Enter Username" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Account Password</label>
+                        <input type="password" name="client_password" id="details_client_password" class="form-control" placeholder="Enter Password">
+                    </div>
+
                     <div class="form-group" style="grid-column: span 2;">
                         <label class="form-label">Company Name</label>
                         <input type="text" name="company_name" id="details_company_name" class="form-control" placeholder="e.g. Acme Corp" required>
@@ -1005,6 +1105,8 @@ if ($inspectors_res) {
 
         function openDetailsModal(data) {
             document.getElementById('details_mapping_id').value = data.mapping_id;
+            document.getElementById('details_client_username').value = data.client_username || '';
+            document.getElementById('details_client_password').value = ''; 
             document.getElementById('details_company_name').value = data.company_name || '';
             document.getElementById('details_company_address').value = data.company_address || '';
             document.getElementById('details_contact_no').value = data.contact_no || '';

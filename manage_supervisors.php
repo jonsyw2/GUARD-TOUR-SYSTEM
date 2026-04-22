@@ -60,7 +60,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_supervisor'])) 
                 if ($res && $row = $res->fetch_assoc()) {
                     $max = (int)$row['supervisor_limit'];
                     $is_assigned = !empty($row['supervisor_id']);
-                    if ($max > 0 && $is_assigned) {
+                    if ($max >= 0 && $is_assigned) {
                         $message = "Creation failed: One or more selected clients already have an assigned supervisor.";
                         $message_type = "error";
                         $show_limit_modal = true;

@@ -22,7 +22,7 @@ if (isset($_GET['ajax_qrs']) && isset($_GET['mapping_id'])) {
 
     // Pull QR limit and client info
     $info_res = $conn->query("
-        SELECT ac.qr_limit, ac.company_name, u.username
+        SELECT ac.qr_limit, ac.company_name, ac.site_name, u.username
         FROM agency_clients ac
         JOIN users u ON ac.client_id = u.id
         WHERE ac.id = $mapping_id
@@ -73,6 +73,7 @@ if (isset($_GET['ajax_qrs']) && isset($_GET['mapping_id'])) {
     echo json_encode([
         'qr_limit'    => $qr_limit,
         'client_name' => $info['company_name'] ?: $info['username'],
+        'site_name'   => $info['site_name'] ?: ($info['company_name'] ?: $info['username']),
         'checkpoints' => $checkpoints,
         'zero_checkpoint' => $zero_cp,
         'end_checkpoint' => $end_cp
@@ -141,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
                     // Insert new checkpoint (only if within limit)
                     $count_res = $conn->query("SELECT COUNT(*) as cnt FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)");
                     $cnt = (int)$count_res->fetch_assoc()['cnt'];
-                    if ($qr_limit > 0 && $cnt >= $qr_limit) continue;
+                    if ($qr_limit >= 0 && $cnt >= $qr_limit) continue;
 
                     // Auto-generate code if blank
                     if ($cp_code === '') {
@@ -260,10 +261,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
         }
         $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
 
-        $count_res = $conn->query("SELECT COUNT(*) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
+        $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
         $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
 
-        if ($client_limit > 0 && $current_clients >= $client_limit) {
+        if ($client_limit >= 0 && $current_clients >= $client_limit) {
             throw new Exception("This agency has reached its maximum client limit ($client_limit). Increase their limit first.");
         }
 
@@ -932,15 +933,15 @@ include 'admin_layout/sidebar.php';
             const existing   = data.checkpoints ?? [];
             const usedCount  = existing.length;
 
-            document.getElementById('qrMetaLimit').textContent = limit > 0 ? limit + ' QRs' : 'No limit set';
-            document.getElementById('qrMetaUsed').textContent  = usedCount + ' / ' + (limit > 0 ? limit : '∞');
+            document.getElementById('qrMetaLimit').textContent = limit >= 0 ? limit + ' QRs' : 'Unlimited';
+            document.getElementById('qrMetaUsed').textContent  = usedCount + ' / ' + (limit >= 0 ? limit : '∞');
 
-            if (limit === 0) {
+            if (limit === 0 && usedCount === 0) {
                 document.getElementById('qrModalBody').innerHTML =
                     '<div class="qr-no-limit">' +
                     '<div class="icon">🔒</div>' +
-                    '<strong>No QR limit configured</strong>' +
-                    '<p style="margin-top:8px;font-size:0.85rem;">Set a QR limit in <em>QR Limit Control</em> first.</p>' +
+                    '<strong>Zero QR limit enabled</strong>' +
+                    '<p style="margin-top:8px;font-size:0.85rem;">This client is restricted from having any QR checkpoints.</p>' +
                     '</div>';
                 document.getElementById('qrSaveBtn').disabled = true;
                 return;
@@ -983,7 +984,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow('zero')"
                         />
                         <button type="button" 
-                            onclick="CustomModal.showQRCode('${escJs(zcp.checkpoint_code)}', '${escJs(zcp.name)}', '${escJs(data.client_name)}')"
+                            onclick="CustomModal.showQRCode('${escJs(zcp.checkpoint_code)}', '${escJs(zcp.name)}', '${escJs(data.site_name)}')"
                             title="View QR Code"
                             style="width: 32px; height: 32px; flex-shrink:0; background: #fff1f2; border: 1.5px solid #fecaca; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #dc2626; transition: all 0.2s;"
                             onmouseover="this.style.background='#fecaca'; this.style.color='#991b1b'"
@@ -1032,7 +1033,7 @@ include 'admin_layout/sidebar.php';
                         </div>
                         ${isExisting ? `
                             <button type="button" 
-                                onclick="console.log('Eye clicked', '${escJs(cp.checkpoint_code)}'); CustomModal.showQRCode('${escJs(cp.checkpoint_code)}', '${escJs(cp.name)}', '${escJs(data.client_name)}')"
+                                onclick="console.log('Eye clicked', '${escJs(cp.checkpoint_code)}'); CustomModal.showQRCode('${escJs(cp.checkpoint_code)}', '${escJs(cp.name)}', '${escJs(data.site_name)}')"
                                 title="View QR Code"
                                 style="width: 32px; height: 32px; flex-shrink:0; background: #f1f5f9; border: 1.5px solid #e2e8f0; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #64748b; transition: all 0.2s;"
                                 onmouseover="this.style.background='#e2e8f0'; this.style.color='#1e293b'"
@@ -1072,7 +1073,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow('end')"
                         />
                         <button type="button" 
-                            onclick="CustomModal.showQRCode('${escJs(ecp.checkpoint_code)}', '${escJs(ecp.name)}', '${escJs(data.client_name)}')"
+                            onclick="CustomModal.showQRCode('${escJs(ecp.checkpoint_code)}', '${escJs(ecp.name)}', '${escJs(data.site_name)}')"
                             title="View QR Code"
                             style="width: 32px; height: 32px; flex-shrink:0; background: #fff1f2; border: 1.5px solid #fecaca; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #dc2626; transition: all 0.2s;"
                             onmouseover="this.style.background='#fecaca'; this.style.color='#991b1b'"

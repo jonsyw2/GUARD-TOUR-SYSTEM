@@ -11,33 +11,52 @@ $agency_id = $_SESSION['user_id'];
 // Data repair: Fix invalid scan_time (0000-00-00) in patrol scans
 $conn->query("UPDATE scans SET scan_time = CURRENT_TIMESTAMP WHERE scan_time = '0000-00-00 00:00:00' OR scan_time IS NULL");
 
-// Fetch all clients for this agency to populate filter
+// Fetch unique clients for this agency (no duplicates)
 $clients_sql = "
-    SELECT ac.id as mapping_id, u.username as client_name 
+    SELECT DISTINCT u.id as client_id, u.username as client_name
     FROM agency_clients ac
     JOIN users u ON ac.client_id = u.id
     WHERE ac.agency_id = $agency_id
     ORDER BY u.username ASC
 ";
 $clients_res = $conn->query($clients_sql);
+
+// Fetch all sites (mapping_id) per client for the JS dropdown population
+$all_sites_sql = "
+    SELECT ac.id as mapping_id, ac.client_id, u.username as client_name, ac.site_name
+    FROM agency_clients ac
+    JOIN users u ON ac.client_id = u.id
+    WHERE ac.agency_id = $agency_id
+    ORDER BY u.username ASC, ac.site_name ASC
+";
+$all_sites_res = $conn->query($all_sites_sql);
+
+// Build mapping_ids list for scope queries
 $mapping_ids = [];
-if ($clients_res) {
-    while($r = $clients_res->fetch_assoc()) $mapping_ids[] = (int)$r['mapping_id'];
+$client_sites_map = []; // client_id => [ [mapping_id, site_name], ... ]
+if ($all_sites_res) {
+    while($r = $all_sites_res->fetch_assoc()) {
+        $mapping_ids[] = (int)$r['mapping_id'];
+        $cid = (int)$r['client_id'];
+        if (!isset($client_sites_map[$cid])) $client_sites_map[$cid] = [];
+        $client_sites_map[$cid][] = [
+            'mapping_id' => (int)$r['mapping_id'],
+            'site_name'  => $r['site_name'] ?: $r['client_name']
+        ];
+    }
 }
 $mapping_ids_str = empty($mapping_ids) ? "0" : implode(',', $mapping_ids);
-
-// Reset pointer for filter dropdown
-if ($clients_res) mysqli_data_seek($clients_res, 0);
 
 // Fetch guards for filtering
 $guards_sql = "SELECT id, name FROM guards WHERE agency_id = $agency_id ORDER BY name ASC";
 $guards_res = $conn->query($guards_sql);
 
 // Handle Filter Submissions
-$filter_date = $_GET['date'] ?? date('Y-m-d');
-$filter_guard = $_GET['guard_id'] ?? '';
-$filter_client = $_GET['mapping_id'] ?? '';
-$filter_shift = $_GET['shift'] ?? '';
+$filter_date   = $_GET['date'] ?? date('Y-m-d');
+$filter_guard  = $_GET['guard_id'] ?? '';
+$filter_client_id = $_GET['client_id'] ?? '';   // selected client user id
+$filter_client = $_GET['mapping_id'] ?? '';      // selected site mapping id
+$filter_shift  = $_GET['shift'] ?? '';
 
 // Fetch checkpoints for filtering (Scope to site if selected)
 $cp_scope_sql = !empty($filter_client) ? "agency_client_id = " . (int)$filter_client : "agency_client_id IN ($mapping_ids_str)";
@@ -426,22 +445,28 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             
             <div class="card">
                 <div class="card-header">Filter Patrol History</div>
-                <form class="filter-form" method="GET" action="agency_patrol_history.php">
+                <form class="filter-form" method="GET" action="agency_patrol_history.php" id="filterForm">
 
                     <div class="form-group">
                         <label class="form-label" for="date">Select Date</label>
                         <input type="date" id="date" name="date" class="form-control" value="<?php echo htmlspecialchars($filter_date); ?>" onchange="this.form.submit()">
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="mapping_id">Client Site</label>
-                        <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
+                        <label class="form-label" for="client_id">Select A Client</label>
+                        <select id="client_id" name="client_id" class="form-control" onchange="onClientChange(this.value)">
                             <option value="">-- Select A Client --</option>
                             <?php if ($clients_res && $clients_res->num_rows > 0): ?>
                                 <?php mysqli_data_seek($clients_res, 0); ?>
                                 <?php while($c = $clients_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $c['mapping_id']; ?>" <?php if($filter_client == $c['mapping_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['client_name']); ?></option>
+                                    <option value="<?php echo $c['client_id']; ?>" <?php if($filter_client_id == $c['client_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['client_name']); ?></option>
                                 <?php endwhile; ?>
                             <?php endif; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="mapping_id">Select Client Site</label>
+                        <select id="mapping_id" name="mapping_id" class="form-control" onchange="this.form.submit()">
+                            <option value="">-- Select A Site --</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -463,7 +488,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                 <div class="table-container" style="border: none;">
                     <?php 
                     if (empty($filter_client)): ?>
-                        <div class="empty-history">Please select a Client Site to view patrol history.</div>
+                        <div class="empty-history">Please select a Client and a Client Site to view patrol history.</div>
                     <?php elseif ($history_res && $history_res->num_rows > 0): 
                         // Process data into groups
                         $grouped = [];
@@ -664,7 +689,54 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script>
         const selectedMappingId = '<?php echo $filter_client; ?>';
+        const selectedClientId  = '<?php echo $filter_client_id; ?>';
+        // Client -> sites map injected from PHP
+        const clientSitesMap = <?php echo json_encode($client_sites_map); ?>;
         let visualCheckpoints = [];
+
+        function onClientChange(clientId) {
+            const siteSelect = document.getElementById('mapping_id');
+            // Clear existing options
+            siteSelect.innerHTML = '<option value="">-- Select A Site --</option>';
+
+            if (!clientId || !clientSitesMap[clientId]) {
+                // No client selected — submit to reset
+                document.getElementById('filterForm').submit();
+                return;
+            }
+
+            const sites = clientSitesMap[clientId];
+            sites.forEach(function(site) {
+                const opt = document.createElement('option');
+                opt.value = site.mapping_id;
+                opt.textContent = site.site_name;
+                siteSelect.appendChild(opt);
+            });
+
+            // If only 1 site, auto-select and submit
+            if (sites.length === 1) {
+                siteSelect.value = sites[0].mapping_id;
+                document.getElementById('filterForm').submit();
+            }
+        }
+
+        // On page load: if a client is already selected, populate the site dropdown
+        document.addEventListener('DOMContentLoaded', function() {
+            if (selectedClientId && clientSitesMap[selectedClientId]) {
+                const siteSelect = document.getElementById('mapping_id');
+                siteSelect.innerHTML = '<option value="">-- Select A Site --</option>';
+                const sites = clientSitesMap[selectedClientId];
+                sites.forEach(function(site) {
+                    const opt = document.createElement('option');
+                    opt.value = site.mapping_id;
+                    opt.textContent = site.site_name;
+                    if (String(site.mapping_id) === String(selectedMappingId)) {
+                        opt.selected = true;
+                    }
+                    siteSelect.appendChild(opt);
+                });
+            }
+        });
 
         function downloadHistoryCSV() {
             const url = new URL(window.location.href);
