@@ -202,6 +202,7 @@ $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT DEFAULT NU
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_person VARCHAR(255) DEFAULT NULL");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_no VARCHAR(20) DEFAULT NULL");
 $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_name VARCHAR(255) DEFAULT NULL");
+$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) DEFAULT NULL");
 
 // Sync existing agency_name for legacy agency accounts
 $conn->query("UPDATE users SET agency_name = username WHERE user_level = 'agency' AND (agency_name IS NULL OR agency_name = '')");
@@ -268,6 +269,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_details'
     $contact_person = $conn->real_escape_string($_POST['contact_person']);
     $contact_no = $conn->real_escape_string($_POST['contact_no']);
     $status = $conn->real_escape_string($_POST['status'] ?? 'active');
+    $email = $conn->real_escape_string($_POST['email'] ?? '');
     $client_limit = (int)($_POST['client_limit'] ?? 0);
 
     $sql = "UPDATE users SET 
@@ -275,6 +277,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_agency_details'
             address = '$address',
             contact_person = '$contact_person',
             contact_no = '$contact_no',
+            email = '$email',
             status = '$status',
             client_limit = $client_limit
             WHERE id = $agency_id";
@@ -301,6 +304,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
     $address = $conn->real_escape_string($_POST['address']);
     $contact_person = $conn->real_escape_string($_POST['contact_person'] ?? '');
     $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
+    $email = $conn->real_escape_string($_POST['email'] ?? '');
     
     // Check if username exists
     $checkSql = "SELECT id FROM users WHERE username = '$username'";
@@ -311,8 +315,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_agency'])) {
         $message_type = "error";
         $show_status_modal = true;
     } else {
-        $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, address, contact_person, contact_no) 
-                VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, '$address', '$contact_person', '$contact_no')";
+        $sql = "INSERT INTO users (username, agency_name, password, user_level, client_limit, address, contact_person, contact_no, email) 
+                VALUES ('$username', '$agency_name', '$password', 'agency', $client_limit, '$address', '$contact_person', '$contact_no', '$email')";
         if ($conn->query($sql) === TRUE) {
             $new_agency_id = $conn->insert_id;
             
@@ -589,7 +593,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['delete_supervisor_acti
 }
 
 // Fetch all agencies for dropdowns
-$agencies_result = $conn->query("SELECT id, username, agency_name, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
+$agencies_result = $conn->query("SELECT id, username, agency_name, email, supervisor_limit, client_limit, address, contact_person, contact_no, status, (SELECT COUNT(DISTINCT client_id) FROM agency_clients WHERE agency_id = users.id) as current_clients FROM users WHERE user_level = 'agency' ORDER BY id ASC");
 
 // Fetch all clients
 $clients_directory = $conn->query("SELECT id, username FROM users WHERE user_level = 'client' ORDER BY username ASC");
@@ -827,6 +831,10 @@ include 'admin_layout/sidebar.php';
                     <input type="password" name="agency_password" class="form-control" required placeholder="••••••••" autocomplete="new-password">
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Agency Email</label>
+                    <input type="email" name="email" class="form-control" placeholder="agency@example.com" required>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Agency Address</label>
                     <textarea name="address" class="form-control" placeholder="Full business address" rows="2"></textarea>
                 </div>
@@ -1009,6 +1017,10 @@ include 'admin_layout/sidebar.php';
                     </div>
                 </div>
                 <div class="form-group" style="text-align: left;">
+                    <label class="form-label">Agency Email</label>
+                    <input type="email" name="email" id="edit_email" class="form-control" required>
+                </div>
+                <div class="form-group" style="text-align: left;">
                     <label class="form-label">Agency Address</label>
                     <textarea name="address" id="edit_agency_address" class="form-control" rows="3"></textarea>
                 </div>
@@ -1135,6 +1147,8 @@ include 'admin_layout/sidebar.php';
         function openEditModal(agency) {
             document.getElementById('edit_agency_id').value = agency.id;
             document.getElementById('edit_agency_name_display').value = agency.agency_name || agency.username;
+            document.getElementById('edit_email').value = agency.email || '';
+            document.getElementById('edit_email').value = agency.email || '';
             document.getElementById('edit_agency_username').value = agency.username;
             document.getElementById('edit_agency_address').value = agency.address;
             document.getElementById('edit_agency_contact_person').value = agency.contact_person;
@@ -1592,6 +1606,122 @@ include 'admin_layout/sidebar.php';
             } catch (err) {
                 console.error(err);
                 CustomModal.alert('Could not save limit. Please check your connection or server logs.', 'Network Error', 'error');
+            }
+        }
+
+        let currentNotifTargetId = 0;
+        let currentNotifTargetType = '';
+
+        function openNotificationsModal(id, type, name) {
+            currentNotifTargetId = id;
+            currentNotifTargetType = type;
+            document.getElementById('notif_target_name').innerText = name;
+            document.getElementById('notif_list_container').innerHTML = '<div style="text-align: center; padding: 40px; color: #94a3b8;"><p>Loading authorized persons...</p></div>';
+            document.getElementById('notificationsModal').classList.add('show');
+            loadNotificationEmails();
+        }
+
+        async function loadNotificationEmails() {
+            try {
+                const formData = new FormData();
+                formData.append('action', 'list');
+                formData.append('parent_id', currentNotifTargetId);
+                formData.append('parent_type', currentNotifTargetType);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                const container = document.getElementById('notif_list_container');
+                if (res.status === 'success') {
+                    if (res.data.length === 0) {
+                        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #94a3b8;"><p>No authorized persons registered yet.</p></div>';
+                    } else {
+                        let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                        res.data.forEach(item => {
+                            html += `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                                    <div>
+                                        <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${item.name || 'Anonymous'}</div>
+                                        <div style="font-size: 0.8rem; color: #64748b;">${item.email}</div>
+                                    </div>
+                                    <button class="btn" style="width: auto; padding: 4px 8px; font-size: 0.75rem; color: #ef4444; background: #fee2e2; border: none;" onclick="deleteNotificationEmail(${item.id})">Remove</button>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        container.innerHTML = html;
+                    }
+                } else {
+                    container.innerHTML = `<div style="text-align: center; padding: 20px; color: #ef4444;"><p>Error: ${res.message}</p></div>`;
+                }
+            } catch (err) {
+                document.getElementById('notif_list_container').innerHTML = '<div style="text-align: center; padding: 20px; color: #ef4444;"><p>Network Error</p></div>';
+            }
+        }
+
+        async function addNotificationEmail() {
+            const nameInput = document.getElementById('notif_new_name');
+            const emailInput = document.getElementById('notif_new_email');
+            const name = nameInput.value.trim();
+            const email = emailInput.value.trim();
+
+            if (!email) {
+                alert('Email address is required');
+                return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'add');
+                formData.append('parent_id', currentNotifTargetId);
+                formData.append('parent_type', currentNotifTargetType);
+                formData.append('name', name);
+                formData.append('email', email);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                if (res.status === 'success') {
+                    nameInput.value = '';
+                    emailInput.value = '';
+                    loadNotificationEmails();
+                } else {
+                    alert('Error: ' + res.message);
+                }
+            } catch (err) {
+                alert('Network Error');
+            }
+        }
+
+        async function deleteNotificationEmail(id) {
+            if (!confirm('Are you sure you want to remove this person from the notification list?')) return;
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'delete');
+                formData.append('id', id);
+                formData.append('parent_id', currentNotifTargetId);
+                formData.append('parent_type', currentNotifTargetType);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                if (res.status === 'success') {
+                    loadNotificationEmails();
+                } else {
+                    alert('Error: ' + res.message);
+                }
+            } catch (err) {
+                alert('Network Error');
             }
         }
 

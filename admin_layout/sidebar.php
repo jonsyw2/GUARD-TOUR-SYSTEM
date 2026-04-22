@@ -33,6 +33,11 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </a>
         </li>
         <li>
+            <a href="admin_retention.php" class="nav-link <?php echo $current_page == 'admin_retention.php' ? 'active' : ''; ?>">
+                <span>🗑️</span> Data Retention
+            </a>
+        </li>
+        <li>
             <a href="login_logs_view.php" class="nav-link <?php echo $current_page == 'login_logs_view.php' ? 'active' : ''; ?>">
                 <span>📋</span> Login Logs
             </a>

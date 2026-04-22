@@ -14,15 +14,25 @@ if ($_SESSION['user_level'] !== 'agency') {
     <title>Settings - Agency Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --primary: #10b981;
+            --primary-hover: #059669;
+            --bg-main: #f3f4f6;
+            --sidebar-bg: #111827;
+            --text-main: #111827;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); padding: 0 16px 0 0; gap: 16px; }
         .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
         .nav-link:hover, .nav-link.active { background-color: #1f2937; color: #fff; border-left-color: #10b981; }
         .sidebar-footer { padding: 20px; border-top: 1px solid #374151; }
-        .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
+        .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; cursor: pointer; }
         .logout-btn:hover { background-color: #dc2626; }
         .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
@@ -31,7 +41,7 @@ if ($_SESSION['user_level'] !== 'agency') {
         .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
 
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
         .modal-overlay.show { display: flex; }
         .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
         @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -39,11 +49,12 @@ if ($_SESSION['user_level'] !== 'agency') {
         .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
         .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
         .modal-actions { display: flex; gap: 12px; }
-        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
+        .btn-modal { padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
+        .modal-actions .btn-modal { flex: 1; }
         .btn-cancel { background: #f3f4f6; color: #374151; }
         .btn-cancel:hover { background: #e5e7eb; }
-        .btn-confirm { background: #e11d48; color: white; text-decoration: none; }
-        .btn-confirm:hover { background: #be123c; }
+        .btn-confirm { background: var(--primary); color: white; text-decoration: none; }
+        .btn-confirm:hover { background: var(--primary-hover); }
     </style>
 </head>
 <body>
@@ -52,13 +63,14 @@ if ($_SESSION['user_level'] !== 'agency') {
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
-
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
+            <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
+            <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-
+            <li><a href="agency_settings.php" class="nav-link active">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -69,12 +81,48 @@ if ($_SESSION['user_level'] !== 'agency') {
             <h2>Agency Settings</h2>
         </header>
         <div class="content-area">
-            <div class="card">
+            <div class="card" style="margin-bottom: 24px;">
                 <h3 class="card-header">Account Configuration</h3>
-                <p style="color: #6b7280;">This section is currently under development. Soon you will be able to manage your agency profile, notification preferences, and API integrations here.</p>
+                <p style="color: #6b7280;">Manage your agency profile and basic account settings here.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Authorized Persons to Notify</span>
+                    <button class="btn-modal btn-confirm" style="width: auto; padding: 8px 16px; font-size: 0.85rem; background: var(--primary);" onclick="openAddNotifModal()">+ Add Person</button>
+                </div>
+                <p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 24px;">These additional emails will automatically receive reports submitted by your guards and inspectors.</p>
+                
+                <div id="notif_list_container">
+                    <div style="text-align: center; padding: 40px; color: #94a3b8;">
+                        <p>Loading authorized persons...</p>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
+
+    <!-- Add Notification Modal -->
+    <div class="modal-overlay" id="addNotifModal">
+        <div class="modal-content" style="max-width: 450px; text-align: left;">
+            <h3 class="modal-title">Add Authorized Person</h3>
+            <p class="modal-text">Register a new recipient for automated reports.</p>
+            
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">Name (Optional)</label>
+                <input type="text" id="notif_new_name" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;" placeholder="e.g. Operations Manager">
+            </div>
+            <div style="margin-bottom: 24px;">
+                <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">Email Address</label>
+                <input type="email" id="notif_new_email" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;" placeholder="manager@example.com">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn-modal btn-cancel" onclick="closeAddNotifModal()">Cancel</button>
+                <button class="btn-modal btn-confirm" style="background: var(--primary);" onclick="addNotificationEmail()">Add Recipient</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
@@ -92,12 +140,139 @@ if ($_SESSION['user_level'] !== 'agency') {
     </div>
 
     <script>
+        const agencyId = <?php echo $_SESSION['user_id']; ?>;
+        const parentType = 'agency';
+
+        function openAddNotifModal() {
+            document.getElementById('addNotifModal').classList.add('show');
+        }
+
+        function closeAddNotifModal() {
+            document.getElementById('addNotifModal').classList.remove('show');
+        }
+
+        async function loadNotificationEmails() {
+            try {
+                const formData = new FormData();
+                formData.append('action', 'list');
+                formData.append('parent_id', agencyId);
+                formData.append('parent_type', parentType);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                const container = document.getElementById('notif_list_container');
+                if (res.status === 'success') {
+                    if (res.data.length === 0) {
+                        container.innerHTML = `
+                            <div style="text-align: center; padding: 40px; color: #94a3b8; border: 2px dashed #e5e7eb; border-radius: 12px;">
+                                <p>No authorized persons registered yet.</p>
+                            </div>`;
+                    } else {
+                        let html = '<div style="display: grid; gap: 12px;">';
+                        res.data.forEach(item => {
+                            html += `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; transition: all 0.2s;">
+                                    <div style="display: flex; align-items: center; gap: 12px;">
+                                        <div style="width: 40px; height: 40px; background: #eff6ff; color: #3b82f6; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;">
+                                            ${(item.name || 'A').charAt(0).toUpperCase()}
+                                        </div>
+                                        <div>
+                                            <div style="font-weight: 600; color: #1e293b; font-size: 0.95rem;">${item.name || 'Anonymous'}</div>
+                                            <div style="font-size: 0.85rem; color: #64748b;">${item.email}</div>
+                                        </div>
+                                    </div>
+                                    <button class="btn-modal" style="width: auto; padding: 6px 12px; font-size: 0.8rem; color: #ef4444; background: #fee2e2; border: none; cursor: pointer; border-radius: 6px;" onclick="deleteNotificationEmail(${item.id})">Remove</button>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        container.innerHTML = html;
+                    }
+                } else {
+                    container.innerHTML = `<div style="text-align: center; padding: 20px; color: #ef4444;"><p>Error: ${res.message}</p></div>`;
+                }
+            } catch (err) {
+                document.getElementById('notif_list_container').innerHTML = '<div style="text-align: center; padding: 20px; color: #ef4444;"><p>Network Error</p></div>';
+            }
+        }
+
+        async function addNotificationEmail() {
+            const nameInput = document.getElementById('notif_new_name');
+            const emailInput = document.getElementById('notif_new_email');
+            const name = nameInput.value.trim();
+            const email = emailInput.value.trim();
+
+            if (!email) {
+                alert('Email address is required');
+                return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'add');
+                formData.append('parent_id', agencyId);
+                formData.append('parent_type', parentType);
+                formData.append('name', name);
+                formData.append('email', email);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                if (res.status === 'success') {
+                    nameInput.value = '';
+                    emailInput.value = '';
+                    closeAddNotifModal();
+                    loadNotificationEmails();
+                } else {
+                    alert('Error: ' + res.message);
+                }
+            } catch (err) {
+                alert('Network Error');
+            }
+        }
+
+        async function deleteNotificationEmail(id) {
+            if (!confirm('Are you sure you want to remove this person from the notification list?')) return;
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'delete');
+                formData.append('id', id);
+                formData.append('parent_id', agencyId);
+                formData.append('parent_type', parentType);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                if (res.status === 'success') {
+                    loadNotificationEmails();
+                } else {
+                    alert('Error: ' + res.message);
+                }
+            } catch (err) {
+                alert('Network Error');
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', loadNotificationEmails);
+
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
-            }
+            const logoutModal = document.getElementById('logoutModal');
+            const addNotifModal = document.getElementById('addNotifModal');
+            if (event.target == logoutModal) logoutModal.classList.remove('show');
+            if (event.target == addNotifModal) addNotifModal.classList.remove('show');
         }
     </script>
 </body>
