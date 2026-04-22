@@ -1628,7 +1628,21 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 new Sortable(tourList, {
                     handle: '.handle',
                     animation: 150,
-                    ghostClass: 'sortable-ghost'
+                    ghostClass: 'sortable-ghost',
+                    onEnd: function() {
+                        // Reordering might change overall timing if intervals vary
+                        syncAllShifts();
+                    }
+                });
+            }
+
+            // Sync shifts whenever patrol pattern values change
+            const patrolTab = document.getElementById('tab-patrol');
+            if (patrolTab) {
+                patrolTab.addEventListener('input', (e) => {
+                    if (e.target.name === 'intervals[]' || e.target.name === 'durations[]') {
+                        syncAllShifts();
+                    }
                 });
             }
         });
@@ -1928,12 +1942,63 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                             addShiftInput(sh.shift_name, sh.id, sh.start_time, sh.end_time, true); // true = skipDirty
                         });
                     }
+                    
+                    // INITIALIZE: Calculate all TO times based on current patrol pattern
+                    syncAllShifts();
                 } catch (e) {
                     console.error('Error fetching site data:', e);
                     addCheckpointInput();
                     addShiftInput();
                 }
             }
+        }
+
+        function calculateTotalPatrolMinutes() {
+            // Target the patrol tab container specifically
+            const patrolPane = document.getElementById('tab-patrol');
+            if (!patrolPane) return 0;
+
+            const intervals = patrolPane.querySelectorAll('input[name="intervals[]"]');
+            const durations = patrolPane.querySelectorAll('input[name="durations[]"]');
+            
+            let total = 0;
+            intervals.forEach(input => total += (parseInt(input.value) || 0));
+            durations.forEach(input => total += (parseInt(input.value) || 0));
+            
+            return total;
+        }
+
+        function updateShiftToTime(row) {
+            if (!row) return;
+            const startInput = row.querySelector('input[name="shift_starts[]"]');
+            const endInput = row.querySelector('input[name="shift_ends[]"]');
+            if (!startInput || !endInput) return;
+
+            const startVal = startInput.value;
+            if (!startVal) return;
+
+            const patrolMins = calculateTotalPatrolMinutes();
+            const allowance = 20;
+            const totalMinsToAdd = patrolMins + allowance;
+
+            const [h, m] = startVal.split(':').map(Number);
+            let totalInMins = h * 60 + m + totalMinsToAdd;
+            
+            // Handle rollover
+            totalInMins = totalInMins % 1440;
+            
+            const newH = Math.floor(totalInMins / 60);
+            const newM = totalInMins % 60;
+            
+            const formattedTime = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+            endInput.value = formattedTime;
+            
+            updateDurationDisplay(true); // Update total 24h summary
+        }
+
+        function syncAllShifts() {
+            const rows = document.querySelectorAll('.shift-input-row');
+            rows.forEach(row => updateShiftToTime(row));
         }
 
         function calculateTotalShiftMinutes() {
@@ -1998,11 +2063,11 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 </div>
                 <div style="flex: 1; display: flex; align-items: center; gap: 4px; min-width: 125px; flex-shrink: 0;">
                     <span style="font-size: 0.7rem; color: #64748b; font-weight: 700;">FROM</span>
-                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" style="padding: 8px 4px; font-size: 0.85rem;" onchange="updateDurationDisplay()">
+                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" required oninput="updateShiftToTime(this.parentElement.parentElement)" onchange="markQrConfigDirty()">
                 </div>
                 <div style="flex: 1; display: flex; align-items: center; gap: 4px; min-width: 125px; flex-shrink: 0;">
                     <span style="font-size: 0.7rem; color: #64748b; font-weight: 700;">TO</span>
-                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" style="padding: 8px 4px; font-size: 0.85rem;" onchange="updateDurationDisplay()">
+                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" readonly style="background-color: #f8fafc; cursor: not-allowed; border-style: dashed;" required>
                 </div>
                 <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border-radius: 8px; border: none; flex-shrink: 0;" onclick="this.parentElement.remove(); updateDurationDisplay();">✕</button>
             `;
