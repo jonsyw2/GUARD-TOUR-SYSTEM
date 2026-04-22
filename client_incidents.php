@@ -35,14 +35,17 @@ $incidents_sql = "
         i.status,
         i.photo_path,
         i.report_category,
-        i.recorded_by,
-        i.noted_by,
-        i.investigated_by,
-        i.approved_by
+        i.approved_by,
+        i.report_what,
+        i.report_who,
+        i.report_when,
+        i.report_where,
+        i.report_why,
+        i.report_how
     FROM incidents i
     LEFT JOIN checkpoints c ON i.checkpoint_id = c.id
     LEFT JOIN guards g ON i.guard_id = g.id
-    WHERE i.agency_client_id IN ($mapping_ids_str)
+    WHERE i.agency_client_id IN ($mapping_ids_str) AND i.report_what IS NULL
     ORDER BY i.created_at DESC
     LIMIT 100
 ";
@@ -165,7 +168,7 @@ $incidents_result = $conn->query($incidents_sql);
             <li><a href="client_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="client_incidents.php" class="nav-link active">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
-
+            <li><a href="client_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -222,9 +225,25 @@ $incidents_result = $conn->query($incidents_sql);
                                 <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f1f5f9; font-size: 0.8rem; color: #64748b;">
                                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
                                         <span>Recorded by:</span>
-                                        <span style="font-weight: 600; color: #334155;"><?php echo htmlspecialchars($row['recorded_by'] ?: '---'); ?></span>
+                                        <span style="font-weight: 600; color: #334155;"><?php echo htmlspecialchars($row['guard_name'] ?: ($row['recorded_by'] ?: '---')); ?></span>
                                     </div>
-                                    <button class="btn-detail" style="width: 100%; margin-top: 10px; padding: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; color: #3b82f6; font-weight: 600; cursor: pointer; font-size: 0.75rem;" onclick="showReportDetails('<?php echo addslashes($row['report_category']); ?>', '<?php echo addslashes($row['description']); ?>', '<?php echo addslashes($row['recorded_by']); ?>', '<?php echo addslashes($row['noted_by']); ?>', '<?php echo addslashes($row['investigated_by']); ?>', '<?php echo addslashes($row['approved_by']); ?>')">View Details (Noted/Approved)</button>
+                                    <button class="btn-detail" style="width: 100%; margin-top: 10px; padding: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; color: #3b82f6; font-weight: 600; cursor: pointer; font-size: 0.75rem;" 
+                                        onclick="showReportDetails(
+                                            '<?php echo addslashes($row['report_category']); ?>', 
+                                            '<?php echo addslashes($row['description']); ?>', 
+                                            '<?php echo addslashes($row['recorded_by'] ?: $row['guard_name']); ?>', 
+                                            '<?php echo addslashes($row['noted_by']); ?>', 
+                                            '<?php echo addslashes($row['investigated_by']); ?>', 
+                                            '<?php echo addslashes($row['approved_by']); ?>',
+                                            <?php echo json_encode([
+                                                'what' => $row['report_what'],
+                                                'who' => $row['report_who'],
+                                                'when' => $row['report_when'],
+                                                'where' => $row['report_where'],
+                                                'why' => $row['report_why'],
+                                                'how' => $row['report_how']
+                                            ]); ?>
+                                        )">View Details (Noted/Approved)</button>
                                 </div>
 
                                 <div class="card-footer" style="margin-top: 10px;">
@@ -267,7 +286,19 @@ $incidents_result = $conn->query($incidents_sql);
             <h3 id="modal_report_title" style="margin-bottom: 16px; font-size: 1.25rem; font-weight: 700; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Report Details</h3>
             
             <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
-                <p id="modal_report_desc" style="font-size: 0.95rem; line-height: 1.6; color: #374151;"></p>
+                <p id="modal_report_desc" style="font-size: 0.95rem; line-height: 1.6; color: #374151; margin-bottom: 12px;"></p>
+                
+                <!-- 5W1H Section -->
+                <div id="w5h_container" style="display: none; border-top: 1px solid #e5e7eb; padding-top: 12px; margin-top: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.85rem;">
+                        <div><strong style="color: #64748b;">WHAT:</strong> <span id="w_what"></span></div>
+                        <div><strong style="color: #64748b;">WHO:</strong> <span id="w_who"></span></div>
+                        <div><strong style="color: #64748b;">WHEN:</strong> <span id="w_when"></span></div>
+                        <div><strong style="color: #64748b;">WHERE:</strong> <span id="w_where"></span></div>
+                        <div><strong style="color: #64748b;">WHY:</strong> <span id="w_why"></span></div>
+                        <div><strong style="color: #64748b;">HOW:</strong> <span id="w_how"></span></div>
+                    </div>
+                </div>
             </div>
 
             <div class="detail-row">
@@ -296,9 +327,22 @@ $incidents_result = $conn->query($incidents_sql);
     </div>
 
     <script>
-        function showReportDetails(category, desc, recorded, noted, investigated, approved) {
+        function showReportDetails(category, desc, recorded, noted, investigated, approved, w5h = null) {
             document.getElementById('modal_report_title').innerText = category === 'investigation' ? 'Professional Investigation Report' : 'General Incident Report';
             document.getElementById('modal_report_desc').innerText = desc;
+
+            if (w5h && w5h.what) {
+                document.getElementById('w5h_container').style.display = 'block';
+                document.getElementById('w_what').innerText = w5h.what || '---';
+                document.getElementById('w_who').innerText = w5h.who || '---';
+                document.getElementById('w_when').innerText = w5h.when || '---';
+                document.getElementById('w_where').innerText = w5h.where || '---';
+                document.getElementById('w_why').innerText = w5h.why || '---';
+                document.getElementById('w_how').innerText = w5h.how || '---';
+            } else {
+                document.getElementById('w5h_container').style.display = 'none';
+            }
+
             document.getElementById('modal_recorded').innerText = recorded || '---';
             document.getElementById('modal_noted').innerText = noted || '---';
             document.getElementById('modal_investigated').innerText = investigated || '---';

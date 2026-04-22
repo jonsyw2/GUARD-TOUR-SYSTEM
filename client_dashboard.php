@@ -130,7 +130,7 @@ if ($mapping_ids_str !== '0') {
             <li><a href="client_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link">General Reports</a></li>
-
+            <li><a href="client_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>

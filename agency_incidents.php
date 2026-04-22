@@ -47,8 +47,13 @@ $columns_to_check = [
     'report_category' => "ENUM('general', 'investigation') DEFAULT 'general' AFTER checkpoint_id",
     'recorded_by' => "VARCHAR(255) DEFAULT NULL AFTER description",
     'noted_by' => "VARCHAR(255) DEFAULT NULL AFTER recorded_by",
-    'investigated_by' => "VARCHAR(255) DEFAULT NULL AFTER noted_by",
-    'approved_by' => "VARCHAR(255) DEFAULT NULL AFTER investigated_by"
+    'approved_by' => "VARCHAR(255) DEFAULT NULL AFTER investigated_by",
+    'report_what' => "TEXT DEFAULT NULL AFTER checkpoint_id",
+    'report_who' => "TEXT DEFAULT NULL AFTER report_what",
+    'report_when' => "TEXT DEFAULT NULL AFTER report_who",
+    'report_where' => "TEXT DEFAULT NULL AFTER report_when",
+    'report_why' => "TEXT DEFAULT NULL AFTER report_where",
+    'report_how' => "TEXT DEFAULT NULL AFTER report_why"
 ];
 
 foreach ($columns_to_check as $col => $definition) {
@@ -103,9 +108,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['create_incident'])) {
 
 // Fetch Incidents for this agency
 $incidents_sql = "
-    SELECT * FROM incidents 
-    WHERE agency_id = $agency_id
-    ORDER BY created_at DESC
+    SELECT i.*, g.name as guard_name, ac.site_name
+    FROM incidents i
+    LEFT JOIN guards g ON i.guard_id = g.id
+    LEFT JOIN agency_clients ac ON i.agency_client_id = ac.id
+    WHERE i.agency_id = $agency_id AND i.report_what IS NULL
+    ORDER BY i.created_at DESC
 ";
 $incidents_res = $conn->query($incidents_sql);
 
@@ -236,7 +244,7 @@ $incidents_res = $conn->query($incidents_sql);
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link active">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-
+            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -290,7 +298,8 @@ $incidents_res = $conn->query($incidents_sql);
                                                 <?php echo htmlspecialchars($row['description']); ?>
                                             </div>
                                             <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;">
-                                                By: <?php echo htmlspecialchars($row['recorded_by'] ?: '---'); ?>
+                                                By: <?php echo htmlspecialchars($row['guard_name'] ?: ($row['recorded_by'] ?: '---')); ?>
+                                                <?php if ($row['site_name']): ?> | Site: <?php echo htmlspecialchars($row['site_name']); ?><?php endif; ?>
                                             </div>
                                         </td>
                                         <td>
@@ -303,7 +312,23 @@ $incidents_res = $conn->query($incidents_sql);
                                                 <?php if (!empty($row['photo_path']) && $row['photo_path'] !== 'NULL'): ?>
                                                     <a href="<?php echo $row['photo_path']; ?>" target="_blank" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">View Photo</a>
                                                 <?php endif; ?>
-                                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" onclick="showIncidentReport('<?php echo addslashes($row['report_category']); ?>', '<?php echo addslashes($row['description']); ?>', '<?php echo addslashes($row['recorded_by']); ?>', '<?php echo addslashes($row['noted_by']); ?>', '<?php echo addslashes($row['investigated_by']); ?>', '<?php echo addslashes($row['approved_by']); ?>')">Details</button>
+                                                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;" 
+                                                    onclick="showIncidentReport(
+                                                        '<?php echo addslashes($row['report_category']); ?>', 
+                                                        '<?php echo addslashes($row['description']); ?>', 
+                                                        '<?php echo addslashes($row['recorded_by'] ?: $row['guard_name']); ?>', 
+                                                        '<?php echo addslashes($row['noted_by']); ?>', 
+                                                        '<?php echo addslashes($row['investigated_by']); ?>', 
+                                                        '<?php echo addslashes($row['approved_by']); ?>',
+                                                        <?php echo json_encode([
+                                                            'what' => $row['report_what'],
+                                                            'who' => $row['report_who'],
+                                                            'when' => $row['report_when'],
+                                                            'where' => $row['report_where'],
+                                                            'why' => $row['report_why'],
+                                                            'how' => $row['report_how']
+                                                        ]); ?>
+                                                    )">Details</button>
                                             </div>
                                         </td>
                                     </tr>
@@ -386,7 +411,20 @@ $incidents_res = $conn->query($incidents_sql);
             
             <div style="background: #f8fafc; padding: 16px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #e2e8f0;">
                 <p id="detail_desc" style="font-size: 0.95rem; line-height: 1.6; color: #334155; margin-bottom: 12px;"></p>
-                <div style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase;" id="detail_category">Category: ---</div>
+                
+                <!-- 5W1H Section -->
+                <div id="w5h_container" style="display: none; border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 0.85rem;">
+                        <div><strong style="color: #64748b;">WHAT:</strong> <span id="w_what"></span></div>
+                        <div><strong style="color: #64748b;">WHO:</strong> <span id="w_who"></span></div>
+                        <div><strong style="color: #64748b;">WHEN:</strong> <span id="w_when"></span></div>
+                        <div><strong style="color: #64748b;">WHERE:</strong> <span id="w_where"></span></div>
+                        <div><strong style="color: #64748b;">WHY:</strong> <span id="w_why"></span></div>
+                        <div><strong style="color: #64748b;">HOW:</strong> <span id="w_how"></span></div>
+                    </div>
+                </div>
+
+                <div style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; margin-top: 12px;" id="detail_category">Category: ---</div>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -425,9 +463,22 @@ $incidents_res = $conn->query($incidents_sql);
     </div>
 
     <script>
-        function showIncidentReport(category, desc, recorded, noted, investigated, approved) {
+        function showIncidentReport(category, desc, recorded, noted, investigated, approved, w5h = null) {
             document.getElementById('detail_title').innerText = category === 'investigation' ? 'Investigation Report' : 'General Incident Report';
             document.getElementById('detail_desc').innerText = desc;
+            
+            if (w5h && w5h.what) {
+                document.getElementById('w5h_container').style.display = 'block';
+                document.getElementById('w_what').innerText = w5h.what || '---';
+                document.getElementById('w_who').innerText = w5h.who || '---';
+                document.getElementById('w_when').innerText = w5h.when || '---';
+                document.getElementById('w_where').innerText = w5h.where || '---';
+                document.getElementById('w_why').innerText = w5h.why || '---';
+                document.getElementById('w_how').innerText = w5h.how || '---';
+            } else {
+                document.getElementById('w5h_container').style.display = 'none';
+            }
+
             document.getElementById('detail_category').innerText = 'Category: ' + category.toUpperCase();
             document.getElementById('detail_recorded').innerText = recorded || '---';
             document.getElementById('detail_noted').innerText = noted || '---';

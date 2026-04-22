@@ -221,10 +221,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
         .user-info { display: flex; align-items: center; gap: 12px; }
         .badge { background: #dbeafe; color: #3b82f6; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
 
-        .content-area { padding: 32px; max-width: 800px; margin: 0 auto; width: 100%; }
+        .content-area { padding: 32px; max-width: 1000px; margin: 0 auto; width: 100%; }
 
         /* Report Form Card */
-        .card { background: white; padding: 32px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .card { background: white; padding: 32px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 32px; border: 1px solid #e5e7eb; }
         .card-header { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
         .card-desc { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; }
 
@@ -241,20 +241,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
         .submit-btn { width: 100%; padding: 14px; background-color: #3b82f6; color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-top: 20px; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .submit-btn:hover { background-color: #2563eb; }
         
+        /* Log Table Styles */
+        .log-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .log-table th { text-align: left; padding: 12px; border-bottom: 2px solid #f3f4f6; color: #6b7280; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .log-table td { padding: 16px 12px; border-bottom: 1px solid #f3f4f6; font-size: 0.9rem; }
+        .status-badge { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+        .btn-view { padding: 6px 12px; background: #eff6ff; color: #3b82f6; border: 1px solid #dbeafe; border-radius: 6px; cursor: pointer; font-size: 0.8rem; font-weight: 600; transition: 0.2s; }
+        .btn-view:hover { background: #dbeafe; }
+
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
         .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
-        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
-        .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
-        .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
-        .modal-actions { display: flex; gap: 12px; }
-        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
-        .btn-cancel { background: #f3f4f6; color: #374151; }
-        .btn-cancel:hover { background: #e5e7eb; }
-        .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
-        .btn-confirm:hover { background: #be123c; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 600px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative; animation: modalFadeIn 0.3s ease-out; }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .modal-close { position: absolute; top: 16px; right: 16px; font-size: 24px; cursor: pointer; color: #94a3b8; }
+        
+        .w5h-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; text-align: left; }
+        .w5h-item { background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .w5h-label { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+        .w5h-value { font-size: 0.9rem; color: #1e293b; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -269,7 +274,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
             <li><a href="client_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="client_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="client_reports.php" class="nav-link active">General Reports</a></li>
-
+            <li><a href="client_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -278,7 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Generate Performance Reports</h2>
+            <h2>Performance & Official Reports</h2>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
                 <span class="badge">CLIENT</span>
@@ -286,12 +291,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
         </header>
 
         <div class="content-area">
+            <!-- 5W1H Report Log Section -->
             <div class="card">
-                <h3 class="card-header">Activity & Compliance Export</h3>
-                <p class="card-desc">Download a comprehensive log of all guard activities for an official record. Select your preferred timeframe and export format.</p>
+                <h3 class="card-header">Official Guard Reports (5W1H)</h3>
+                <p class="card-desc">Recent structured reports submitted by guards from the field.</p>
+                
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Reported By</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $log_sql = "
+                            SELECT i.*, 
+                                   CASE WHEN i.reporter_role = 'inspector' THEN ins.name ELSE g.name END as guard_name
+                            FROM incidents i
+                            LEFT JOIN guards g ON i.guard_id = g.id AND (i.reporter_role = 'guard' OR i.reporter_role IS NULL)
+                            LEFT JOIN inspectors ins ON i.guard_id = ins.id AND i.reporter_role = 'inspector'
+                            WHERE i.agency_client_id IN ($mapping_ids_str) AND i.report_what IS NOT NULL
+                            ORDER BY i.created_at DESC LIMIT 10
+                        ";
+                        $log_res = $conn->query($log_sql);
+                        if ($log_res && $log_res->num_rows > 0):
+                            while($row = $log_res->fetch_assoc()): 
+                                $prefix = (isset($row['reporter_role']) && $row['reporter_role'] == 'inspector') ? 'Insp. ' : 'SG. ';
+                                $display_name = $prefix . ($row['guard_name'] ?: 'Unknown');
+                                ?>
+                                <tr>
+                                    <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
+                                    <td><strong><?php echo htmlspecialchars($display_name); ?></strong></td>
+                                    <td>
+                                        <span class="status-badge" style="background: <?php echo strtolower($row['status']) === 'resolved' ? '#dcfce7' : '#fef3c7'; ?>; color: <?php echo strtolower($row['status']) === 'resolved' ? '#166534' : '#92400e'; ?>;">
+                                            <?php echo htmlspecialchars($row['status']); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; gap: 8px;">
+                                            <button class="btn-view" onclick='showReport(<?php echo json_encode($row); ?>, "<?php echo $display_name; ?>")'>View</button>
+                                            <button class="btn-view" style="background:#f0fdf4; color:#166534; border-color:#bbf7d0;" onclick='downloadPDF(<?php echo json_encode($row); ?>, "<?php echo $display_name; ?>")'>PDF</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <tr><td colspan="4" style="text-align:center; padding:30px; color:#9ca3af;">No official reports submitted yet.</td></tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Report Export Card -->
+            <div class="card">
+                <h3 class="card-header">Export Activity Logs</h3>
+                <p class="card-desc">Generate CSV or PDF reports for your internal records.</p>
                 
                 <form action="client_reports.php" method="POST" target="_blank">
-                    
                     <div class="form-group">
                         <span class="form-label">Report Period</span>
                         <div class="radio-group">
@@ -318,81 +377,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
                             </label>
                         </div>
                     </div>
-
-                    <div class="form-group">
-                        <span class="form-label">Guard Filter (Optional)</span>
-                        <select name="guard_id" class="form-control" style="background: #f9fafb;">
-                            <option value="">All Guards</option>
-                            <?php if ($guards_res) {
-                                mysqli_data_seek($guards_res, 0); // reset pointer
-                                while($g = $guards_res->fetch_assoc()): ?>
-                                <option value="<?php echo $g['id']; ?>"><?php echo htmlspecialchars($g['name']); ?></option>
-                            <?php endwhile; } ?>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <span class="form-label">Shift Filter (Optional)</span>
-                        <select name="shift" class="form-control" style="background: #f9fafb;">
-                            <option value="">All Shifts</option>
-                            <option value="Day Shift">Day Shift</option>
-                            <option value="Night Shift">Night Shift</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" style="margin-top: 32px;">
-                        <span class="form-label">Export Format</span>
-                        <div class="radio-group">
-                            <label class="radio-label">
-                                <input type="radio" name="format" value="pdf" class="radio-input" checked>
-                                <span class="radio-content">
-                                    <span class="radio-text">PDF Document (Printable)</span>
-                                    <span class="radio-sub">A clean, formatted page ready for printing or saving as PDF.</span>
-                                </span>
-                            </label>
-                            <label class="radio-label">
-                                <input type="radio" name="format" value="csv" class="radio-input">
-                                <span class="radio-content">
-                                    <span class="radio-text">CSV Spreadsheet</span>
-                                    <span class="radio-sub">Raw data format, easily importable into Excel or Google Sheets.</span>
-                                </span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <button type="submit" name="generate_report" value="1" class="submit-btn" onclick="setTimeout(() => { document.getElementById('successMsg').style.display='block'; }, 1500);">
-                        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2-2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                        Download Report
+                    <button type="submit" name="generate_report" value="1" class="submit-btn">
+                        Download Export
                     </button>
-                    <p id="successMsg" style="display:none; color:#10b981; font-weight:600; text-align:center; margin-top:16px;">Report generated successfully in a new tab!</p>
                 </form>
             </div>
         </div>
     </main>
 
+    <!-- Report Detail Modal -->
+    <div class="modal-overlay" id="reportModal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <h3 style="margin-bottom: 8px; color: #1e293b;">Report Details</h3>
+            <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 24px;" id="modal_meta"></p>
+            
+            <div class="w5h-grid">
+                <div class="w5h-item">
+                    <div class="w5h-label">What happened?</div>
+                    <div class="w5h-value" id="v_what"></div>
+                </div>
+                <div class="w5h-item">
+                    <div class="w5h-label">Who was involved?</div>
+                    <div class="w5h-value" id="v_who"></div>
+                </div>
+                <div class="w5h-item">
+                    <div class="w5h-label">When did it occur?</div>
+                    <div class="w5h-value" id="v_when"></div>
+                </div>
+                <div class="w5h-item">
+                    <div class="w5h-label">Where exactly?</div>
+                    <div class="w5h-value" id="v_where"></div>
+                </div>
+                <div class="w5h-item">
+                    <div class="w5h-label">Why did it happen?</div>
+                    <div class="w5h-value" id="v_why"></div>
+                </div>
+                <div class="w5h-item">
+                    <div class="w5h-label">How was it handled?</div>
+                    <div class="w5h-value" id="v_how"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Logout Modal -->
     <div class="modal-overlay" id="logoutModal">
-        <div class="modal-content">
-            <div class="modal-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-            </div>
-            <h3 class="modal-title">Ready to Leave?</h3>
-            <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
-            <div class="modal-actions">
-                <button class="btn-modal btn-cancel" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
-                <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
+            <h3 class="modal-title">Log Out?</h3>
+            <p class="modal-text">Are you sure you want to end your session?</p>
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                <button class="btn-view" style="flex:1; padding:12px;" onclick="document.getElementById('logoutModal').classList.remove('show')">Cancel</button>
+                <a href="logout.php" style="flex:1; padding:12px; background:#ef4444; color:white; text-decoration:none; border-radius:8px; font-weight:600;">Log Out</a>
             </div>
         </div>
     </div>
 
     <script>
-        // Close modal when clicking outside
+        function showReport(data, displayName) {
+            document.getElementById('v_what').innerText = data.report_what || '---';
+            document.getElementById('v_who').innerText = data.report_who || '---';
+            document.getElementById('v_when').innerText = data.report_when || '---';
+            document.getElementById('v_where').innerText = data.report_where || '---';
+            document.getElementById('v_why').innerText = data.report_why || '---';
+            document.getElementById('v_how').innerText = data.report_how || '---';
+            
+            const date = new Date(data.created_at).toLocaleString();
+            document.getElementById('modal_meta').innerText = `Reported by ${displayName} on ${date}`;
+            
+            document.getElementById('reportModal').classList.add('show');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function downloadPDF(data, displayName) {
+            window.open('generate_5w1h_pdf.php?id=' + data.id, '_blank');
+        }
+
+        function closeModal() {
+            document.getElementById('reportModal').classList.remove('show');
+            document.body.style.overflow = '';
+        }
+
         window.onclick = function(event) {
-            const modal = document.getElementById('logoutModal');
-            if (event.target == modal) {
-                modal.classList.remove('show');
+            if (event.target.classList.contains('modal-overlay')) {
+                closeModal();
+                document.getElementById('logoutModal').classList.remove('show');
             }
         }
     </script>
+</body>
+</html>
 </body>
 </html>

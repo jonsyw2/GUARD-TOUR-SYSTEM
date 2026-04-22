@@ -552,7 +552,7 @@ if ($inspectors_res) {
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-
+            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -805,6 +805,39 @@ if ($inspectors_res) {
     </div>
         </div>
     </main>
+
+    <!-- Authorized Persons / Notifications Modal -->
+    <div id="notificationsModal" class="modal">
+        <div class="modal-content" style="max-width: 600px; text-align: left; padding: 0;">
+            <div style="padding: 24px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; font-size: 1.25rem; font-weight: 700; color: #1e293b;">Authorized Persons to Notify</h3>
+                <button type="button" onclick="closeModal('notificationsModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8;">&times;</button>
+            </div>
+            <div style="padding: 24px;">
+                <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 20px;">Manage additional emails that will automatically receive reports for <strong id="notif_target_name"></strong>.</p>
+                
+                <!-- Add New Form -->
+                <div style="background: #f8fafc; padding: 16px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 24px;">
+                    <h4 style="margin: 0 0 12px 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; color: #475569;">Add Authorized Person</h4>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px;">
+                        <input type="text" id="notif_new_name" class="form-control" placeholder="Name (Optional)" style="font-size: 0.85rem;">
+                        <input type="email" id="notif_new_email" class="form-control" placeholder="Email Address" style="font-size: 0.85rem;">
+                        <button class="btn-sm btn-primary" style="width: auto; padding: 0 16px;" onclick="addNotificationEmail()">Add</button>
+                    </div>
+                </div>
+
+                <!-- List -->
+                <div id="notif_list_container" style="max-height: 300px; overflow-y: auto;">
+                    <div style="text-align: center; padding: 40px; color: #94a3b8;">
+                        <p>Loading authorized persons...</p>
+                    </div>
+                </div>
+            </div>
+            <div style="padding: 16px 24px; border-top: 1px solid #e5e7eb; text-align: right; background: #f8fafc; border-radius: 0 0 12px 12px;">
+                <button type="button" class="btn-sm" style="background: #ffffff; border: 1px solid #e2e8f0; color: #475569; width: auto;" onclick="closeModal('notificationsModal')">Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Site Summary Modal -->
     <div id="summaryModal" class="modal">
@@ -1102,6 +1135,122 @@ if ($inspectors_res) {
                 inputs.forEach(input => {
                     input.required = false;
                 });
+            }
+        }
+
+        let currentNotifTargetId = 0;
+        let currentNotifTargetType = '';
+
+        function openNotificationsModal(id, type, name) {
+            currentNotifTargetId = id;
+            currentNotifTargetType = type;
+            document.getElementById('notif_target_name').innerText = name;
+            document.getElementById('notif_list_container').innerHTML = '<div style="text-align: center; padding: 40px; color: #94a3b8;"><p>Loading authorized persons...</p></div>';
+            document.getElementById('notificationsModal').classList.add('show');
+            loadNotificationEmails();
+        }
+
+        async function loadNotificationEmails() {
+            try {
+                const formData = new FormData();
+                formData.append('action', 'list');
+                formData.append('parent_id', currentNotifTargetId);
+                formData.append('parent_type', currentNotifTargetType);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                const container = document.getElementById('notif_list_container');
+                if (res.status === 'success') {
+                    if (res.data.length === 0) {
+                        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #94a3b8;"><p>No authorized persons registered yet.</p></div>';
+                    } else {
+                        let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+                        res.data.forEach(item => {
+                            html += `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px;">
+                                    <div>
+                                        <div style="font-weight: 600; color: #1e293b; font-size: 0.9rem;">${item.name || 'Anonymous'}</div>
+                                        <div style="font-size: 0.8rem; color: #64748b;">${item.email}</div>
+                                    </div>
+                                    <button class="btn-sm" style="width: auto; padding: 4px 8px; font-size: 0.75rem; color: #ef4444; background: #fee2e2; border: none;" onclick="deleteNotificationEmail(${item.id})">Remove</button>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        container.innerHTML = html;
+                    }
+                } else {
+                    container.innerHTML = `<div style="text-align: center; padding: 20px; color: #ef4444;"><p>Error: ${res.message}</p></div>`;
+                }
+            } catch (err) {
+                document.getElementById('notif_list_container').innerHTML = '<div style="text-align: center; padding: 20px; color: #ef4444;"><p>Network Error</p></div>';
+            }
+        }
+
+        async function addNotificationEmail() {
+            const nameInput = document.getElementById('notif_new_name');
+            const emailInput = document.getElementById('notif_new_email');
+            const name = nameInput.value.trim();
+            const email = emailInput.value.trim();
+
+            if (!email) {
+                alert('Email address is required');
+                return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'add');
+                formData.append('parent_id', currentNotifTargetId);
+                formData.append('parent_type', currentNotifTargetType);
+                formData.append('name', name);
+                formData.append('email', email);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                if (res.status === 'success') {
+                    nameInput.value = '';
+                    emailInput.value = '';
+                    loadNotificationEmails();
+                } else {
+                    alert('Error: ' + res.message);
+                }
+            } catch (err) {
+                alert('Network Error');
+            }
+        }
+
+        async function deleteNotificationEmail(id) {
+            if (!confirm('Are you sure you want to remove this person from the notification list?')) return;
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'delete');
+                formData.append('id', id);
+                formData.append('parent_id', currentNotifTargetId);
+                formData.append('parent_type', currentNotifTargetType);
+
+                const response = await fetch('api/manage_notifications.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await response.json();
+                
+                if (res.status === 'success') {
+                    loadNotificationEmails();
+                } else {
+                    alert('Error: ' + res.message);
+                }
+            } catch (err) {
+                alert('Network Error');
             }
         }
 

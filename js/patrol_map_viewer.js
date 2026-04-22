@@ -6,24 +6,24 @@ class PatrolMapViewer {
             console.error('Container not found:', containerId);
             return;
         }
-        
-        this.container.innerHTML = ''; 
+
+        this.container.innerHTML = '';
         this.canvas = document.createElement('canvas');
         this.canvas.style.display = 'block';
         this.canvas.style.width = '100%';
         this.canvas.style.height = '100%';
-        
+
         this.ctx = this.canvas.getContext('2d');
         this.container.appendChild(this.canvas);
-        
+
         this.pathData = [];
         this.padding = 60;
         this.isLoading = false;
-        
+
         window.addEventListener('resize', () => this.resize());
-        
+
         // Initial setup
-        setTimeout(() => this.resize(), 100); 
+        setTimeout(() => this.resize(), 100);
     }
 
     resize() {
@@ -37,7 +37,7 @@ class PatrolMapViewer {
             this.canvas.width = this.container.clientWidth || 800;
             this.canvas.height = this.container.clientHeight || 500;
         }
-        
+
         if (this.isLoading) {
             this.drawMessage('Loading Patrol Data...', '#f8fafc', '#64748b');
         } else if (this.pathData && this.pathData.length > 0) {
@@ -50,18 +50,18 @@ class PatrolMapViewer {
     async renderTour(tourId, mappingId = '') {
         console.log('Requesting tour data:', { tourId, mappingId });
         this.isLoading = true;
-        this.resize(); 
+        this.resize();
         this.drawMessage('Loading Patrol Data...', '#f8fafc', '#64748b');
-        
+
         try {
             const url = `api/get_tour_visual_data.php?tour_session_id=${encodeURIComponent(tourId)}&mapping_id=${mappingId}&v=${Date.now()}`;
             const response = await fetch(url);
-            
+
             if (!response.ok) throw new Error('Network response was not ok');
-            
+
             const data = await response.json();
             console.log('Received data:', data);
-            
+
             this.isLoading = false;
             if (data.status === 'success') {
                 this.pathData = data.path;
@@ -79,18 +79,18 @@ class PatrolMapViewer {
     drawMessage(msg, bgColor, textColor) {
         this.ctx.fillStyle = bgColor;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
+
         this.ctx.fillStyle = textColor;
         this.ctx.font = '600 18px Inter, sans-serif';
         this.ctx.textAlign = 'center';
-        this.ctx.fillText(msg, this.canvas.width/2, this.canvas.height/2);
+        this.ctx.fillText(msg, this.canvas.width / 2, this.canvas.height / 2);
     }
 
     draw() {
         const cw = this.canvas.width;
         const ch = this.canvas.height;
         this.ctx.clearRect(0, 0, cw, ch);
-        
+
         if (!this.pathData || this.pathData.length === 0) {
             this.drawMessage('No checkpoint data available for this site configuration.', '#f9fafb', '#94a3b8');
             return;
@@ -133,7 +133,7 @@ class PatrolMapViewer {
 
         const segmentColor = {
             scanned: '#60a5fa', // Blue
-            missed:  '#ef4444', // Red (covers both missed and justified)
+            missed: '#ef4444', // Red (covers both missed and justified)
             pending: '#cbd5e1', // Grey
         };
 
@@ -143,16 +143,16 @@ class PatrolMapViewer {
         const startPoint = startIdx >= 0 ? this.pathData[startIdx] : this.pathData[0];
         const lastPoint = drawSequence[drawSequence.length - 1];
         if (lastPoint.checkpoint_id !== startPoint.checkpoint_id && drawSequence.length > 1) {
-            drawSequence.push(startPoint); 
+            drawSequence.push(startPoint);
         }
 
         // 1. Draw Paths
         for (let i = 0; i < drawSequence.length - 1; i++) {
             const from = drawSequence[i];
-            const to   = drawSequence[i + 1];
+            const to = drawSequence[i + 1];
             const p1 = project(from.visual_pos_x, from.visual_pos_y);
             const p2 = project(to.visual_pos_x, to.visual_pos_y);
-            
+
             const toState = getState(to.status);
             const color = segmentColor[toState];
             const isDashed = (toState === 'pending');
@@ -165,7 +165,7 @@ class PatrolMapViewer {
             this.ctx.moveTo(p1.x, p1.y);
             this.ctx.lineTo(p2.x, p2.y);
             this.ctx.stroke();
-            
+
             if (!isDashed) {
                 this.drawArrow(p1.x, p1.y, p2.x, p2.y, color);
             }
@@ -176,7 +176,7 @@ class PatrolMapViewer {
         this.pathData.forEach(p => {
             const pos = project(p.visual_pos_x, p.visual_pos_y);
             const state = getState(p.status);
-            
+
             if (state === 'scanned') {
                 this.drawScannedNode(pos.x, pos.y, p.checkpoint_name);
             } else if (state === 'missed') {
