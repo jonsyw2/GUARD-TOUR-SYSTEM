@@ -1707,10 +1707,9 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             // Auto-select if only one site exists
             if (sites.length === 1) {
                 siteSelect.value = sites[0].mapping_id;
-                if (!skipUpdateLimit) updateLimitForm();
-            } else {
-                updateUsageSidebar(null);
             }
+            
+            if (!skipUpdateLimit) updateLimitForm();
 
             // Check limits
             const limit = parseInt(org.client_limit) || 0;
@@ -1823,18 +1822,15 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             // QR Calculations
             const qrLimit = parseInt(client.qr_limit) || 0;
             const qrSiteUsed = parseInt(client.site_used_qrs) || 0;
-            const qrTotalUsed = parseInt(client.total_used_qrs) || 0;
             const qrPercent = qrLimit > 0 ? (qrSiteUsed / qrLimit) * 100 : 0;
             
-            // Guard Calculations
+            // Guard Calculations (Pooled across org, but showing relevant to this client context)
             const grdLimit = parseInt(client.guard_limit) || 0;
-            const grdSiteUsed = parseInt(client.site_used_guards) || 0;
             const grdTotalUsed = parseInt(client.total_used_guards) || 0;
             const grdPercent = grdLimit > 0 ? (grdTotalUsed / grdLimit) * 100 : 0;
 
-            // Inspector Calculations
+            // Inspector Calculations (Pooled)
             const inspLimit = parseInt(client.inspector_limit) || 0;
-            const inspSiteUsed = parseInt(client.site_used_inspectors) || 0;
             const inspTotalUsed = parseInt(client.total_used_inspectors) || 0;
             const inspPercent = inspLimit > 0 ? (inspTotalUsed / inspLimit) * 100 : 0;
 
@@ -1856,7 +1852,6 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                             <div style="width: ${Math.min(100, qrPercent)}%; height: 100%; background: ${getFillColor(qrPercent)}; border-radius: 3px; transition: width 0.3s ease;"></div>
                         </div>
                     </div>
-
 
                     ${client.is_disabled == 1 ? '<div style="margin-top: 15px; padding: 10px; background: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; color: #ef4444; font-size: 0.75rem; font-weight: 700; text-align: center; text-transform: uppercase; letter-spacing: 0.05em;">Account Suspended</div>' : ''}
                     ${client.qr_override == 1 ? '<div style="margin-top:12px; font-size: 0.65rem; color: #10b981; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">✓ Admin Override Active</div>' : ''}
@@ -2070,8 +2065,10 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             const btn = document.getElementById('add-checkpoint-btn');
             const limitText = document.getElementById('qr-limit-text');
             const container = document.getElementById('checkpoints-container');
-            if (!btn || !limitText || !container) return;
+            const select = document.getElementById('qr_agency_client_id');
+            if (!btn || !limitText || !container || !select) return;
 
+            const mappingId = select.value;
             const limit = parseInt(limitText.dataset.limit || 0);
             const count = container.querySelectorAll('.cp-input-row').length;
             const remaining = Math.max(0, limit - count);
@@ -2182,10 +2179,20 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 if (data.success) {
                     isQrConfigDirty = false; // RESET DIRTY FLAG
 
-                    // UI Cleanup: Update any "New Checkpoint" items in sidebar correctly
                     const siteSelect = document.getElementById('qr_agency_client_id');
                     const mappingId = siteSelect.value;
-                    
+                    const container = document.getElementById('checkpoints-container');
+                    const currentCount = container ? container.querySelectorAll('.cp-input-row').length : 0;
+
+                    // SYNC: Update the local cache object so the sidebar stays correct
+                    const clientRecord = clientsData.find(c => String(c.mapping_id) === String(mappingId));
+                    if (clientRecord) {
+                        clientRecord.site_used_qrs = currentCount;
+                        // Also update site name in case it changed
+                        const siteNameInput = document.getElementById('site_name');
+                        if (siteNameInput) clientRecord.site_name = siteNameInput.value;
+                    }
+
                     // We reload the mapping form to ensure all new checkpoints get their DB IDs
                     await updateLimitForm();
                     
@@ -2287,8 +2294,8 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
         const select = document.getElementById('checkpoint-select');
         if (!select) return;
 
-        // Get all used checkpoint IDs (from Start, Middle, and End sections)
-        const usedIds = Array.from(document.querySelectorAll('input[name="checkpoint_ids[]"]')).map(input => input.value);
+        // Get all used checkpoint IDs specifically within the Patrol Sequence list
+        const usedIds = Array.from(document.getElementById('tour-list').querySelectorAll('input[name="checkpoint_ids[]"]')).map(input => input.value);
         
         // Loop through options and hide if already in the sequence
         Array.from(select.options).forEach(option => {
