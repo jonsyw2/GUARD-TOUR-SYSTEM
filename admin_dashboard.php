@@ -8,14 +8,16 @@ if ($_SESSION['user_level'] !== 'admin') {
 
 // Auto-cleanup trigger (runs once every 24h when admin visits dashboard)
 $last_run_res = $conn->query("SELECT setting_value FROM system_settings WHERE setting_key = 'last_cleanup_run'");
-$last_run = $last_run_res ? (int)$last_run_res->fetch_assoc()['setting_value'] : 0;
+$last_run_row = $last_run_res ? $last_run_res->fetch_assoc() : null;
+$last_run = $last_run_row ? (int)$last_run_row['setting_value'] : 0;
+
 if (time() - $last_run > 86400) { // 24 hours
-    // Trigger cleanup silently in the background (using ignore_user_abort if needed, but here a simple include or fetch works)
-    // For simplicity, we just trigger it and let it finish.
+    // Trigger cleanup silently in the background
     $_GET['manual'] = '1';
+    $is_internal_include = true;
     include 'api/cleanup_retention.php';
-    // Clear the GET to avoid side effects
-    unset($_GET['manual']);
+    // Clear the flags to avoid side effects
+    unset($_GET['manual'], $is_internal_include);
 }
 
 // Fetch statistics

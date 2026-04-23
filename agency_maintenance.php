@@ -86,10 +86,10 @@ if (isset($_GET['ajax_agency_data'])) {
             $conn->query($sqlSite);
             
             // 4. Handle auto-deletion if limit is decreased below current usage
-            if ($add_qr > 0) {
+            if ($add_qr >= 0) {
                 // Get all user-added checkpoints ordered by creation (most recent first) across all sites
                 $qr_sql = "SELECT id FROM checkpoints 
-                           WHERE is_zero_checkpoint = 0 
+                           WHERE (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL) 
                            AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = $target_client_id)
                            ORDER BY created_at DESC, id DESC";
                 $qr_res = $conn->query($qr_sql);
@@ -196,20 +196,42 @@ if (isset($_GET['ajax_agency_data'])) {
                     $tryUsername = $baseUsername;
                     $suffix = 1;
                     // Ensure username uniqueness
-                    while ($conn->query("SELECT id FROM users WHERE username = '" . $conn->real_escape_string($tryUsername) . "' LIMIT 1")->num_rows > 0) {
+                    while (($checkRes = $conn->query("SELECT id FROM users WHERE username = '" . $conn->real_escape_string($tryUsername) . "' LIMIT 1")) && $checkRes->num_rows > 0) {
                         $tryUsername = $baseUsername . '_' . $suffix++;
                     }
-                    $placeholderPw = password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT);
+                    
+                    // Fallback for older PHP versions or environments without random_bytes
+                    $randomString = '';
+                    if (function_exists('random_bytes')) {
+                        try {
+                            $randomString = bin2hex(random_bytes(8));
+                        } catch (Exception $e) {
+                            $randomString = md5(uniqid(mt_rand(), true));
+                        }
+                    } else {
+                        $randomString = md5(uniqid(mt_rand(), true));
+                    }
+                    
+                    $placeholderPw = password_hash($randomString, PASSWORD_DEFAULT);
                     if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('" . $conn->real_escape_string($tryUsername) . "', '$placeholderPw', 'client')")) {
                         $newClientId = $conn->insert_id;
                         $placeholderName = 'Client ' . $clientNum;
-                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, qr_limit, guard_limit, inspector_limit, client_limit, supervisor_limit) 
-                                       VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "', 0, 0, 0, 0, 0)");
+                        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, qr_limit, guard_limit, inspector_limit, client_limit, supervisor_limit) 
+                                       VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "', 0, 0, 0, 0, 0)")) {
+                            $response['warnings'][] = "Failed to create mapping for placeholder client $clientNum: " . $conn->error;
+                        }
                         $clientNum++;
+                    } else {
+                        $response['warnings'][] = "Failed to create user account for slot $slot: " . $conn->error;
                     }
                 }
             }
-            $response = ['success' => true, 'message' => 'Agency client limit updated!'];
+            if (!empty($response['warnings'])) {
+                $response['success'] = true; // Still success but with warnings
+                $response['message'] = "Limit updated, but some placeholders could not be created: " . implode('; ', $response['warnings']);
+            } else {
+                $response = ['success' => true, 'message' => 'Agency client limit updated!'];
+            }
         } else {
             $response = ['success' => false, 'message' => "SQL Error: " . $conn->error];
         }
@@ -1393,15 +1415,25 @@ include 'admin_layout/sidebar.php';
                 const groupOrder = [];
                 data.forEach(item => {
                     qlSiteDataMap[item.id] = item; // store by mapping id
-                    if (!groups[item.user_id]) {
-                        groups[item.user_id] = { user_id: item.user_id, name: item.company_name || item.name, status: item.status, sites: [] };
-                        groupOrder.push(item.user_id);
+                    
+                    // Grouping by company name (fallback to username) to ensure sites with same name are merged
+                    const groupKey = (item.company_name || item.name || "Unknown").trim().toLowerCase();
+                    
+                    if (!groups[groupKey]) {
+                        groups[groupKey] = { 
+                            user_id: item.user_id, 
+                            name: item.company_name || item.name, 
+                            status: item.status, 
+                            sites: [] 
+                        };
+                        groupOrder.push(groupKey);
                     }
-                    groups[item.user_id].sites.push(item);
+                    groups[groupKey].sites.push(item);
                 });
 
-                groupOrder.forEach(uid => {
-                    const group = groups[uid];
+                groupOrder.forEach(key => {
+                    const group = groups[key];
+                    const uid = group.user_id;
                     const isSuspended = group.status === 'suspended';
                     const statusTag = isSuspended ? `<span style="color:#ef4444; font-size: 0.7rem; font-weight:700;">[SUSPENDED]</span>` : '';
 

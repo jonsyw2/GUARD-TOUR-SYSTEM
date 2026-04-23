@@ -124,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
         $conn->begin_transaction();
         try {
             $saved = 0;
+            $kept_ids = [];
             for ($i = 0; $i < count($cp_names); $i++) {
                 $cp_id   = (int)($cp_ids[$i]   ?? 0);
                 $cp_name = trim($cp_names[$i]  ?? '');
@@ -138,6 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
                     );
                     $stmt->bind_param('ssii', $cp_name, $cp_code, $cp_id, $mapping_id);
                     $stmt->execute();
+                    $kept_ids[] = $cp_id;
                 } else {
                     // Insert new checkpoint (only if within limit)
                     $count_res = $conn->query("SELECT COUNT(*) as cnt FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)");
@@ -153,9 +155,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
                     );
                     $stmt->bind_param('iss', $mapping_id, $cp_name, $cp_code);
                     $stmt->execute();
+                    $kept_ids[] = $conn->insert_id;
                 }
                 $saved++;
             }
+
+            // Deletion logic: Delete regular checkpoints that were NOT in the kept list
+            $kept_ids_str = count($kept_ids) > 0 ? implode(',', $kept_ids) : '0';
+            $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id AND checkpoint_id NOT IN ($kept_ids_str) AND checkpoint_id IN (SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL))");
+            $conn->query("DELETE FROM checkpoints WHERE agency_client_id = $mapping_id AND id NOT IN ($kept_ids_str) AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)");
+
             $conn->commit();
             $message = "QR checkpoints saved successfully ($saved updated/added).";
             $message_type = 'success';
@@ -237,60 +246,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['handle_sequence_reques
     }
 }
 
-// Handle Add Client Branch
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
-    $agency_id = (int)$_POST['agency_id'];
-    $client_username = $conn->real_escape_string($_POST['client_username']);
-    $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
-    $company_name = $conn->real_escape_string($_POST['site_name']); // Use Site Name as Company Name primary display
-    $company_address = $conn->real_escape_string($_POST['company_address'] ?? '');
-    $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
-
-    $conn->begin_transaction();
-    try {
-        // 1. Check if username exists
-        $user_check = $conn->query("SELECT id FROM users WHERE username = '$client_username'");
-        if ($user_check && $user_check->num_rows > 0) {
-            throw new Exception("Username '$client_username' is already taken.");
-        }
-
-        // 2. Check Agency Limit
-        $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id AND user_level = 'agency'");
-        if (!$limit_res || $limit_res->num_rows === 0) {
-            throw new Exception("Selected agency not found.");
-        }
-        $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
-
-        $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
-        $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
-
-        if ($client_limit >= 0 && $current_clients >= $client_limit) {
-            throw new Exception("This agency has reached its maximum client limit ($client_limit). Increase their limit first.");
-        }
-
-        // 3. Create User Account
-        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
-            throw new Exception("Error creating user: " . $conn->error);
-        }
-        $new_client_id = $conn->insert_id;
-
-        // 4. Create Agency-Client Assignment
-        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, qr_limit, client_limit, guard_limit, inspector_limit, supervisor_limit) 
-                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', 1, 1, 0, 0, 0)")) {
-            throw new Exception("Error creating client profile: " . $conn->error);
-        }
-
-        $conn->commit();
-        $message = "Client site created and assigned successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
-    } catch (Exception $e) {
-        $conn->rollback();
-        $message = "Error: " . $e->getMessage();
-        $message_type = "error";
-        $show_status_modal = true;
-    }
-}
 
 // Fetch all agencies
 $agencies_res = $conn->query("SELECT id, username, agency_name, client_limit FROM users WHERE user_level = 'agency' ORDER BY agency_name ASC");
@@ -369,12 +324,12 @@ include 'admin_layout/sidebar.php';
                                 <td style="padding: 12px 16px;">
                                     <div style="display: flex; gap: 8px;">
                                         <form method="POST" style="margin:0;">
-                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['mapping_id']; ?>">
+                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['primary_mapping_id']; ?>">
                                             <input type="hidden" name="action" value="approve">
                                             <button type="submit" name="handle_sequence_request" style="padding: 6px 16px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 0.75rem; font-weight: 700; cursor: pointer;">Approve</button>
                                         </form>
                                         <form method="POST" style="margin:0;">
-                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['mapping_id']; ?>">
+                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['primary_mapping_id']; ?>">
                                             <input type="hidden" name="action" value="deny">
                                             <button type="submit" name="handle_sequence_request" style="padding: 6px 16px; border: 1px solid #e2e8f0; background: white; color: #64748b; border-radius: 6px; font-size: 0.75rem; font-weight: 700; cursor: pointer;">Deny</button>
                                         </form>
@@ -400,11 +355,6 @@ include 'admin_layout/sidebar.php';
                             </option>
                         <?php endforeach; ?>
                     </select>
-                </div>
-                <div>
-                    <button type="button" onclick="openAddClientModal()" class="btn btn-success" style="height: 48px; padding: 0 24px; display: flex; align-items: center; gap: 8px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
-                        <span style="font-size: 1.2rem;">+</span> Add Client Site
-                    </button>
                 </div>
             </div>
 
@@ -554,13 +504,6 @@ include 'admin_layout/sidebar.php';
             noMsg.style.display = visible === 0 ? 'block' : 'none';
         }
 
-        function openAddClientModal() {
-            document.getElementById('addClientModal').classList.add('show');
-        }
-
-        function closeAddClientModal() {
-            document.getElementById('addClientModal').classList.remove('show');
-        }
 
         // Handle URL parameters for filtering and auto-alerts
         window.addEventListener('DOMContentLoaded', () => {
@@ -745,14 +688,10 @@ include 'admin_layout/sidebar.php';
             border-radius: 20px;
             white-space: nowrap;
         }
-        .qr-slot-status.existing {
-            background: #d1fae5;
-            color: #065f46;
-        }
-        .qr-slot-status.empty {
-            background: #f1f5f9;
-            color: #94a3b8;
-        }
+        .qr-slot-status.existing { background: #dcfce7; color: #166534; border-color: #86efac; }
+        .qr-slot-status.over-limit { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+        .qr-slot-status.empty { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+
         .qr-auto-badge {
             font-size: 0.68rem;
             color: #94a3b8;
@@ -996,15 +935,24 @@ include 'admin_layout/sidebar.php';
                 </tr>`;
             }
 
-            for (let i = 0; i < limit; i++) {
-                const cp         = existing[i] ?? null;
-                const isExisting = cp !== null;
+            // Display all allowed slots, PLUS any existing checkpoints that exceed the limit
+            const displayCount = Math.max(limit, existing.length);
+            for (let i = 0; i < displayCount; i++) {
+                const cp = existing[i] ?? null;
+                const isOverLimit = i >= limit;
+                const isExisting = !!cp;
                 const cpId       = isExisting ? cp.id : 0;
                 const cpName     = isExisting ? escHtml(cp.name) : '';
                 const cpCode     = isExisting ? escHtml(cp.checkpoint_code) : '';
-                const statusHtml = isExisting
-                    ? '<span class="qr-slot-status existing">✓ Existing</span>'
-                    : '<span class="qr-slot-status empty">Empty</span>';
+                
+                let statusHtml = '';
+                if (isExisting) {
+                    statusHtml = isOverLimit 
+                        ? '<span class="qr-slot-status over-limit">⚠️ OVER LIMIT</span>'
+                        : '<span class="qr-slot-status existing">✓ Existing</span>';
+                } else {
+                    statusHtml = '<span class="qr-slot-status empty">Empty</span>';
+                }
 
                 html += `<tr>
                     <td class="slot-num">${i + 1}</td>
@@ -1169,60 +1117,6 @@ include 'admin_layout/sidebar.php';
         </div>
     </div>
 
-    <!-- Add Client Modal -->
-    <div id="addClientModal" class="modal">
-        <div class="modal-content" style="max-width: 500px; padding: 0; overflow: hidden;">
-            <div style="padding: 24px; background: #1e293b; color: white;">
-                <h3 style="margin: 0; display: flex; align-items: center; gap: 10px;">
-                    <span style="background: rgba(255,255,255,0.1); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">➕</span>
-                    Add New Client Site
-                </h3>
-                <p style="margin: 8px 0 0; font-size: 0.85rem; color: #94a3b8;">Create a new branch and assign it to an agency.</p>
-            </div>
-            
-            <form method="POST" style="padding: 24px;">
-                <input type="hidden" name="add_client" value="1">
-                
-                <div style="margin-bottom: 18px;">
-                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Assign to Agency</label>
-                    <select name="agency_id" class="form-control" required style="font-weight: 600;">
-                        <option value="" disabled selected>-- Select Agency --</option>
-                        <?php foreach ($agencies as $ag): ?>
-                            <option value="<?php echo $ag['id']; ?>">
-                                <?php echo htmlspecialchars($ag['agency_name'] ?: $ag['username']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px;">
-                    <div>
-                        <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Account Username</label>
-                        <input type="text" name="client_username" class="form-control" placeholder="e.g. lbc_main" required>
-                    </div>
-                    <div>
-                        <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Account Password</label>
-                        <input type="password" name="client_password" class="form-control" placeholder="••••••••" required>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 18px;">
-                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Site / Company Name</label>
-                    <input type="text" name="site_name" class="form-control" placeholder="e.g. LBC Express - Main Branch" required>
-                </div>
-
-                <div style="margin-bottom: 24px;">
-                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Site Address / Location</label>
-                    <textarea name="company_address" class="form-control" rows="2" placeholder="Street, City, Province"></textarea>
-                </div>
-
-                <div style="display: flex; gap: 12px; margin-top: 10px;">
-                    <button type="button" class="btn" style="flex: 1; background: #f1f5f9; color: #475569; font-weight: 600;" onclick="closeAddClientModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary" style="flex: 2; font-weight: 700;">Create Site Account</button>
-                </div>
-            </form>
-        </div>
-    </div>
 
     <?php include 'includes/common_modals.php'; ?>
     <?php include 'admin_layout/footer.php'; ?>
