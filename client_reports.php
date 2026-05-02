@@ -260,11 +260,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
         .w5h-item { background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }
         .w5h-label { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
         .w5h-value { font-size: 0.9rem; color: #1e293b; line-height: 1.5; }
+
+        /* ── Responsive ── */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(2px); }
+        .sidebar-overlay.show { display: block; }
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 1001; width: 250px; transition: left 0.3s ease; box-shadow: 4px 0 20px rgba(0,0,0,0.2); }
+            .sidebar.show { left: 0; }
+            .sidebar-close { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .mobile-toggle { display: block; }
+            .content-area { padding: 20px 16px; }
+        }
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1rem; }
+            .user-info span:first-child { display: none; }
+            .w5h-grid { grid-template-columns: 1fr; }
+            .modal-content { max-width: 95%; padding: 20px; }
+        }
     </style>
 </head>
 <body>
 
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Client Portal</div>
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
@@ -283,7 +307,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Performance & Official Reports</h2>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Performance &amp; Official Reports</h2>
+            </div>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
@@ -434,6 +461,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
         function showReport(data, displayName) {
             document.getElementById('v_what').innerText = data.report_what || '---';
             document.getElementById('v_who').innerText = data.report_who || '---';
@@ -467,17 +499,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_report'])) {
     </script>
 </body>
 </html>
-</body>
-</html>
-            document.getElementById('reportModal').classList.remove('show');
-            document.body.style.overflow = '';
-        }
-
-        // Close modal when clicking outside
-        window.addEventListener('click', function(event) {
-            if (event.target.classList.contains('modal-overlay')) {
-                closeModal();
-            }
-        });
-    </script>
-    <?php include 'admin_layout/footer.php'; ?>

@@ -113,11 +113,35 @@ function getAgencySupervisors($conn, $agency_id) {
         .btn-cancel:hover { background: #e5e7eb; }
         .btn-confirm { background: var(--primary); color: white; text-decoration: none; }
         .btn-confirm:hover { filter: brightness(0.9); }
+
+        /* ── Responsive ── */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(2px); }
+        .sidebar-overlay.show { display: block; }
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 1001; width: 250px; transition: left 0.3s ease; box-shadow: 4px 0 20px rgba(0,0,0,0.2); }
+            .sidebar.show { left: 0; }
+            .sidebar-close { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .mobile-toggle { display: block; }
+            .content-area { padding: 20px 16px; }
+            .site-item { flex-direction: column; align-items: flex-start; gap: 16px; }
+            .assign-form { flex-wrap: wrap; width: 100%; }
+        }
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1rem; }
+            .modal-content { max-width: 95%; padding: 20px; }
+        }
     </style>
 </head>
 <body>
 
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Client Portal</div>
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
@@ -136,7 +160,10 @@ function getAgencySupervisors($conn, $agency_id) {
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Portal Settings</h2>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Portal Settings</h2>
+            </div>
             <span class="badge" style="background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600;">ACCOUNT CONTROL</span>
         </header>
 
@@ -230,6 +257,11 @@ function getAgencySupervisors($conn, $agency_id) {
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
         let currentNotifTargetId = 0;
         const parentType = 'client';
 
@@ -355,10 +387,3 @@ function getAgencySupervisors($conn, $agency_id) {
     </script>
 </body>
 </html>
-            if (event.target.classList.contains('modal-overlay')) {
-                 event.target.classList.remove('show');
-            }
-        });
-        function openLogout() { document.getElementById('logoutModal').classList.add('show'); }
-    </script>
-    <?php include 'admin_layout/footer.php'; ?>

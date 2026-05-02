@@ -372,12 +372,41 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
             max-width: 900px;
             width: 95%;
         }
+
+        /* ── Responsive ── */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(2px); }
+        .sidebar-overlay.show { display: block; }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 1001; width: 250px; transition: left 0.3s ease; box-shadow: 4px 0 20px rgba(0,0,0,0.2); }
+            .sidebar.show { left: 0; }
+            .sidebar-close { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .mobile-toggle { display: block; }
+            .content-area { padding: 20px 16px; }
+            .filter-form { flex-direction: column; }
+            .form-group { min-width: 100%; }
+        }
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1rem; }
+            .user-info span:first-child { display: none; }
+            th, td { padding: 10px 8px; font-size: 0.8rem; }
+            .tour-group { padding: 0 12px; }
+            .shift-header { padding: 14px 16px; }
+            .modal-content { max-width: 95%; padding: 20px; }
+        }
     </style>
 </head>
 <body>
 
     <!-- Sidebar -->
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">
             Client Portal
         </div>
@@ -400,7 +429,10 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>Detailed Activity Logs</h2>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Detailed Activity Logs</h2>
+            </div>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
@@ -635,6 +667,11 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
         function downloadHistoryCSV() {
             const url = new URL(window.location.href);
             url.searchParams.set('download_csv', '1');
@@ -691,19 +728,6 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         function closeAllModals() {
             document.querySelectorAll('.modal-overlay').forEach(modal => {
                 modal.classList.remove('show');
-            });
-            document.body.style.overflow = '';
-        }
-
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            if (event.target.classList.contains('modal-overlay')) {
-                closeAllModals();
-            }
-        }
-    </script>
-</body>
-</html>
             });
             document.body.style.overflow = '';
         }
