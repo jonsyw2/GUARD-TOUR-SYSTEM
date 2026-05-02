@@ -223,6 +223,24 @@ $history_res = $conn->query($history_sql);
             color: #9ca3af;
             cursor: pointer;
         }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+            .topbar { padding: 16px 20px; flex-direction: column; gap: 12px; text-align: center; }
+            .topbar div { flex-direction: column; gap: 8px !important; }
+            .main-content { padding: 20px 16px; }
+            .filter-grid { grid-template-columns: 1fr; gap: 16px; }
+            .modal-content.large { width: 98%; padding: 20px; }
+            .visual-3d-container { height: 350px; }
+        }
+
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1.1rem; }
+            .shift-header { padding: 12px 16px; flex-direction: column; align-items: flex-start; gap: 10px; }
+            .tour-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .tour-title { font-size: 0.9rem; }
+            th, td { padding: 10px 8px; font-size: 0.8rem; }
+        }
     </style>
 </head>
 <body>

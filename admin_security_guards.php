@@ -80,7 +80,7 @@ include 'admin_layout/sidebar.php';
     <main class="main-content">
         <?php include 'admin_layout/topbar.php'; ?>
 
-        <div class="contentArea">
+        <div class="content-area">
             <?php if ($msg): ?>
                 <div class="alert alert-<?php echo $msg_type === 'success' ? 'success' : 'error'; ?>">
                     <?php echo htmlspecialchars($msg); ?>
@@ -142,6 +142,14 @@ include 'admin_layout/sidebar.php';
 
                 /* ── results count ── */
                 .results-count { font-size: 0.85rem; color: var(--text-muted); margin-left: auto; }
+                @media (max-width: 640px) {
+                    .filter-bar { flex-direction: column; align-items: stretch; }
+                    .filter-bar input, .filter-bar select { width: 100%; min-width: 0; }
+                    .results-count { text-align: center; margin-left: 0; order: -1; padding-bottom: 10px; }
+                    .sg-stats { gap: 12px; }
+                    .sg-stat { padding: 16px 20px; }
+                    .sg-stat .val { font-size: 1.5rem; }
+                }
             </style>
 
             <!-- Filter bar -->

@@ -138,10 +138,10 @@ $incidents_res = $conn->query($incidents_sql);
             --text-muted: #6b7280;
             --border: #e5e7eb;
         }
-        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); padding: 0 16px 0 0; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); margin: 0; padding: 0; gap: 0; overflow-x: hidden; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; transition: transform 0.3s ease; z-index: 2000; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s; border-left: 4px solid transparent; }
@@ -150,10 +150,9 @@ $incidents_res = $conn->query($incidents_sql);
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; }
 
         /* Main Content */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; border-radius: 16px; border: 1px solid var(--border); background: white; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; }
-        .user-info { display: flex; align-items: center; gap: 12px; }
         .badge { background: #d1fae5; color: #10b981; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
 
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
@@ -182,63 +181,63 @@ $incidents_res = $conn->query($incidents_sql);
         .btn-secondary { background: #f3f4f6; color: #374151; }
 
         /* Modal */
-        .modal { 
-            display: none; 
-            position: fixed; 
-            top: 0; left: 0; right: 0; bottom: 0; 
-            background: rgba(0,0,0,0.5); 
-            z-index: 2000; 
-            backdrop-filter: blur(4px); 
-            overflow-y: auto;
-            padding: 20px;
-        }
-        .modal.show { 
-            display: flex; 
-            align-items: flex-start; 
-            justify-content: center; 
-        }
-        .modal-content { 
-            background: white; 
-            padding: 32px; 
-            border-radius: 12px; 
-            width: 100%; 
-            max-width: 500px; 
-            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); 
-            position: relative;
-            margin: auto;
-            animation: modalFadeIn 0.3s ease-out forwards;
-        }
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2100; backdrop-filter: blur(4px); overflow-y: auto; padding: 20px; }
+        .modal.show { display: flex; align-items: flex-start; justify-content: center; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); position: relative; margin: auto; animation: modalFadeIn 0.3s ease-out forwards; }
         @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .modal-close {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            font-size: 24px;
-            background: none;
-            border: none;
-            color: #9ca3af;
-            cursor: pointer;
-            transition: color 0.2s;
-            line-height: 1;
-            padding: 4px;
-            border-radius: 4px;
-        }
+        .modal-close { position: absolute; top: 12px; right: 12px; font-size: 24px; background: none; border: none; color: #9ca3af; cursor: pointer; transition: color 0.2s; line-height: 1; padding: 4px; border-radius: 4px; }
         .modal-close:hover { color: #111827; background: #f3f4f6; }
         .form-group { margin-bottom: 16px; }
         .form-label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 6px; }
         .form-control { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; outline: none; }
         .form-control:focus { border-color: var(--primary); }
+
+        /* Mobile Menu Toggle */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-main); padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            td:last-child { border-bottom: none !important; flex-direction: column; align-items: stretch; gap: 8px; }
+            td::before { content: attr(data-label); font-weight: 700; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+        }
     </style>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+    </script>
 </head>
 <body>
 
-    <aside class="sidebar">
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <aside class="sidebar" id="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Agency Portal</div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -247,16 +246,18 @@ $incidents_res = $conn->query($incidents_sql);
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
-            <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
+            <a href="logout.php" class="logout-btn">Logout</a>
         </div>
     </aside>
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Incident Management</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Incident Reports</h2>
+            </div>
             <div class="user-info">
-                <span>Welcome, <strong>Agency</strong></span>
-                <span class="badge">AGENCY</span>
+                <span class="badge">Professional reports</span>
             </div>
         </header>
 
@@ -287,13 +288,13 @@ $incidents_res = $conn->query($incidents_sql);
                             <?php if ($incidents_res && $incidents_res->num_rows > 0): ?>
                                 <?php while($row = $incidents_res->fetch_assoc()): ?>
                                     <tr>
-                                        <td><?php echo date('M d, H:i', strtotime($row['created_at'])); ?></td>
-                                        <td>
+                                        <td data-label="Date"><?php echo date('M d, H:i', strtotime($row['created_at'])); ?></td>
+                                        <td data-label="Category">
                                             <span style="font-weight: 600; color: #334155;">
                                                 <?php echo ucfirst($row['report_category']); ?> Report
                                             </span>
                                         </td>
-                                        <td>
+                                        <td data-label="Description">
                                             <div style="max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.85rem;" title="<?php echo htmlspecialchars($row['description']); ?>">
                                                 <?php echo htmlspecialchars($row['description']); ?>
                                             </div>
@@ -302,13 +303,13 @@ $incidents_res = $conn->query($incidents_sql);
                                                 <?php if ($row['site_name']): ?> | Site: <?php echo htmlspecialchars($row['site_name']); ?><?php endif; ?>
                                             </div>
                                         </td>
-                                        <td>
+                                        <td data-label="Status">
                                             <span class="status-badge status-<?php echo $row['status']; ?>">
                                                 <?php echo ucfirst($row['status']); ?>
                                             </span>
                                         </td>
-                                        <td>
-                                            <div style="display: flex; gap: 8px;">
+                                        <td data-label="Actions">
+                                            <div style="display: flex; gap: 8px; justify-content: flex-end;">
                                                 <?php if (!empty($row['photo_path']) && $row['photo_path'] !== 'NULL'): ?>
                                                     <a href="<?php echo $row['photo_path']; ?>" target="_blank" class="btn btn-secondary" style="padding: 4px 8px; font-size: 0.75rem;">View Photo</a>
                                                 <?php endif; ?>
@@ -364,7 +365,7 @@ $incidents_res = $conn->query($incidents_sql);
                     <label class="form-label">Description</label>
                     <textarea name="description" class="form-control" rows="3" placeholder="Explain what happened..." required></textarea>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="create-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                     <div class="form-group">
                         <label class="form-label">Recorded by</label>
                         <input type="text" name="recorded_by" class="form-control" placeholder="Name">
@@ -374,7 +375,7 @@ $incidents_res = $conn->query($incidents_sql);
                         <input type="text" name="noted_by" class="form-control" placeholder="Name">
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div class="create-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                     <div class="form-group">
                         <label class="form-label">Investigated by</label>
                         <input type="text" name="investigated_by" class="form-control" placeholder="Name">
@@ -463,6 +464,11 @@ $incidents_res = $conn->query($incidents_sql);
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
         function showIncidentReport(category, desc, recorded, noted, investigated, approved, w5h = null) {
             document.getElementById('detail_title').innerText = category === 'investigation' ? 'Investigation Report' : 'General Incident Report';
             document.getElementById('detail_desc').innerText = desc;

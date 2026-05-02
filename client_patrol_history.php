@@ -402,7 +402,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         <header class="topbar">
             <h2>Detailed Activity Logs</h2>
             <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
+                <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
             </div>
         </header>
@@ -691,6 +691,19 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1') {
         function closeAllModals() {
             document.querySelectorAll('.modal-overlay').forEach(modal => {
                 modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal-overlay')) {
+                closeAllModals();
+            }
+        }
+    </script>
+</body>
+</html>
             });
             document.body.style.overflow = '';
         }

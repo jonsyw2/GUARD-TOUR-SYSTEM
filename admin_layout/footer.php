@@ -9,9 +9,9 @@
             <div class="modal-icon">⚠️</div>
             <h3 style="margin-bottom: 12px; font-size: 1.5rem;">Confirm Sign Out</h3>
             <p style="color: var(--text-muted); margin-bottom: 32px;">Are you sure you want to end your current dashboard session? You will need to log in again to access the panel.</p>
-            <div style="display: flex; gap: 12px;">
-                <button class="btn" style="flex: 1; background: #f1f5f9; color: var(--text-main);" onclick="document.getElementById('logoutModal').classList.remove('show');">Stay Logged In</button>
-                <a href="logout.php" class="btn btn-primary" style="flex: 1; background: var(--danger); text-decoration: none;">Yes, Sign Out</a>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                <button class="btn" style="flex: 1; min-width: 140px; background: #f1f5f9; color: var(--text-main);" onclick="document.getElementById('logoutModal').classList.remove('show');">Stay Logged In</button>
+                <a href="logout.php" class="btn btn-primary" style="flex: 1; min-width: 140px; background: var(--danger); text-decoration: none;">Yes, Sign Out</a>
             </div>
         </div>
     </div>

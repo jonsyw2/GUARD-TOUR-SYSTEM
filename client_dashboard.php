@@ -116,11 +116,51 @@ if ($mapping_ids_str !== '0') {
         .btn-confirm { background: #e11d48; color: white; text-decoration: none; display: flex; align-items: center; justify-content: center; }
         .btn-confirm:hover { background: #be123c; }
 
+        /* Responsive Design */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-main); padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 1001; transition: left 0.3s ease; box-shadow: 10px 0 20px rgba(0,0,0,0.2); }
+            .sidebar.show { left: 0; }
+            .sidebar-close { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .mobile-toggle { display: block; }
+            .content-area { padding: 24px 16px; }
+            .stats-row { grid-template-columns: 1fr; gap: 16px; }
+        }
+
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1.1rem; }
+            .topbar div span:first-child { display: none; }
+            .modal-content { max-width: 90%; padding: 24px; }
+        }
+
+        /* Overlay for mobile sidebar */
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(2px); }
+        .sidebar-overlay.show { display: block; }
     </style>
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.querySelector('.sidebar-overlay');
+            if (!overlay) {
+                const newOverlay = document.createElement('div');
+                newOverlay.className = 'sidebar-overlay';
+                newOverlay.onclick = toggleSidebar;
+                document.body.appendChild(newOverlay);
+            }
+            sidebar.classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+    </script>
 </head>
 <body>
 
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Client Portal</div>
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link active">Dashboard</a></li>
@@ -133,15 +173,19 @@ if ($mapping_ids_str !== '0') {
             <li><a href="client_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
+            <a href="#" class="btn-change-password" onclick="document.getElementById('changePasswordModal').classList.add('show'); return false;" style="display: block; text-align: center; padding: 12px; background-color: #3b82f6; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; margin-bottom: 12px; transition: background 0.3s;">Change Password</a>
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
         </div>
     </aside>
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Security Overview</h2>
             <div style="display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 0.9rem;">Welcome, <strong><?php echo htmlspecialchars($_SESSION['username']); ?></strong></span>
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Security Overview</h2>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 0.9rem;">Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
             </div>
         </header>
@@ -189,14 +233,108 @@ if ($mapping_ids_str !== '0') {
         </div>
     </div>
 
+    <!-- Change Password Modal -->
+    <div class="modal-overlay" id="changePasswordModal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 class="modal-title" style="text-align: center;">Change Password</h3>
+            <p class="modal-text" style="text-align: center;">Update your account password securely.</p>
+            
+            <div id="pwd_alert" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; text-align: center;"></div>
+
+            <form id="changePasswordForm">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">Current Password</label>
+                    <input type="password" id="current_password" required style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">New Password</label>
+                    <input type="password" id="new_password" required style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;">
+                </div>
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">Confirm New Password</label>
+                    <input type="password" id="confirm_password" required style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;">
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-modal btn-cancel" onclick="document.getElementById('changePasswordModal').classList.remove('show');">Cancel</button>
+                    <button type="submit" class="btn-modal btn-confirm" style="background: var(--primary);" id="btnSubmitPassword">Update Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // Close modal when clicking outside
         window.onclick = function(event) {
             const modal = document.getElementById('logoutModal');
+            const pwdModal = document.getElementById('changePasswordModal');
             if (event.target == modal) {
                 modal.classList.remove('show');
             }
+            if (event.target == pwdModal) {
+                pwdModal.classList.remove('show');
+            }
         }
+
+        document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btnSubmitPassword');
+            const alertBox = document.getElementById('pwd_alert');
+            
+            const current_password = document.getElementById('current_password').value;
+            const new_password = document.getElementById('new_password').value;
+            const confirm_password = document.getElementById('confirm_password').value;
+
+            if (new_password !== confirm_password) {
+                alertBox.style.display = 'block';
+                alertBox.style.backgroundColor = '#fee2e2';
+                alertBox.style.color = '#dc2626';
+                alertBox.innerText = 'New password and confirm password do not match.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = 'Updating...';
+            alertBox.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('current_password', current_password);
+                formData.append('new_password', new_password);
+                formData.append('confirm_password', confirm_password);
+
+                const response = await fetch('api/change_password.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                alertBox.style.display = 'block';
+                if (result.status === 'success') {
+                    alertBox.style.backgroundColor = '#dcfce7';
+                    alertBox.style.color = '#16a34a';
+                    alertBox.innerText = result.message;
+                    document.getElementById('changePasswordForm').reset();
+                    setTimeout(() => {
+                        document.getElementById('changePasswordModal').classList.remove('show');
+                        alertBox.style.display = 'none';
+                    }, 2000);
+                } else {
+                    alertBox.style.backgroundColor = '#fee2e2';
+                    alertBox.style.color = '#dc2626';
+                    alertBox.innerText = result.message;
+                }
+            } catch (error) {
+                alertBox.style.display = 'block';
+                alertBox.style.backgroundColor = '#fee2e2';
+                alertBox.style.color = '#dc2626';
+                alertBox.innerText = 'An error occurred. Please try again.';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Update Password';
+            }
+        });
     </script>
 </body>
 </html>

@@ -281,7 +281,7 @@ $history_res = $conn->query($history_sql);
         <header class="topbar">
             <h2>Inspector Visit History</h2>
             <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
+                <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
             </div>
         </header>

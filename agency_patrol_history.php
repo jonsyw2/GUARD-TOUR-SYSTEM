@@ -13,21 +13,21 @@ $conn->query("UPDATE scans SET scan_time = CURRENT_TIMESTAMP WHERE scan_time = '
 
 // Fetch unique clients for this agency (no duplicates)
 $clients_sql = "
-    SELECT DISTINCT u.id as client_id, u.username as client_name
+    SELECT DISTINCT u.id as client_id, u.username as client_name, ac.company_name
     FROM agency_clients ac
     JOIN users u ON ac.client_id = u.id
     WHERE ac.agency_id = $agency_id
-    ORDER BY u.username ASC
+    ORDER BY COALESCE(ac.company_name, u.username) ASC
 ";
 $clients_res = $conn->query($clients_sql);
 
 // Fetch all sites (mapping_id) per client for the JS dropdown population
 $all_sites_sql = "
-    SELECT ac.id as mapping_id, ac.client_id, u.username as client_name, ac.site_name
+    SELECT ac.id as mapping_id, ac.client_id, u.username as client_name, ac.site_name, ac.company_name
     FROM agency_clients ac
     JOIN users u ON ac.client_id = u.id
     WHERE ac.agency_id = $agency_id
-    ORDER BY u.username ASC, ac.site_name ASC
+    ORDER BY COALESCE(ac.company_name, u.username) ASC, ac.site_name ASC
 ";
 $all_sites_res = $conn->query($all_sites_sql);
 
@@ -62,6 +62,34 @@ $filter_shift  = $_GET['shift'] ?? '';
 $cp_scope_sql = !empty($filter_client) ? "agency_client_id = " . (int)$filter_client : "agency_client_id IN ($mapping_ids_str)";
 $cp_filter_sql = "SELECT id, name FROM checkpoints WHERE $cp_scope_sql ORDER BY name ASC";
 $checkpoints_res = $conn->query($cp_filter_sql);
+
+// Fetch available shifts for the selected site
+$site_shifts = [];
+$shift_placeholder = empty($filter_client) ? '-- Select a Client Site First --' : '-- All Shifts --';
+
+if (!empty($filter_client)) {
+    $m_id = (int)$filter_client;
+    $shift_res = $conn->query("
+        SELECT DISTINCT shift_name FROM shifts WHERE agency_client_id = $m_id
+        UNION
+        SELECT DISTINCT s.shift as shift_name 
+        FROM scans s 
+        JOIN checkpoints c ON s.checkpoint_id = c.id 
+        WHERE c.agency_client_id = $m_id AND s.shift != ''
+        ORDER BY shift_name ASC
+    ");
+    if ($shift_res) {
+        while ($r = $shift_res->fetch_assoc()) {
+            if (!empty($r['shift_name'])) {
+                $site_shifts[] = $r['shift_name'];
+            }
+        }
+    }
+    
+    if (empty($site_shifts)) {
+        $shift_placeholder = '-- No Assigned Shift --';
+    }
+}
 
 // Build dynamic WHERE clause
 $where_clauses = ["c.agency_client_id IN ($mapping_ids_str)"];
@@ -403,12 +431,48 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
             max-width: 900px;
             width: 95%;
         }
+
+        /* Mobile Menu Toggle */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+
+            .filter-form { flex-direction: column; align-items: stretch !important; }
+            .form-group { width: 100%; min-width: 0; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            td:last-child { border-bottom: none !important; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+            td::before { content: attr(data-label); font-weight: 700; color: #64748b; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+        }
     </style>
+    <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay-bg').classList.toggle('show');
+        }
+    </script>
 </head>
 <body>
 
     <!-- Sidebar -->
+    <div class="sidebar-overlay-bg" onclick="toggleSidebar()"></div>
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">
             Agency Portal
         </div>
@@ -418,6 +482,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link active">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -434,7 +499,10 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>Detailed Activity Logs</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Detailed Activity Logs</h2>
+            </div>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Agency'; ?></strong></span>
                 <span class="badge">AGENCY</span>
@@ -458,7 +526,7 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                             <?php if ($clients_res && $clients_res->num_rows > 0): ?>
                                 <?php mysqli_data_seek($clients_res, 0); ?>
                                 <?php while($c = $clients_res->fetch_assoc()): ?>
-                                    <option value="<?php echo $c['client_id']; ?>" <?php if($filter_client_id == $c['client_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['client_name']); ?></option>
+                                    <option value="<?php echo $c['client_id']; ?>" <?php if($filter_client_id == $c['client_id']) echo 'selected'; ?>><?php echo htmlspecialchars($c['company_name'] ?: $c['client_name']); ?></option>
                                 <?php endwhile; ?>
                             <?php endif; ?>
                         </select>
@@ -471,10 +539,11 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="shift">Shift</label>
-                        <select id="shift" name="shift" class="form-control" onchange="this.form.submit()">
-                            <option value="">-- All Shifts --</option>
-                            <option value="Day Shift" <?php if($filter_shift == 'Day Shift') echo 'selected'; ?>>Day Shift</option>
-                            <option value="Night Shift" <?php if($filter_shift == 'Night Shift') echo 'selected'; ?>>Night Shift</option>
+                        <select id="shift" name="shift" class="form-control" onchange="this.form.submit()" <?php echo empty($filter_client) || empty($site_shifts) ? 'disabled' : ''; ?>>
+                            <option value=""><?php echo htmlspecialchars($shift_placeholder); ?></option>
+                            <?php foreach($site_shifts as $s_name): ?>
+                                <option value="<?php echo htmlspecialchars($s_name); ?>" <?php if($filter_shift === $s_name) echo 'selected'; ?>><?php echo htmlspecialchars($s_name); ?></option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                 </form>
@@ -669,21 +738,6 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
         </div>
     </div>
 
-    <!-- Logout Modal -->
-    <div class="modal-overlay" id="logoutModal">
-        <div class="modal-content">
-            <button class="modal-close" onclick="closeAllModals()">&times;</button>
-            <div class="modal-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-            </div>
-            <h3 class="modal-title">Ready to Leave?</h3>
-            <p class="modal-text">Select "Log Out" below if you are ready to end your current dashboard session.</p>
-            <div class="modal-actions">
-                <button class="btn-modal btn-cancel" onclick="closeAllModals()">Cancel</button>
-                <a href="logout.php" class="btn-modal btn-confirm">Log Out</a>
-            </div>
-        </div>
-    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -800,11 +854,11 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
         }
 
         // Close modal when clicking outside
-        window.onclick = function(event) {
+        document.addEventListener('click', function(event) {
             if (event.target.classList.contains('modal-overlay')) {
                 closeAllModals();
             }
-        }
+        });
 
         function showAlert(message) {
             document.getElementById('alertModalText').textContent = message;
@@ -812,5 +866,4 @@ if (isset($_GET['download_csv']) && $_GET['download_csv'] == '1' && !empty($filt
         }
     </script>
     <!-- VERSION: 2.1 -->
-</body>
-</html>
+    <?php include 'admin_layout/footer.php'; ?>

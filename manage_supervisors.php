@@ -186,9 +186,10 @@ if (isset($_SESSION['supervisor_created_key'])) {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; margin: 0; padding: 0 16px 0 0; gap: 16px; }
 
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
+        /* Sidebar Styles */
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: transform 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0; z-index: 2000; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -197,50 +198,96 @@ if (isset($_SESSION['supervisor_created_key'])) {
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
 
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
+        /* Main Content Styles */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
 
-        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
-        .grid { display: grid; grid-template-columns: 350px 1fr; gap: 24px; align-items: start; }
+        .content-area { padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; }
+        .grid-layout { display: grid; grid-template-columns: 350px 1fr; gap: 24px; align-items: start; }
         
-        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
+        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; border: 1px solid #e5e7eb; }
+        .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
 
         .form-group { margin-bottom: 16px; }
-        .form-label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 8px; }
-        .form-control { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; }
-        .btn { padding: 10px 18px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; width: 100%; transition: background 0.2s; }
-        .btn:hover { background-color: #059669; }
-        .btn-secondary { background: #6366f1; }
-        .btn-secondary:hover { background: #4f46e5; }
-        .btn-danger { background: #ef4444; }
-        .btn-danger:hover { background: #dc2626; }
+        .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: #4b5563; margin-bottom: 8px; }
+        .form-control { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; transition: border-color 0.2s; }
+        .form-control:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
 
+        .btn { padding: 10px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 0.9rem; }
+        .btn:hover { background-color: #059669; transform: translateY(-1px); }
+        .btn-danger { background-color: #ef4444; }
+        .btn-danger:hover { background-color: #dc2626; }
+        .btn-outline { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; }
+        .btn-outline:hover { background: #f1f5f9; }
+
+        /* Table Styles */
+        .table-container { overflow-x: auto; border-radius: 8px; border: 1px solid #e5e7eb; }
         table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
+        th { background: #f9fafb; padding: 14px 16px; text-align: left; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
+        td { padding: 16px; border-bottom: 1px solid #e5e7eb; font-size: 0.95rem; color: #1f2937; }
+        tbody tr:hover { background-color: #f9fafb; }
+
+        /* Modal Styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 2100; backdrop-filter: blur(4px); overflow-y: auto; padding: 20px; }
+        .modal.show { display: flex; align-items: flex-start; justify-content: center; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative; margin: auto; animation: modalFadeIn 0.3s ease-out forwards; text-align: left; }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
         
-        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; }
+        /* Mobile Adjustments */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+            .grid-layout { grid-template-columns: 1fr; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            td:last-child { border-bottom: none !important; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+            td::before { content: attr(data-label); font-weight: 700; color: #64748b; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+        }
     </style>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+    </script>
 </head>
 <body>
 
-    <aside class="sidebar">
+    <div class="sidebar-overlay-bg" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <aside class="sidebar" id="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Agency Portal</div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link active">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
             <li><a href="agency_incidents.php" class="nav-link">Incident Reports</a></li>
             <li><a href="agency_reports.php" class="nav-link">Reports</a></li>
-
+            <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
@@ -249,20 +296,14 @@ if (isset($_SESSION['supervisor_created_key'])) {
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Supervisor Management</h2>
-            <div class="user-info">
-                <span class="badge" style="background: #e0f2fe; color: #0369a1;">AGENCY CONTROL</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Supervisor Management</h2>
             </div>
         </header>
 
         <div class="content-area">
-            <?php if ($message): ?>
-                <div style="padding: 16px; border-radius: 8px; margin-bottom: 24px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#065f46' : '#991b1b'; ?>; border: 1px solid <?php echo $message_type === 'success' ? '#34d399' : '#f87171'; ?>;">
-                    <?php echo $message; ?>
-                </div>
-            <?php endif; ?>
-
-            <div class="grid">
+            <div class="grid-layout">
                 <div class="card">
                     <h3 class="card-header">Add New Supervisor</h3>
                     <form action="manage_supervisors.php" method="POST">
@@ -310,11 +351,13 @@ if (isset($_SESSION['supervisor_created_key'])) {
                                 <?php if ($supervisors_res && $supervisors_res->num_rows > 0): ?>
                                     <?php while($row = $supervisors_res->fetch_assoc()): ?>
                                         <tr onclick="openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['contact_no']); ?>', '<?php echo addslashes($row['username']); ?>')" style="cursor: pointer;">
-                                            <td><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
-                                            <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
-                                            <td><?php echo htmlspecialchars($row['contact_no'] ?: '---'); ?></td>
-                                            <td>
-                                                <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Delete</button>
+                                            <td data-label="Name"><strong><?php echo htmlspecialchars($row['name']); ?></strong></td>
+                                            <td data-label="Username"><code><?php echo htmlspecialchars($row['username']); ?></code></td>
+                                            <td data-label="Contact"><?php echo htmlspecialchars($row['contact_no'] ?: '---'); ?></td>
+                                            <td data-label="Actions">
+                                                <div style="display: flex; justify-content: flex-end;">
+                                                    <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.8rem; width: auto;">Delete</button>
+                                                </div>
                                             </td>
                                         </tr>
                                     <?php endwhile; ?>
@@ -332,13 +375,13 @@ if (isset($_SESSION['supervisor_created_key'])) {
 
     <!-- Status Process Modal -->
     <div id="statusModal" class="modal <?php echo $show_status_modal ? 'show' : ''; ?>">
-        <div class="modal-content">
+        <div class="modal-content" style="text-align: center; max-width: 400px;">
             <div style="width: 60px; height: 60px; background: <?php echo $message_type === 'success' ? '#d1fae5' : '#fee2e2'; ?>; color: <?php echo $message_type === 'success' ? '#10b981' : '#ef4444'; ?>; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">
                 <?php echo $message_type === 'success' ? '✓' : '!'; ?>
             </div>
             <h3 style="margin-bottom: 10px;"><?php echo $message_type === 'success' ? 'Success!' : 'Notice'; ?></h3>
             <p style="color: #6b7280; margin-bottom: 24px;"><?php echo $message; ?></p>
-            <button class="btn btn-primary" onclick="closeModal('statusModal')">Done</button>
+            <button class="btn btn-primary" style="width: 100%;" onclick="closeModal('statusModal')">Done</button>
         </div>
     </div>
 
@@ -355,28 +398,28 @@ if (isset($_SESSION['supervisor_created_key'])) {
     <!-- Edit Modal -->
     <div id="editModal" class="modal">
         <div class="modal-content">
-            <h3 style="margin-bottom: 20px;">Edit Supervisor</h3>
+            <h3 style="margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Edit Supervisor</h3>
             <form action="manage_supervisors.php" method="POST">
                 <input type="hidden" name="supervisor_id" id="edit_id">
-                <div class="form-group" style="text-align: left;">
+                <div class="form-group">
                     <label class="form-label">Full Name</label>
                     <input type="text" name="name" id="edit_name" class="form-control" required>
                 </div>
-                <div class="form-group" style="text-align: left;">
+                <div class="form-group">
                     <label class="form-label">Username</label>
                     <input type="text" name="username" id="edit_username" class="form-control" required>
                 </div>
-                <div class="form-group" style="text-align: left;">
+                <div class="form-group">
                     <label class="form-label">New Password (Leave blank to keep current)</label>
                     <input type="password" name="password" class="form-control" placeholder="••••••••">
                 </div>
-                <div class="form-group" style="text-align: left;">
+                <div class="form-group">
                     <label class="form-label">Contact Number</label>
                     <input type="text" name="contact_no" id="edit_contact" class="form-control">
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="document.getElementById('editModal').classList.remove('show')">Cancel</button>
-                    <button type="submit" name="update_supervisor" class="btn">Save Changes</button>
+                    <button type="button" class="btn btn-outline" style="flex: 1;" onclick="closeModal('editModal')">Cancel</button>
+                    <button type="submit" name="update_supervisor" class="btn" style="flex: 1;">Save Changes</button>
                 </div>
             </form>
         </div>
@@ -384,15 +427,15 @@ if (isset($_SESSION['supervisor_created_key'])) {
 
     <!-- Delete Modal -->
     <div id="deleteModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="text-align: center;">
             <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
             <h3>Confirm Deletion</h3>
             <p style="color: #6b7280; margin: 12px 0 24px;">Are you sure you want to delete <strong id="delete_name"></strong>? This will permanentely remove their access.</p>
             <form action="manage_supervisors.php" method="POST">
                 <input type="hidden" name="supervisor_id" id="delete_id">
                 <div style="display: flex; gap: 12px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="document.getElementById('deleteModal').classList.remove('show')">Cancel</button>
-                    <button type="submit" name="delete_supervisor" class="btn btn-danger">Delete Supervisor</button>
+                    <button type="button" class="btn btn-outline" style="flex: 1;" onclick="closeModal('deleteModal')">Cancel</button>
+                    <button type="submit" name="delete_supervisor" class="btn btn-danger" style="flex: 1;">Delete Supervisor</button>
                 </div>
             </form>
         </div>
@@ -400,16 +443,21 @@ if (isset($_SESSION['supervisor_created_key'])) {
 
     <!-- Logout Modal -->
     <div id="logoutModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="text-align: center;">
             <h3 style="margin-bottom: 20px;">Ready to Logout?</h3>
             <div style="display: flex; gap: 12px;">
-                <button class="btn" style="background: #f3f4f6; color: #374151;" onclick="document.getElementById('logoutModal').classList.remove('show')">Cancel</button>
-                <a href="logout.php" class="btn btn-danger" style="text-decoration: none;">Logout</a>
+                <button class="btn btn-outline" style="flex: 1;" onclick="closeModal('logoutModal')">Cancel</button>
+                <a href="logout.php" class="btn btn-danger" style="flex: 1; display: flex; align-items: center; justify-content: center;">Logout</a>
             </div>
         </div>
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+
         function openEditModal(id, name, contact, username) {
             document.getElementById('edit_id').value = id;
             document.getElementById('edit_name').value = name;
@@ -433,11 +481,6 @@ if (isset($_SESSION['supervisor_created_key'])) {
         function closeModal(modalId) {
             document.getElementById(modalId).classList.remove('show');
         }
-    </script>
-    <!-- VERSION: 2.1 -->
-</body>
-</html>
-
     </script>
 </body>
 </html>

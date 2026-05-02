@@ -182,7 +182,7 @@ if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
     $verify_res = $conn->query($verify_sql);
 
     if ($verify_res && $verify_res->num_rows > 0) {
-        $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1, visual_saved = 1 WHERE id = ?");
+        $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1, visual_saved = 1, is_patrol_locked = 1 WHERE id = ?");
         $stmt->bind_param("i", $m_id);
         $stmt->execute();
         
@@ -277,19 +277,14 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
         $message_type = "error";
         $show_status_modal = true;
     }
-    else if ($is_sequence_fixed && $sequence_change_request !== 'approved') {
-        $message = "Error: Sequence is fixed and cannot be changed without admin permission.";
-        $message_type = "error";
-        $show_status_modal = true;
-    }
     else {
         $checkpoint_ids = $_POST['checkpoint_ids'] ?? [];
         $intervals = $_POST['intervals'] ?? [];
         // $assignment_shifts = $_POST['assignment_shifts'] ?? []; // Deprecated
         // Durations are automated to 1 min for non-zero points, except for points already in sequence which might have 0
         $durations = $_POST['durations'] ?? [];
-        // Validation: Count checkpoints excluding the starting point
-        $excluded_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1");
+        // Validation: Count checkpoints excluding Starting Point (is_zero_checkpoint=1) and End Point (is_zero_checkpoint=2)
+        $excluded_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint IN (1, 2)");
         $excluded_ids = [];
         while ($row = $excluded_res->fetch_assoc())
             $excluded_ids[] = $row['id'];
@@ -312,7 +307,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
         $start_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 1 LIMIT 1");
         if ($start_res && $start_res->num_rows > 0) $start_point_id = (int)$start_res->fetch_assoc()['id'];
 
-        $end_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_end_checkpoint = 1 LIMIT 1");
+        $end_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint = 2 LIMIT 1");
         if ($end_res && $end_res->num_rows > 0) $end_point_id = (int)$end_res->fetch_assoc()['id'];
 
         // 2. Prepare lookup for submitted values
@@ -372,9 +367,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_tour'])) {
                     $stmt->bind_param("iiiii", $mapping_id, $cp_id, $order, $interval, $duration);
                     $stmt->execute();
                 }
-                $conn->query("UPDATE agency_clients SET is_sequence_fixed = 1, sequence_change_request = 'none' WHERE id = $mapping_id");
                 $conn->commit();
-                $message = "Tour sequence saved successfully! Your sequence is now fixed.";
+                $message = "Tour sequence saved successfully!";
                 $message_type = "success";
                 $show_status_modal = true;
             }
@@ -581,7 +575,7 @@ if ($mapping_id) {
         .btn-success:hover { background: #059669; }
 
         /* Tour Sequence Setup Specific */
-        .tour-list-container { margin-top: 20px; counter-reset: tour-counter -1; }
+        .tour-list-container { margin-top: 20px; counter-reset: tour-counter 0; }
         .tour-list { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
         .tour-item { position: relative; display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 10px; transition: all 0.2s; }
         .tour-item:hover { border-color: #3b82f6; background: #fff; }
@@ -900,32 +894,32 @@ if ($mapping_id) {
                 <h2>Tours & Checkpoints</h2>
             </div>
 
-            <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
-                <span class="badge">CLIENT</span>
-            </div>
-            <?php if ($is_patrol_locked): ?>
-                <div style="background: #fff7ed; color: #9a3412; padding: 10px 20px; border-radius: 8px; border: 1px solid #fed7aa; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
-                    <span>🔒 Patrol sequence is managed and locked by your agency.</span>
+            <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                <div class="user-info">
+                    <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
+                    <span class="badge">CLIENT</span>
                 </div>
-            <?php elseif ($is_sequence_fixed): ?>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <div style="background: #f1f5f9; color: #475569; padding: 10px 20px; border-radius: 8px; border: 1px solid #e2e8f0; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
-                        <span>🔒 Sequence is Fixed</span>
+                <?php if ($is_patrol_locked): ?>
+                    <div style="margin-top: 20px; background: #fff7ed; color: #9a3412; padding: 10px 20px; border-radius: 8px; border: 1px solid #fed7aa; font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 8px;">
+                        <span>🔒 Patrol sequence is managed and locked by your agency.</span>
                     </div>
-                    <?php if ($sequence_change_request === 'pending'): ?>
-                        <div style="background: #eff6ff; color: #1e40af; padding: 10px 20px; border-radius: 8px; border: 1px solid #bfdbfe; font-weight: 600; font-size: 0.9rem;">
-                            ⏳ Permission Request Pending...
-                        </div>
-                    <?php elseif ($sequence_change_request === 'approved'): ?>
-                        <div style="background: #f0fdf4; color: #166534; padding: 10px 20px; border-radius: 8px; border: 1px solid #bbf7d0; font-weight: 600; font-size: 0.9rem;">
-                            ✅ Permission Granted! You can now edit.
-                        </div>
-                    <?php else: ?>
-                        <button type="button" class="btn" style="width: auto; padding: 10px 20px; font-size: 0.85rem; background: #3b82f6;" onclick="requestSequenceChange()">Request Permission to Edit</button>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
+                <?php endif; ?>
+                <?php if (!$is_patrol_locked && $visual_saved): ?>
+                    <div style="margin-top: 20px; display: flex; align-items: center; gap: 12px;">
+                        <?php if ($sequence_change_request === 'pending'): ?>
+                            <div style="background: #eff6ff; color: #1e40af; padding: 10px 20px; border-radius: 8px; border: 1px solid #bfdbfe; font-weight: 600; font-size: 0.9rem;">
+                                ⏳ Visual Map Unlock Pending...
+                            </div>
+                        <?php elseif ($sequence_change_request === 'approved'): ?>
+                            <div style="background: #f0fdf4; color: #166534; padding: 10px 20px; border-radius: 8px; border: 1px solid #bbf7d0; font-weight: 600; font-size: 0.9rem;">
+                                ✅ Visual Map Unlock Approved!
+                            </div>
+                        <?php else: ?>
+                            <button type="button" class="btn" style="width: auto; padding: 10px 20px; font-size: 0.85rem; background: #6366f1;" onclick="requestSequenceChange()">🗺️ Request Visual Map Edit</button>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
         </header>
 
         <div class="content-area">
@@ -1008,12 +1002,12 @@ if ($mapping_id) {
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo (int)($start_interval ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo (int)($start_interval ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || !$visual_saved) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo (int)($start_duration ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo (int)($start_duration ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || !$visual_saved) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                                 <input type="hidden" name="assignment_shifts[]" value="Day Shift">
@@ -1037,17 +1031,17 @@ endif; ?>
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo (int)($item['interval_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo (int)($item['interval_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || !$visual_saved) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo (int)($item['duration_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo (int)($item['duration_minutes'] ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || !$visual_saved) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                                 <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($item['shift_name'] ?? 'Day Shift'); ?>">
                                         </div>
-                                        <?php if (!$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved')): ?>
+                                        <?php if (!$is_patrol_locked): ?>
                                             <button type="button" class="remove-btn" onclick="removeItem(this)">
                                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                                             </button>
@@ -1077,12 +1071,12 @@ endforeach; ?>
                                         <div class="setting-inputs">
                                             <div class="input-group">
                                                 <label>Interval</label>
-                                                <input type="number" name="intervals[]" value="<?php echo (int)($end_interval ?: 1); ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="intervals[]" value="<?php echo (int)($end_interval ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || !$visual_saved) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                             <div class="input-group">
                                                 <label>Duration</label>
-                                                <input type="number" name="durations[]" value="<?php echo (int)($end_duration ?: 1); ?>" min="0" <?php echo $is_patrol_locked ? 'disabled' : ''; ?>>
+                                                <input type="number" name="durations[]" value="<?php echo (int)($end_duration ?: 1); ?>" min="0" <?php echo ($is_patrol_locked || !$visual_saved) ? 'disabled' : ''; ?>>
                                                 <label>min</label>
                                             </div>
                                                 <input type="hidden" name="assignment_shifts[]" value="Day Shift">
@@ -1094,7 +1088,7 @@ endforeach; ?>
 endif; ?>
                         </div>
 
-                        <?php if ( !$is_patrol_locked && !($is_sequence_fixed && $sequence_change_request !== 'approved') ): ?>
+                        <?php if (!$is_patrol_locked): ?>
 
 
 
@@ -1210,7 +1204,7 @@ endif; ?>
         const tourList = document.getElementById('tour-list');
 
         // Initialize Sortable
-        if (tourList && !<?php echo ($is_patrol_locked || ($is_sequence_fixed && $sequence_change_request !== 'approved')) ? '1' : '0'; ?>) {
+        if (tourList && !<?php echo $is_patrol_locked ? '1' : '0'; ?>) {
             new Sortable(tourList, {
                 handle: '.handle',
                 animation: 150,
@@ -1307,15 +1301,7 @@ endif; ?>
                         <input type="number" name="durations[]" value="1" min="0">
                         <label>min</label>
                     </div>
-                    <div class="input-group">
-                        <label>Shift Declare</label>
-                        <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 110px;">
-                            ${clientShifts.length > 0 
-                                ? clientShifts.map(s => `<option value="${s}">${s}</option>`).join('')
-                                : `<option value="Day Shift">Day Shift</option><option value="Night Shift">Night Shift</option>`
-                            }
-                        </select>
-                    </div>
+                    <input type="hidden" name="assignment_shifts[]" value="Day Shift">
                 </div>
                 <button type="button" class="remove-btn" onclick="removeItem(this)">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -1735,3 +1721,16 @@ endif; ?>
     <?php include_once 'includes/common_modals.php'; ?>
 </body>
 </html>
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.classList.remove('show');
+            });
+            document.body.style.overflow = '';
+        }
+
+        window.addEventListener('click', function(event) {
+            if (event.target.classList.contains('modal-overlay')) {
+                closeAllModals();
+            }
+        });
+    </script>
+    <?php include 'admin_layout/footer.php'; ?>

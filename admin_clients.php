@@ -228,22 +228,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['handle_sequence_reques
     $action     = $_POST['action']; // 'approve' or 'deny'
     
     if ($action === 'approve') {
-        $sql = "UPDATE agency_clients SET sequence_change_request = 'approved' WHERE id = $mapping_id";
-        $msg = "Sequence change request approved.";
+        // Approve the specific request
+        $conn->query("UPDATE agency_clients SET sequence_change_request = 'approved' WHERE id = $mapping_id");
+        // Unlock patrol and visual globally for this client (to sync with manage_limits.php behavior)
+        $conn->query("UPDATE agency_clients SET is_patrol_locked = 0, is_visual_locked = 0 WHERE client_id = (SELECT client_id FROM (SELECT client_id FROM agency_clients WHERE id = $mapping_id) as t)");
+        
+        $msg = "Sequence change request approved. Patrol and Visual locks have been removed for this client.";
     } else {
         $sql = "UPDATE agency_clients SET sequence_change_request = 'none' WHERE id = $mapping_id";
+        $conn->query($sql);
         $msg = "Sequence change request denied.";
     }
     
-    if ($conn->query($sql)) {
-        $message = $msg;
-        $message_type = "success";
-        $show_status_modal = true;
-    } else {
-        $message = "Error handling request: " . $conn->error;
-        $message_type = "error";
-        $show_status_modal = true;
-    }
+    $message = $msg;
+    $message_type = "success";
+    $show_status_modal = true;
 }
 
 
@@ -278,8 +277,21 @@ $clients_res = $conn->query($clients_sql);
 $clients = [];
 if ($clients_res) while ($r = $clients_res->fetch_assoc()) $clients[] = $r;
 
-// Fetch pending sequence requests
-$pending_requests = array_filter($clients, fn($c) => $c['sequence_change_request'] === 'pending');
+// Fetch pending sequence requests individually to avoid grouping issues
+$pending_requests_res = $conn->query("
+    SELECT ac.id as mapping_id, ac.company_name, ac.site_name, u.username, ag.agency_name, ag.username as agency_username
+    FROM agency_clients ac
+    JOIN users u ON ac.client_id = u.id
+    JOIN users ag ON ac.agency_id = ag.id
+    WHERE ac.sequence_change_request = 'pending'
+    ORDER BY ac.id ASC
+");
+$pending_requests = [];
+if ($pending_requests_res) {
+    while ($row = $pending_requests_res->fetch_assoc()) {
+        $pending_requests[] = $row;
+    }
+}
 
 $page_title = 'Client Management';
 $header_title = 'Client Management';
@@ -324,12 +336,12 @@ include 'admin_layout/sidebar.php';
                                 <td style="padding: 12px 16px;">
                                     <div style="display: flex; gap: 8px;">
                                         <form method="POST" style="margin:0;">
-                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['primary_mapping_id']; ?>">
+                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['mapping_id']; ?>">
                                             <input type="hidden" name="action" value="approve">
                                             <button type="submit" name="handle_sequence_request" style="padding: 6px 16px; background: #10b981; color: white; border: none; border-radius: 6px; font-size: 0.75rem; font-weight: 700; cursor: pointer;">Approve</button>
                                         </form>
                                         <form method="POST" style="margin:0;">
-                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['primary_mapping_id']; ?>">
+                                            <input type="hidden" name="mapping_id" value="<?php echo $pr['mapping_id']; ?>">
                                             <input type="hidden" name="action" value="deny">
                                             <button type="submit" name="handle_sequence_request" style="padding: 6px 16px; border: 1px solid #e2e8f0; background: white; color: #64748b; border-radius: 6px; font-size: 0.75rem; font-weight: 700; cursor: pointer;">Deny</button>
                                         </form>
@@ -757,6 +769,30 @@ include 'admin_layout/sidebar.php';
             color: #94a3b8;
         }
         .qr-no-limit .icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+        @media (max-width: 768px) {
+            #qrModal { padding: 10px; }
+            #qrModalBox { max-height: 95vh; width: 100%; border-radius: 12px; }
+            #qrModalHeader { padding: 14px 16px; }
+            #qrModalHeader h3 { font-size: 1rem; }
+            #qrModalMeta { padding: 10px 16px; gap: 8px; flex-direction: column; align-items: flex-start; }
+            #qrModalMeta div { width: 100%; }
+            #qrModalBody { padding: 10px; }
+            .qr-slot-input { font-size: 0.85rem; padding: 8px; }
+            .qr-slots-table th { padding: 8px 4px; font-size: 0.65rem; }
+            .qr-slots-table td { padding: 6px 2px; }
+            .qr-slot-status { font-size: 0.65rem; padding: 2px 6px; }
+            #qrModalFooter { padding: 12px 16px; flex-direction: column; align-items: stretch; text-align: center; }
+            #qrSaveBtn { width: 100%; justify-content: center; padding: 12px; }
+            .qr-slots-table .slot-num { width: 24px; font-size: 0.75rem; }
+        }
+        @media (max-width: 480px) {
+            .qr-slots-table thead { display: none; }
+            .qr-slots-table tr { display: block; margin-bottom: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+            .qr-slots-table td { display: block; width: 100% !important; padding: 4px 0; border: none; text-align: left !important; }
+            .qr-slots-table td::before { content: attr(data-label); font-weight: 700; font-size: 0.7rem; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 2px; }
+            .qr-slots-table .slot-num { display: none; }
+        }
     </style>
 
     <div id="qrModal">
@@ -903,8 +939,8 @@ include 'admin_layout/sidebar.php';
                 const escZCode = escHtml(zcp.checkpoint_code);
                 
                 html += `<tr style="background: #fffbeb;">
-                    <td class="slot-num" style="background:#fef3c7; color:#92400e; font-weight:800;">0</td>
-                    <td>
+                    <td class="slot-num" style="background:#fef3c7; color:#92400e; font-weight:800;" data-label="#">0</td>
+                    <td data-label="Checkpoint Name">
                         <input type="text" class="qr-slot-input"
                             data-idx="zero"
                             data-cpid="${zcp.id}"
@@ -914,7 +950,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow('zero')"
                         />
                     </td>
-                    <td style="display: flex; align-items: center; gap: 8px;">
+                    <td data-label="QR Code / Key" style="display: flex; align-items: center; gap: 8px;">
                         <input type="text" class="qr-slot-input code-input"
                             data-idx="zero"
                             data-cpid="${zcp.id}"
@@ -931,7 +967,7 @@ include 'admin_layout/sidebar.php';
                             👁️
                         </button>
                     </td>
-                    <td style="text-align:center;"><span class="qr-slot-status" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">✓ Start</span></td>
+                    <td data-label="Status" style="text-align:center;"><span class="qr-slot-status" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">✓ Start</span></td>
                 </tr>`;
             }
 
@@ -955,8 +991,8 @@ include 'admin_layout/sidebar.php';
                 }
 
                 html += `<tr>
-                    <td class="slot-num">${i + 1}</td>
-                    <td>
+                    <td class="slot-num" data-label="#">${i + 1}</td>
+                    <td data-label="Checkpoint Name">
                         <input type="text" class="qr-slot-input"
                             data-idx="${i}"
                             data-cpid="${cpId}"
@@ -966,7 +1002,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow(${i})"
                         />
                     </td>
-                    <td style="display: flex; align-items: center; gap: 8px;">
+                    <td data-label="QR Code / Key" style="display: flex; align-items: center; gap: 8px;">
                         <div style="flex: 1; position: relative;">
                             <input type="text" class="qr-slot-input code-input"
                                 data-idx="${i}"
@@ -990,7 +1026,7 @@ include 'admin_layout/sidebar.php';
                             </button>
                         ` : ''}
                     </td>
-                    <td style="text-align:center;" id="qr-status-${i}">${statusHtml}</td>
+                    <td data-label="Status" style="text-align:center;" id="qr-status-${i}">${statusHtml}</td>
                 </tr>`;
             }
 
@@ -1001,8 +1037,8 @@ include 'admin_layout/sidebar.php';
                 const escECode = escHtml(ecp.checkpoint_code);
                 
                 html += `<tr style="background: #fff5f5;">
-                    <td class="slot-num" style="background:#fee2e2; color:#991b1b; font-weight:800;">E</td>
-                    <td>
+                    <td class="slot-num" style="background:#fee2e2; color:#991b1b; font-weight:800;" data-label="#">E</td>
+                    <td data-label="Checkpoint Name">
                         <input type="text" class="qr-slot-input"
                             data-idx="end"
                             data-cpid="${ecp.id}"
@@ -1012,7 +1048,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow('end')"
                         />
                     </td>
-                    <td style="display: flex; align-items: center; gap: 8px;">
+                    <td data-label="QR Code / Key" style="display: flex; align-items: center; gap: 8px;">
                         <input type="text" class="qr-slot-input code-input"
                             data-idx="end"
                             data-cpid="${ecp.id}"
@@ -1029,7 +1065,7 @@ include 'admin_layout/sidebar.php';
                             👁️
                         </button>
                     </td>
-                    <td style="text-align:center;"><span class="qr-slot-status" style="background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">✓ End</span></td>
+                    <td data-label="Status" style="text-align:center;"><span class="qr-slot-status" style="background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">✓ End</span></td>
                 </tr>`;
             }
 

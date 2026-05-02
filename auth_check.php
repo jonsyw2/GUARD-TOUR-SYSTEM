@@ -37,6 +37,15 @@ $_SESSION['user_id'] = $decoded_payload['user_id'];
 $_SESSION['username'] = $decoded_payload['username'];
 $_SESSION['user_level'] = $decoded_payload['user_level'];
 
+// Populate company_name for client users from agency_clients table
+if ($_SESSION['user_level'] === 'client' && !isset($_SESSION['company_name'])) {
+    $c_id = $_SESSION['user_id'];
+    $comp_res = $conn->query("SELECT company_name FROM agency_clients WHERE client_id = $c_id LIMIT 1");
+    if ($comp_res && $comp_row = $comp_res->fetch_assoc()) {
+        $_SESSION['company_name'] = $comp_row['company_name'];
+    }
+}
+
 // (Optional) Enforce specific access levels on different pages.
 // Here we just ensure they are logged in. The caller script can verify $_SESSION['user_level'].
 ?>

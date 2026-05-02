@@ -355,3 +355,10 @@ function getAgencySupervisors($conn, $agency_id) {
     </script>
 </body>
 </html>
+            if (event.target.classList.contains('modal-overlay')) {
+                 event.target.classList.remove('show');
+            }
+        });
+        function openLogout() { document.getElementById('logoutModal').classList.add('show'); }
+    </script>
+    <?php include 'admin_layout/footer.php'; ?>

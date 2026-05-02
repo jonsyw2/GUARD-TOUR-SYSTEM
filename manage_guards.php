@@ -338,11 +338,11 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
     <title>Manage Guards - Agency Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Reusing common styles from manage_qrs.php */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
+        body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; margin: 0; padding: 0 16px 0 0; gap: 16px; }
 
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
+        /* Sidebar Styles */
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: transform 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0; z-index: 2000; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -351,53 +351,87 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
 
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
+        /* Main Content Styles */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
 
-        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .content-area { padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; }
 
-        .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: 500; }
-        .alert-success { background-color: #d1fae5; color: #065f46; border: 1px solid #34d399; }
-        .alert-error { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
+        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 24px; border: 1px solid #e5e7eb; }
+        .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 
-        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 32px;}
-        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
-
-        .form-group { margin-bottom: 16px; }
-        .form-label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 8px; }
-        .form-control { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; }
-        .btn { padding: 10px 18px; background-color: #10b981; color: white; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; width: 100%; }
+        .btn { padding: 10px 20px; background-color: #10b981; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; font-size: 0.9rem; }
         .btn:hover { background-color: #059669; }
+        .btn-danger { background-color: #ef4444; }
+        .btn-danger:hover { background-color: #dc2626; }
+        .btn-outline { background: #f8fafc; color: #475569; border: 1px solid #e2e8f0; }
+        .btn-outline:hover { background: #f1f5f9; }
 
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
-        .empty-state { text-align: center; padding: 30px; color: #6b7280; font-style: italic; }
+        /* Table Styles */
+        .table-container { overflow-x: auto; border-radius: 8px; border: 1px solid #e5e7eb; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f9fafb; padding: 14px 16px; text-align: left; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #e5e7eb; }
+        td { padding: 16px; border-bottom: 1px solid #e5e7eb; font-size: 0.95rem; color: #1f2937; }
+        tbody tr:hover { background-color: #f9fafb; }
 
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-overlay.show, .modal.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; text-align: center; max-height: 90vh; overflow-y: auto; }
+        .modal, .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 2100; backdrop-filter: blur(4px); overflow-y: auto; padding: 20px; }
+        .modal.show, .modal-overlay.show { display: flex; align-items: flex-start; justify-content: center; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 680px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative; margin: auto; animation: modalFadeIn 0.3s ease-out forwards; }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: #4b5563; margin-bottom: 8px; }
+        .form-control { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; transition: border-color 0.2s; }
+        .form-control:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+        
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .col-span-2 { grid-column: span 2; }
 
-        /* Centered Modal Specifics */
-        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        /* Mobile Adjustments */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); }
 
-        /* Tab Styles */
-        .tabs-container { margin-bottom: 32px; }
-        .tabs-nav { display: flex; gap: 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 24px; background: white; border-radius: 8px 8px 0 0; overflow: hidden; }
-        .tab-btn { flex: 1; padding: 16px; border: none; background: #f9fafb; cursor: pointer; font-weight: 600; color: #6b7280; font-size: 0.95rem; transition: all 0.2s; border-bottom: 2px solid transparent; }
-        .tab-btn:hover { background: #f3f4f6; color: #111827; }
-        .tab-btn.active { background: white; color: #10b981; border-bottom-color: #10b981; }
-        .tab-content { display: none; width: 100%; }
-        .tab-content.active { display: block; animation: fadeIn 0.3s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            td:last-child { border-bottom: none !important; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+            td::before { content: attr(data-label); font-weight: 700; color: #64748b; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .col-span-2 { grid-column: span 1; }
+        }
+    </style>
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
+        }
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+    </script>
     </style>
 </head>
 <body>
 
-    <aside class="sidebar">
+    <div class="sidebar-overlay-bg" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <aside class="sidebar" id="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Agency Portal</div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
@@ -405,6 +439,7 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
 
             <li><a href="manage_guards.php" class="nav-link active">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -419,7 +454,10 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Personnel & Assignment Management</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Personnel & Assignment Management</h2>
+            </div>
         </header>
 
         <div class="content-area">
@@ -464,7 +502,7 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
                                     $middle = $fm_parts[1] ?? '';
                                 ?>
                                     <tr onclick="openViewClientModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>', '<?php echo addslashes($row['client_names'] ?? ''); ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" style="cursor: pointer;">
-                                        <td>
+                                        <td data-label="Guard Name">
                                             <div style="display: flex; align-items: center; gap: 12px;">
                                                 <?php
                                                 $photo_url = $row['profile_photo'] ?? '';
@@ -479,14 +517,14 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
                                                 ?>
                                                     <div style="width: 40px; height: 40px; border-radius: 50%; background: #dbeafe; color: #3b82f6; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.9rem;"><?php echo htmlspecialchars($initials); ?></div>
                                                 <?php endif; ?>
-                                                <strong><?php echo htmlspecialchars($row['name']); ?></strong>
+                                                <strong style="text-align: left;"><?php echo htmlspecialchars($row['name']); ?></strong>
                                             </div>
                                         </td>
-                                        <td><code><?php echo htmlspecialchars($row['username']); ?></code></td>
-                                        <td>
+                                        <td data-label="Access Key"><code><?php echo htmlspecialchars($row['username']); ?></code></td>
+                                        <td data-label="Assigned Client">
                                             <?php if ($row['client_names']): ?>
                                                 <?php $names = explode(', ', $row['client_names']); ?>
-                                                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                                                <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">
                                                     <?php foreach($names as $name): ?>
                                                         <span class="badge" style="background: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem;"><?php echo htmlspecialchars($name); ?></span>
                                                     <?php endforeach; ?>
@@ -495,9 +533,9 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
                                                 <span style="color: #9ca3af; font-size: 0.8rem;">None</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
-                                        <td>
-                                            <div style="display: flex; gap: 6px;">
+                                        <td data-label="Date Created"><?php echo date('M d, Y', strtotime($row['created_at'])); ?></td>
+                                        <td data-label="Actions">
+                                            <div style="display: flex; gap: 6px; justify-content: flex-end;">
                                                 <button onclick="event.stopPropagation(); openEditModal(<?php echo $row['id']; ?>, '<?php echo addslashes($last); ?>', '<?php echo addslashes($first); ?>', '<?php echo addslashes($middle); ?>', '<?php echo addslashes($row['gender'] ?? ''); ?>', '<?php echo addslashes($row['address']); ?>', '<?php echo addslashes($row['contact_no'] ?? ''); ?>', '<?php echo addslashes($row['police_clearance_no'] ?? ''); ?>', '<?php echo addslashes($row['nbi_no'] ?? ''); ?>', '<?php echo addslashes($row['lesp_no']); ?>', '<?php echo $row['lesp_expiry']; ?>', '<?php echo $row['mapping_ids'] ?? ''; ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #3b82f6; width: auto;">Edit</button>
                                                 <button onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['name']); ?>')" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #ef4444; width: auto;">Delete</button>
                                             </div>
@@ -518,10 +556,10 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
         <div class="modal-content" style="max-width: 680px; text-align: left; padding: 32px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid #e5e7eb; padding-bottom: 16px;">
                 <h3 style="margin: 0; font-size: 1.2rem;">Register New Guard</h3>
-                <button type="button" onclick="document.getElementById('addGuardModal').classList.remove('show')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #9ca3af; line-height: 1;">&times;</button>
+                <button type="button" onclick="closeModal('addGuardModal')" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #9ca3af; line-height: 1;">&times;</button>
             </div>
             <form action="manage_guards.php" method="POST">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">First Name</label>
                         <input type="text" name="first_name" class="form-control" placeholder="e.g. John" required>
@@ -530,11 +568,11 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
                         <label class="form-label">Middle Name (Optional)</label>
                         <input type="text" name="middle_name" class="form-control" placeholder="e.g. Quincey">
                     </div>
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <label class="form-label">Last Name</label>
                         <input type="text" name="last_name" class="form-control" placeholder="e.g. Doe" required>
                     </div>
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <label class="form-label">Permanent Address</label>
                         <textarea name="address" class="form-control" rows="2" placeholder="Full residential address" required></textarea>
                     </div>
@@ -567,12 +605,12 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
                         <label class="form-label">LESP Expiry Date</label>
                         <input type="date" name="lesp_expiry" class="form-control" required>
                     </div>
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <p style="font-size: 0.8rem; color: #6b7280; margin-bottom: 0;">An access key will be automatically generated upon account creation.</p>
                     </div>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
-                    <button type="button" onclick="document.getElementById('addGuardModal').classList.remove('show')" class="btn" style="background: #f1f5f9; color: #475569; width: auto; padding: 10px 24px;">Cancel</button>
+                    <button type="button" onclick="closeModal('addGuardModal')" class="btn btn-outline" style="width: auto; padding: 10px 24px;">Cancel</button>
                     <button type="submit" name="create_guard" class="btn" style="width: auto; padding: 10px 24px;">Create Guard Account</button>
                 </div>
             </form>
@@ -620,30 +658,28 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
 
     <!-- Edit Guard Modal -->
     <div id="editGuardModal" class="modal">
-        <div class="modal-content" style="max-width: 500px;">
-            <h3 style="margin-bottom: 20px;">Edit Guard Details</h3>
+        <div class="modal-content" style="max-width: 600px;">
+            <h3 style="margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px;">Edit Guard Details</h3>
             <form action="manage_guards.php" method="POST">
                 <input type="hidden" name="guard_id" id="edit_guard_id">
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group" style="text-align: left;">
+                <div class="form-grid">
+                    <div class="form-group">
                         <label class="form-label">First Name</label>
                         <input type="text" name="first_name" id="edit_first_name" class="form-control" required>
                     </div>
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group">
                         <label class="form-label">Middle Name</label>
                         <input type="text" name="middle_name" id="edit_middle_name" class="form-control">
                     </div>
-                </div>
-                <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Last Name</label>
-                    <input type="text" name="last_name" id="edit_last_name" class="form-control" required>
-                </div>
-                <div class="form-group" style="text-align: left;">
-                    <label class="form-label">Permanent Address</label>
-                    <textarea name="address" id="edit_address" class="form-control" rows="2" required></textarea>
-                </div>
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group col-span-2">
+                        <label class="form-label">Last Name</label>
+                        <input type="text" name="last_name" id="edit_last_name" class="form-control" required>
+                    </div>
+                    <div class="form-group col-span-2">
+                        <label class="form-label">Permanent Address</label>
+                        <textarea name="address" id="edit_address" class="form-control" rows="2" required></textarea>
+                    </div>
+                    <div class="form-group">
                         <label class="form-label">Gender</label>
                         <select name="gender" id="edit_gender" class="form-control" required>
                             <option value="Male">Male</option>
@@ -651,34 +687,30 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
                             <option value="Other">Other</option>
                         </select>
                     </div>
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group">
                         <label class="form-label">Contact No.</label>
                         <input type="text" name="contact_no" id="edit_contact_no" class="form-control" required>
                     </div>
-                </div>
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group">
                         <label class="form-label">Police Clearance No.</label>
                         <input type="text" name="police_clearance_no" id="edit_police_clearance_no" class="form-control" required>
                     </div>
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group">
                         <label class="form-label">NBI No.</label>
                         <input type="text" name="nbi_no" id="edit_nbi_no" class="form-control" required>
                     </div>
-                </div>
-                <div class="form-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group">
                         <label class="form-label">LESP No.</label>
                         <input type="text" name="lesp_no" id="edit_lesp_no" class="form-control" required>
                     </div>
-                    <div class="form-group" style="text-align: left;">
+                    <div class="form-group">
                         <label class="form-label">LESP Expiry Date</label>
                         <input type="date" name="lesp_expiry" id="edit_lesp_expiry" class="form-control" required>
                     </div>
                 </div>
-                <div style="display: flex; gap: 12px; margin-top: 24px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('editGuardModal')">Cancel</button>
-                    <button type="submit" name="update_guard" class="btn">Update Details</button>
+                <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-outline" style="width: auto; padding: 10px 24px;" onclick="closeModal('editGuardModal')">Cancel</button>
+                    <button type="submit" name="update_guard" class="btn" style="width: auto; padding: 10px 24px;">Update Details</button>
                 </div>
             </form>
         </div>
@@ -686,15 +718,15 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
 
     <!-- Delete Confirmation Modal -->
     <div id="deleteGuardModal" class="modal">
-        <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
             <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
             <h3 style="margin-bottom: 10px;">Confirm Deletion</h3>
             <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to delete <strong id="delete_guard_name"></strong>? This will permanently remove their access and assignments.</p>
             <form action="manage_guards.php" method="POST">
                 <input type="hidden" name="guard_id" id="delete_guard_id">
-                <div style="display: flex; gap: 12px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('deleteGuardModal')">Cancel</button>
-                    <button type="submit" name="delete_guard" class="btn" style="background: #ef4444;">Delete Guard</button>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="btn btn-outline" style="width: auto; padding: 10px 24px;" onclick="closeModal('deleteGuardModal')">Cancel</button>
+                    <button type="submit" name="delete_guard" class="btn btn-danger" style="width: auto; padding: 10px 24px;">Delete Guard</button>
                 </div>
             </form>
         </div>
@@ -702,33 +734,26 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
 
     <!-- Unassign Confirmation Modal -->
     <div id="unassignModal" class="modal">
-        <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
             <div style="width: 60px; height: 60px; background: #fee2e2; color: #ef4444; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 1.5rem;">!</div>
             <h3 style="margin-bottom: 10px;">Confirm Unassignment</h3>
             <p style="color: #6b7280; margin-bottom: 24px;">Are you sure you want to unassign <strong id="unassign_guard_name"></strong> from <strong id="unassign_client_name"></strong>?</p>
             <form action="manage_guards.php" method="POST">
                 <input type="hidden" name="assignment_id" id="unassign_id">
-                <div style="display: flex; gap: 12px;">
-                    <button type="button" class="btn" style="background: #f3f4f6; color: #374151;" onclick="closeModal('unassignModal')">Cancel</button>
-                    <button type="submit" name="unassign_guard" class="btn" style="background: #ef4444;">Unassign Guard</button>
+                <div style="display: flex; gap: 12px; justify-content: center;">
+                    <button type="button" class="btn btn-outline" style="width: auto; padding: 10px 24px;" onclick="closeModal('unassignModal')">Cancel</button>
+                    <button type="submit" name="unassign_guard" class="btn btn-danger" style="width: auto; padding: 10px 24px;">Unassign Guard</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <div class="modal-overlay" id="logoutModal">
-        <div class="modal-content">
-            <h3 style="margin-bottom: 20px;">Ready to Leave?</h3>
-            <div style="display: flex; gap: 12px;">
-                <button class="btn" style="background: #f3f4f6; color: #374151;" onclick="document.getElementById('logoutModal').classList.remove('show');">Cancel</button>
-                <a href="logout.php" class="btn" style="background: #ef4444; text-decoration: none;">Log Out</a>
-            </div>
-        </div>
-    </div>
+
 
     <script>
-        function switchTab(tabId, btn) {
-            return; // Tabs removed
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
         }
 
         // Auto-switch to appropriate tab if form was submitted
@@ -788,21 +813,9 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
         }
 
         window.onclick = function(event) {
-            const logoutModal = document.getElementById('logoutModal');
-            const successModal = document.getElementById('successKeyModal');
-            const statusModal = document.getElementById('statusModal');
-            const editModal = document.getElementById('editGuardModal');
-            const deleteModal = document.getElementById('deleteGuardModal');
-            const unassignModal = document.getElementById('unassignModal');
-            
-            if (event.target == logoutModal) logoutModal.classList.remove('show');
-            if (event.target == successModal) successModal.classList.remove('show');
-            if (event.target == statusModal) statusModal.classList.remove('show');
-            if (event.target == editModal) editModal.classList.remove('show');
-            if (event.target == deleteModal) deleteModal.classList.remove('show');
-            if (event.target == unassignModal) unassignModal.classList.remove('show');
-            const viewClientModal = document.getElementById('viewClientModal');
-            if (event.target == viewClientModal) viewClientModal.classList.remove('show');
+            if (event.target.classList.contains('modal')) {
+                event.target.classList.remove('show');
+            }
         }
     </script>
 
@@ -835,6 +848,4 @@ $guard_limit_reached = ($total_guard_limit >= 0 && $current_guard_count >= $tota
             </form>
         </div>
     </div>
-    <!-- VERSION: 2.1 -->
-</body>
-</html>
+<?php include 'admin_layout/footer.php'; ?>

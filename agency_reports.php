@@ -16,7 +16,7 @@ if ($_SESSION['user_level'] !== 'agency') {
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: transform 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -24,7 +24,7 @@ if ($_SESSION['user_level'] !== 'agency') {
         .sidebar-footer { padding: 20px; border-top: 1px solid #374151; }
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
@@ -56,6 +56,31 @@ if ($_SESSION['user_level'] !== 'agency') {
         .w5h-item { background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; }
         .w5h-label { font-size: 0.7rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
         .w5h-value { font-size: 0.9rem; color: #1e293b; line-height: 1.5; }
+
+        /* Mobile Menu Toggle */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #1f2937; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 100; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border-bottom: 1px solid #e5e7eb; padding: 16px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; text-align: right; }
+            td::before { content: attr(data-label); font-weight: 700; color: #64748b; font-size: 0.7rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+            .w5h-grid { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body>
@@ -74,13 +99,16 @@ if ($_SESSION['user_level'] !== 'agency') {
     ";
     $reports_res = $conn->query($reports_sql);
     ?>
-    <aside class="sidebar">
+    <div class="sidebar-overlay-bg" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <aside class="sidebar" id="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Agency Portal</div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -95,7 +123,13 @@ if ($_SESSION['user_level'] !== 'agency') {
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Official Guard & Inspector Reports</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Official Field Reports</h2>
+            </div>
+            <div class="user-info">
+                <span class="badge" style="background: #e0f2fe; color: #0369a1;">REPORTING CENTER</span>
+            </div>
         </header>
         <div class="content-area">
             <div class="card">
@@ -119,16 +153,16 @@ if ($_SESSION['user_level'] !== 'agency') {
                                 $display_name = $prefix . ($row['guard_name'] ?: 'Unknown');
                                 ?>
                                 <tr>
-                                    <td><?php echo date('M d, Y h:i A', strtotime($row['created_at'])); ?></td>
-                                    <td><strong><?php echo htmlspecialchars($display_name); ?></strong></td>
-                                    <td><?php echo htmlspecialchars($row['site_name'] ?: 'General Site'); ?></td>
-                                    <td>
+                                    <td data-label="Date & Time"><?php echo date('M d, Y h:i A', strtotime($row['created_at'])); ?></td>
+                                    <td data-label="Reported By"><strong><?php echo htmlspecialchars($display_name); ?></strong></td>
+                                    <td data-label="Site/Location"><?php echo htmlspecialchars($row['site_name'] ?: 'General Site'); ?></td>
+                                    <td data-label="Status">
                                         <span class="status-badge <?php echo strtolower($row['status']) === 'resolved' ? 'status-resolved' : 'status-active'; ?>">
                                             <?php echo htmlspecialchars($row['status']); ?>
                                         </span>
                                     </td>
-                                    <td>
-                                        <div style="display: flex; gap: 8px;">
+                                    <td data-label="Actions">
+                                        <div style="display: flex; gap: 8px; justify-content: flex-end;">
                                             <button class="btn-view" onclick='showReport(<?php echo json_encode($row); ?>, "<?php echo $display_name; ?>")'>View</button>
                                             <button class="btn-view" style="background:#f0fdf4; color:#166534; border-color:#bbf7d0;" onclick='downloadPDF(<?php echo json_encode($row); ?>, "<?php echo $display_name; ?>")'>PDF</button>
                                         </div>
@@ -193,6 +227,11 @@ if ($_SESSION['user_level'] !== 'agency') {
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay-bg').classList.toggle('show');
+        }
+
         function showReport(data, displayName) {
             document.getElementById('v_what').innerText = data.report_what || '---';
             document.getElementById('v_who').innerText = data.report_who || '---';

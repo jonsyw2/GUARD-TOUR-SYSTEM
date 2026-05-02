@@ -181,7 +181,7 @@ $incidents_result = $conn->query($incidents_sql);
         <header class="topbar">
             <h2>Incident Reports & Alerts</h2>
             <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
+                <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
             </div>
         </header>

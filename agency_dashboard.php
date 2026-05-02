@@ -71,7 +71,7 @@ $recent_scans = $conn->query("
         body { display: flex; height: 100vh; background-color: var(--bg-main); color: var(--text-main); padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; overflow: hidden; }
+        .sidebar { width: 250px; background-color: var(--sidebar-bg); color: #fff; display: flex; flex-direction: column; transition: transform 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); flex-shrink: 0; overflow: hidden; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -81,22 +81,22 @@ $recent_scans = $conn->query("
         .logout-btn:hover { background-color: #dc2626; }
 
         /* Modal Styles */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 50; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 2000; align-items: center; justify-content: center; backdrop-filter: blur(4px); padding: 20px; }
         .modal-overlay.show { display: flex; }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); text-align: center; animation: modalFadeIn 0.3s ease-out forwards; position: relative; margin: auto; }
         @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
         .modal-icon { width: 48px; height: 48px; background: #ffe4e6; color: #e11d48; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 1.5rem; }
         .modal-title { font-size: 1.25rem; font-weight: 700; color: #111827; margin-bottom: 8px; }
         .modal-text { color: #6b7280; font-size: 0.95rem; margin-bottom: 24px; line-height: 1.5; }
         .modal-actions { display: flex; gap: 12px; }
-        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; }
+        .btn-modal { flex: 1; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; border: none; text-decoration: none; display: flex; align-items: center; justify-content: center; }
         .btn-cancel { background: #f3f4f6; color: #374151; }
         .btn-cancel:hover { background: #e5e7eb; }
-        .btn-confirm { background: #e11d48; color: white; text-decoration: none; }
+        .btn-confirm { background: #e11d48; color: white; }
         .btn-confirm:hover { background: #be123c; }
 
         /* Main Content Styles */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; border-radius: 16px; border: 1px solid var(--border); background: white; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; border-radius: 16px; border: 1px solid var(--border); background: white; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
         .user-info { display: flex; align-items: center; gap: 12px; }
@@ -106,15 +106,62 @@ $recent_scans = $conn->query("
         .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); margin-bottom: 24px;}
         .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; }
 
-
         .form-select { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; font-family: inherit; color: var(--text-main); outline: none; transition: border-color 0.2s; }
         .form-select:focus { border-color: var(--primary); }
+
+        /* Responsive Design */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-main); padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); transition: opacity 0.3s ease; }
+        .sidebar-overlay.show { display: block; }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .mobile-toggle { display: block; }
+            .content-area { padding: 24px 16px; }
+            .stats-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important; gap: 16px; }
+            
+            /* Table responsiveness */
+            .activity-table thead { display: none; }
+            .activity-table tr { display: block; background: #fff; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; padding: 12px; }
+            .activity-table td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f1f5f9 !important; text-align: right; }
+            .activity-table td:last-child { border-bottom: none !important; }
+            .activity-table td::before { content: attr(data-label); font-weight: 700; color: var(--text-muted); font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+        }
+
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1.1rem; }
+            .user-info span { display: none; }
+            .user-info strong { display: block; }
+        }
     </style>
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.querySelector('.sidebar-overlay');
+            if (!overlay) {
+                const newOverlay = document.createElement('div');
+                newOverlay.className = 'sidebar-overlay';
+                newOverlay.onclick = toggleSidebar;
+                document.body.appendChild(newOverlay);
+            }
+            sidebar.classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+    </script>
 </head>
 <body>
 
     <!-- Sidebar -->
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">
             Agency Portal
         </div>
@@ -124,6 +171,7 @@ $recent_scans = $conn->query("
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -132,6 +180,7 @@ $recent_scans = $conn->query("
             <li><a href="agency_settings.php" class="nav-link">Settings</a></li>
         </ul>
         <div class="sidebar-footer">
+            <a href="#" class="btn-change-password" onclick="document.getElementById('changePasswordModal').classList.add('show'); return false;" style="display: block; text-align: center; padding: 12px; background-color: #3b82f6; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; margin-bottom: 12px; transition: background 0.3s;">Change Password</a>
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
         </div>
     </aside>
@@ -140,7 +189,10 @@ $recent_scans = $conn->query("
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>Overview</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Overview</h2>
+            </div>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Agency'; ?></strong></span>
                 <span class="badge">AGENCY</span>
@@ -220,10 +272,10 @@ $recent_scans = $conn->query("
                                 <?php if ($recent_scans && $recent_scans->num_rows > 0): ?>
                                     <?php while($scan = $recent_scans->fetch_assoc()): ?>
                                         <tr>
-                                            <td><strong><?php echo htmlspecialchars($scan['guard_name']); ?></strong></td>
-                                            <td><?php echo htmlspecialchars($scan['checkpoint_name']); ?></td>
-                                            <td><span class="badge" style="background: #f1f5f9; color: #475569;"><?php echo htmlspecialchars($scan['site_name']); ?></span></td>
-                                            <td style="color: var(--text-muted);"><?php echo date('h:i:s A', strtotime($scan['scan_time'])); ?></td>
+                                            <td data-label="Guard"><strong><?php echo htmlspecialchars($scan['guard_name']); ?></strong></td>
+                                            <td data-label="Checkpoint"><?php echo htmlspecialchars($scan['checkpoint_name']); ?></td>
+                                            <td data-label="Site"><span class="badge" style="background: #f1f5f9; color: #475569;"><?php echo htmlspecialchars($scan['site_name']); ?></span></td>
+                                            <td data-label="Time" style="color: var(--text-muted);"><?php echo date('h:i:s A', strtotime($scan['scan_time'])); ?></td>
                                         </tr>
                                     <?php endwhile; ?>
                                 <?php else: ?>
@@ -252,14 +304,108 @@ $recent_scans = $conn->query("
         </div>
     </div>
 
+    <!-- Change Password Modal -->
+    <div class="modal-overlay" id="changePasswordModal">
+        <div class="modal-content" style="text-align: left;">
+            <h3 class="modal-title" style="text-align: center;">Change Password</h3>
+            <p class="modal-text" style="text-align: center;">Update your account password securely.</p>
+            
+            <div id="pwd_alert" style="display: none; padding: 10px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; text-align: center;"></div>
+
+            <form id="changePasswordForm">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">Current Password</label>
+                    <input type="password" id="current_password" required style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;">
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">New Password</label>
+                    <input type="password" id="new_password" required style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;">
+                </div>
+                <div style="margin-bottom: 24px;">
+                    <label style="display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px; color: #374151;">Confirm New Password</label>
+                    <input type="password" id="confirm_password" required style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px;">
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-modal btn-cancel" onclick="document.getElementById('changePasswordModal').classList.remove('show');">Cancel</button>
+                    <button type="submit" class="btn-modal btn-confirm" style="background: var(--primary);" id="btnSubmitPassword">Update Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         // Close modal when clicking outside
         window.onclick = function(event) {
             const modal = document.getElementById('logoutModal');
+            const pwdModal = document.getElementById('changePasswordModal');
             if (event.target == modal) {
                 modal.classList.remove('show');
             }
+            if (event.target == pwdModal) {
+                pwdModal.classList.remove('show');
+            }
         }
+
+        document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btnSubmitPassword');
+            const alertBox = document.getElementById('pwd_alert');
+            
+            const current_password = document.getElementById('current_password').value;
+            const new_password = document.getElementById('new_password').value;
+            const confirm_password = document.getElementById('confirm_password').value;
+
+            if (new_password !== confirm_password) {
+                alertBox.style.display = 'block';
+                alertBox.style.backgroundColor = '#fee2e2';
+                alertBox.style.color = '#dc2626';
+                alertBox.innerText = 'New password and confirm password do not match.';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = 'Updating...';
+            alertBox.style.display = 'none';
+
+            try {
+                const formData = new FormData();
+                formData.append('current_password', current_password);
+                formData.append('new_password', new_password);
+                formData.append('confirm_password', confirm_password);
+
+                const response = await fetch('api/change_password.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                alertBox.style.display = 'block';
+                if (result.status === 'success') {
+                    alertBox.style.backgroundColor = '#dcfce7';
+                    alertBox.style.color = '#16a34a';
+                    alertBox.innerText = result.message;
+                    document.getElementById('changePasswordForm').reset();
+                    setTimeout(() => {
+                        document.getElementById('changePasswordModal').classList.remove('show');
+                        alertBox.style.display = 'none';
+                    }, 2000);
+                } else {
+                    alertBox.style.backgroundColor = '#fee2e2';
+                    alertBox.style.color = '#dc2626';
+                    alertBox.innerText = result.message;
+                }
+            } catch (error) {
+                alertBox.style.display = 'block';
+                alertBox.style.backgroundColor = '#fee2e2';
+                alertBox.style.color = '#dc2626';
+                alertBox.innerText = 'An error occurred. Please try again.';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Update Password';
+            }
+        });
     </script>
     <!-- VERSION: 2.1 -->
 </body>

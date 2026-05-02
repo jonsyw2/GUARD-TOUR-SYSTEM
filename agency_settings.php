@@ -55,16 +55,35 @@ if ($_SESSION['user_level'] !== 'agency') {
         .btn-cancel:hover { background: #e5e7eb; }
         .btn-confirm { background: var(--primary); color: white; text-decoration: none; }
         .btn-confirm:hover { background: var(--primary-hover); }
+        /* Mobile Menu Toggle */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #1f2937; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 99; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; overflow-x: hidden; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 1000; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+        }
     </style>
 </head>
 <body>
-    <aside class="sidebar">
+    <div class="sidebar-overlay-bg" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+    <aside class="sidebar" id="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Agency Portal</div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -76,9 +95,16 @@ if ($_SESSION['user_level'] !== 'agency') {
             <a href="#" class="logout-btn" onclick="document.getElementById('logoutModal').classList.add('show'); return false;">Logout</a>
         </div>
     </aside>
+
     <main class="main-content">
         <header class="topbar">
-            <h2>Agency Settings</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>System Settings</h2>
+            </div>
+            <div class="user-info">
+                <span class="badge" style="background: #e0f2fe; color: #0369a1;">AGENCY CONFIG</span>
+            </div>
         </header>
         <div class="content-area">
             <div class="card" style="margin-bottom: 24px;">
@@ -267,12 +293,9 @@ if ($_SESSION['user_level'] !== 'agency') {
         // Initialize
         document.addEventListener('DOMContentLoaded', loadNotificationEmails);
 
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const logoutModal = document.getElementById('logoutModal');
-            const addNotifModal = document.getElementById('addNotifModal');
-            if (event.target == logoutModal) logoutModal.classList.remove('show');
-            if (event.target == addNotifModal) addNotifModal.classList.remove('show');
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('show');
+            document.getElementById('sidebarOverlay').classList.toggle('show');
         }
     </script>
 </body>
