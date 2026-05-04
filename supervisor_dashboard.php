@@ -89,28 +89,60 @@ if (!empty($filter_client)) {
 
 $where_sql = implode(" AND ", $where_clauses);
 
-$history_sql = "
-    SELECT 
-        s.scan_time,
-        s.shift,
-        s.tour_session_id,
-        c.name as checkpoint_name,
-        g.name as guard_name,
-        u.username as client_name,
-        ac.company_name,
-        ac.id as mapping_id,
-        s.status,
-        s.justification
+// Auto-migrate justification_photo_path if needed
+$conn->query("ALTER TABLE scans ADD COLUMN IF NOT EXISTS justification_photo_path VARCHAR(255) NULL AFTER justification");
+
+// Step 1: Fetch most recent tour_session_ids matching filters
+$session_where_sql = $where_sql;
+$sessions_sql = "
+    SELECT s.tour_session_id, MIN(s.scan_time) as tour_start
     FROM scans s
     JOIN checkpoints c ON s.checkpoint_id = c.id
     JOIN guards g ON s.guard_id = g.id
     JOIN agency_clients ac ON c.agency_client_id = ac.id
     JOIN users u ON ac.client_id = u.id
-    WHERE $where_sql
-    ORDER BY s.scan_time DESC
-    LIMIT 100
+    WHERE $session_where_sql
+      AND s.tour_session_id IS NOT NULL
+      AND s.tour_session_id != ''
+      AND s.tour_session_id != '0'
+    GROUP BY s.tour_session_id
+    ORDER BY tour_start DESC
+    LIMIT 30
 ";
-$history_res = $conn->query($history_sql);
+$sessions_res = $conn->query($sessions_sql);
+$session_ids = [];
+if ($sessions_res) {
+    while ($sr = $sessions_res->fetch_assoc()) {
+        $session_ids[] = "'" . $conn->real_escape_string($sr['tour_session_id']) . "'";
+    }
+}
+
+// Step 2: Fetch ALL scans for those sessions
+$history_res = null;
+if (!empty($session_ids)) {
+    $session_ids_str = implode(',', $session_ids);
+    $history_sql = "
+        SELECT
+            s.scan_time,
+            s.shift,
+            s.tour_session_id,
+            c.name as checkpoint_name,
+            g.name as guard_name,
+            u.username as client_name,
+            ac.company_name,
+            ac.id as mapping_id,
+            s.status,
+            s.justification
+        FROM scans s
+        JOIN checkpoints c ON s.checkpoint_id = c.id
+        JOIN guards g ON s.guard_id = g.id
+        JOIN agency_clients ac ON c.agency_client_id = ac.id
+        JOIN users u ON ac.client_id = u.id
+        WHERE s.tour_session_id IN ($session_ids_str)
+        ORDER BY s.tour_session_id ASC, s.scan_time ASC
+    ";
+    $history_res = $conn->query($history_sql);
+}
 
 ?>
 <!DOCTYPE html>
@@ -292,38 +324,51 @@ $history_res = $conn->query($history_sql);
         <div class="table-container" style="border: none;">
             <?php 
             if ($history_res && $history_res->num_rows > 0): 
-                // Process data into groups
+                // Process data into groups — shift_key is locked to the FIRST scan
+                // of each tour_session_id, so a scan with a wrong 'shift' value
+                // cannot split the same tour into a separate shift group.
                 $grouped = [];
+                $tour_shift_map = []; // tour_session_id => shift_key (set from first scan)
+
                 while($row = $history_res->fetch_assoc()) {
-                    $ts = strtotime($row['scan_time']);
-                    $s_date = date('Y-m-d', $ts);
-                    $hour = (int)date('H', $ts);
-                    $s_type = $row['shift'] ?? 'Day Shift';
-                    
-                    if ($s_type === 'Night Shift' && $hour < 6) {
-                        $s_date = date('Y-m-d', strtotime($s_date . ' -1 day'));
+                    $tour_session_id = $row['tour_session_id'] ?? '';
+
+                    if (!empty($tour_session_id) && isset($tour_shift_map[$tour_session_id])) {
+                        // Already registered — reuse the same shift group
+                        $shift_key = $tour_shift_map[$tour_session_id];
+                        $tour_id   = $tour_session_id;
+                    } else {
+                        // First scan for this tour — derive date/shift from scan_time (authoritative)
+                        $ts     = strtotime($row['scan_time']);
+                        $s_date = date('Y-m-d', $ts);
+                        $hour   = (int)date('H', $ts);
+                        $s_type = ($hour >= 6 && $hour < 18) ? 'Day Shift' : 'Night Shift';
+                        if ($s_type === 'Night Shift' && $hour < 6) {
+                            $s_date = date('Y-m-d', strtotime($s_date . ' -1 day'));
+                        }
+                        $shift_key = $s_date . '_' . $s_type;
+                        $tour_id   = !empty($tour_session_id) ? $tour_session_id : ('adhoc_' . $s_date . '_' . $s_type);
+
+                        if (!empty($tour_session_id)) {
+                            $tour_shift_map[$tour_session_id] = $shift_key;
+                        }
+                        if (!isset($grouped[$shift_key])) {
+                            $grouped[$shift_key] = [
+                                'date'  => $s_date,
+                                'shift' => $s_type,
+                                'tours' => []
+                            ];
+                        }
                     }
-                    
-                    $shift_key = $s_date . '_' . $s_type;
-                    $tour_id = ($row['tour_session_id'] ?? '') ?: 'adhoc_' . $s_date . '_' . $s_type;
-                    
-                    if (!isset($grouped[$shift_key])) {
-                        $grouped[$shift_key] = [
-                            'date' => $s_date,
-                            'shift' => $s_type,
-                            'tours' => []
-                        ];
-                    }
+
                     if (!isset($grouped[$shift_key]['tours'][$tour_id])) {
                         $grouped[$shift_key]['tours'][$tour_id] = [
                             'start_time' => $row['scan_time'],
-                            'scans' => []
+                            'mapping_id' => $row['mapping_id'] ?? '',
+                            'scans'      => []
                         ];
                     }
                     $grouped[$shift_key]['tours'][$tour_id]['scans'][] = $row;
-                    if (!isset($grouped[$shift_key]['tours'][$tour_id]['mapping_id'])) {
-                        $grouped[$shift_key]['tours'][$tour_id]['mapping_id'] = $row['mapping_id'];
-                    }
                 }
 
                 foreach($grouped as $sk => $s_data):

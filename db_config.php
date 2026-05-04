@@ -32,4 +32,3 @@ $conn->query("SET time_zone = '+08:00'");
 
 // Secret key for JWT signing.
 define('JWT_SECRET_KEY', 'guard_tour_super_secret_key_2026!');
-?>

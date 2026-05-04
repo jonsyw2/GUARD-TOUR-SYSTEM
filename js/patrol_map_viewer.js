@@ -132,19 +132,13 @@ class PatrolMapViewer {
         };
 
         const segmentColor = {
-            scanned: '#60a5fa', // Blue
-            missed: '#ef4444', // Red (covers both missed and justified)
+            scanned: '#10b981', // Green
+            missed: '#ef4444', // Red
             pending: '#cbd5e1', // Grey
         };
 
-        // Build Sequence & Close Loop
-        const startIdx = this.pathData.findIndex(p => p.is_zero_checkpoint);
+        // Build Sequence
         const drawSequence = [...this.pathData];
-        const startPoint = startIdx >= 0 ? this.pathData[startIdx] : this.pathData[0];
-        const lastPoint = drawSequence[drawSequence.length - 1];
-        if (lastPoint.checkpoint_id !== startPoint.checkpoint_id && drawSequence.length > 1) {
-            drawSequence.push(startPoint);
-        }
 
         // 1. Draw Paths
         for (let i = 0; i < drawSequence.length - 1; i++) {
@@ -176,11 +170,20 @@ class PatrolMapViewer {
         this.pathData.forEach(p => {
             const pos = project(p.visual_pos_x, p.visual_pos_y);
             const state = getState(p.status);
+            
+            // Format time if available (2026-04-22 10:30:00 -> 10:30 AM)
+            let timeStr = '';
+            if (p.scan_time) {
+                try {
+                    const date = new Date(p.scan_time.replace(/-/g, "/")); // Cross-browser safe
+                    timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+                } catch(e) { timeStr = ''; }
+            }
 
             if (state === 'scanned') {
-                this.drawScannedNode(pos.x, pos.y, p.checkpoint_name);
+                this.drawScannedNode(pos.x, pos.y, p.checkpoint_name, timeStr);
             } else if (state === 'missed') {
-                this.drawMissedNode(pos.x, pos.y, p.checkpoint_name);
+                this.drawMissedNode(pos.x, pos.y, p.checkpoint_name, timeStr);
             } else {
                 this.drawPlaceholderNode(pos.x, pos.y, p.checkpoint_name);
             }
@@ -201,23 +204,23 @@ class PatrolMapViewer {
         this.ctx.fill();
     }
 
-    drawScannedNode(x, y, label) {
+    drawScannedNode(x, y, label, time = '') {
         this.ctx.fillStyle = '#10b981';
         this.ctx.beginPath(); this.ctx.arc(x, y, 16, 0, Math.PI * 2); this.ctx.fill();
         this.ctx.strokeStyle = 'white'; this.ctx.lineWidth = 3; this.ctx.beginPath();
         this.ctx.moveTo(x - 6, y); this.ctx.lineTo(x - 2, y + 5); this.ctx.lineTo(x + 7, y - 6);
         this.ctx.stroke();
-        this.drawLabel(x, y, label);
+        this.drawLabel(x, y, label, time);
     }
 
-    drawMissedNode(x, y, label) {
+    drawMissedNode(x, y, label, time = '') {
         this.ctx.fillStyle = '#ef4444';
         this.ctx.beginPath(); this.ctx.arc(x, y, 16, 0, Math.PI * 2); this.ctx.fill();
         this.ctx.strokeStyle = 'white'; this.ctx.lineWidth = 3; const s = 6;
         this.ctx.beginPath(); this.ctx.moveTo(x - s, y - s); this.ctx.lineTo(x + s, y + s);
         this.ctx.moveTo(x + s, y - s); this.ctx.lineTo(x - s, y + s);
         this.ctx.stroke();
-        this.drawLabel(x, y, label);
+        this.drawLabel(x, y, label, time);
     }
 
     drawPlaceholderNode(x, y, label) {
@@ -227,10 +230,18 @@ class PatrolMapViewer {
         this.drawLabel(x, y, label);
     }
 
-    drawLabel(x, y, text) {
+    drawLabel(x, y, text, time = '') {
+        // Main Label
         this.ctx.fillStyle = '#475569';
         this.ctx.font = '700 12px Inter, sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.fillText(text, x, y + 34);
+
+        // Timestamp
+        if (time) {
+            this.ctx.fillStyle = '#64748b';
+            this.ctx.font = '500 10px Inter, sans-serif';
+            this.ctx.fillText(time, x, y + 48);
+        }
     }
 }
