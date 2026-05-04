@@ -86,10 +86,10 @@ if (isset($_GET['ajax_agency_data'])) {
             $conn->query($sqlSite);
             
             // 4. Handle auto-deletion if limit is decreased below current usage
-            if ($add_qr > 0) {
+            if ($add_qr >= 0) {
                 // Get all user-added checkpoints ordered by creation (most recent first) across all sites
                 $qr_sql = "SELECT id FROM checkpoints 
-                           WHERE is_zero_checkpoint = 0 
+                           WHERE (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL) 
                            AND agency_client_id IN (SELECT id FROM agency_clients WHERE client_id = $target_client_id)
                            ORDER BY created_at DESC, id DESC";
                 $qr_res = $conn->query($qr_sql);
@@ -196,20 +196,42 @@ if (isset($_GET['ajax_agency_data'])) {
                     $tryUsername = $baseUsername;
                     $suffix = 1;
                     // Ensure username uniqueness
-                    while ($conn->query("SELECT id FROM users WHERE username = '" . $conn->real_escape_string($tryUsername) . "' LIMIT 1")->num_rows > 0) {
+                    while (($checkRes = $conn->query("SELECT id FROM users WHERE username = '" . $conn->real_escape_string($tryUsername) . "' LIMIT 1")) && $checkRes->num_rows > 0) {
                         $tryUsername = $baseUsername . '_' . $suffix++;
                     }
-                    $placeholderPw = password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT);
+                    
+                    // Fallback for older PHP versions or environments without random_bytes
+                    $randomString = '';
+                    if (function_exists('random_bytes')) {
+                        try {
+                            $randomString = bin2hex(random_bytes(8));
+                        } catch (Exception $e) {
+                            $randomString = md5(uniqid(mt_rand(), true));
+                        }
+                    } else {
+                        $randomString = md5(uniqid(mt_rand(), true));
+                    }
+                    
+                    $placeholderPw = password_hash($randomString, PASSWORD_DEFAULT);
                     if ($conn->query("INSERT INTO users (username, password, user_level) VALUES ('" . $conn->real_escape_string($tryUsername) . "', '$placeholderPw', 'client')")) {
                         $newClientId = $conn->insert_id;
                         $placeholderName = 'Client ' . $clientNum;
-                        $conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, qr_limit, guard_limit, inspector_limit, client_limit, supervisor_limit) 
-                                       VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "', 0, 0, 0, 0, 0)");
+                        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, qr_limit, guard_limit, inspector_limit, client_limit, supervisor_limit) 
+                                       VALUES ($agency_id, $newClientId, '" . $conn->real_escape_string($placeholderName) . "', 0, 0, 0, 0, 0)")) {
+                            $response['warnings'][] = "Failed to create mapping for placeholder client $clientNum: " . $conn->error;
+                        }
                         $clientNum++;
+                    } else {
+                        $response['warnings'][] = "Failed to create user account for slot $slot: " . $conn->error;
                     }
                 }
             }
-            $response = ['success' => true, 'message' => 'Agency client limit updated!'];
+            if (!empty($response['warnings'])) {
+                $response['success'] = true; // Still success but with warnings
+                $response['message'] = "Limit updated, but some placeholders could not be created: " . implode('; ', $response['warnings']);
+            } else {
+                $response = ['success' => true, 'message' => 'Agency client limit updated!'];
+            }
         } else {
             $response = ['success' => false, 'message' => "SQL Error: " . $conn->error];
         }
@@ -656,15 +678,16 @@ $supervisors_result = $conn->query($supervisors_sql);
 
 // Fetch all agency clients for JS mapping (for dynamic client selection)
 $agency_clients_raw = $conn->query("
-    SELECT ac.agency_id, ac.client_id, c.username as client_name 
+    SELECT ac.agency_id, ac.client_id, ac.company_name, c.username as client_name 
     FROM agency_clients ac 
     JOIN users c ON ac.client_id = c.id
 ");
 $agency_clients_map = [];
 while ($ac_row = $agency_clients_raw->fetch_assoc()) {
+    $displayName = (!empty($ac_row['company_name'])) ? $ac_row['company_name'] : $ac_row['client_name'];
     $agency_clients_map[$ac_row['agency_id']][] = [
         'id' => $ac_row['client_id'],
-        'name' => $ac_row['client_name']
+        'name' => $displayName
     ];
 }
 $agency_clients_json = json_encode($agency_clients_map);
@@ -702,7 +725,7 @@ include 'admin_layout/sidebar.php';
             </div>
 
             <style>
-                .tab-nav { display: flex; gap: 8px; margin-bottom: 32px; background: #e2e8f0; padding: 6px; border-radius: var(--radius-lg); width: fit-content; }
+                .tab-nav { display: flex; gap: 8px; margin-bottom: 32px; background: #e2e8f0; padding: 6px; border-radius: var(--radius-lg); width: fit-content; flex-wrap: wrap; }
                 .tab-btn { padding: 10px 24px; border: none; background: transparent; color: var(--text-muted); font-weight: 600; cursor: pointer; border-radius: var(--radius-md); transition: all 0.2s; }
                 .tab-btn.active { background: var(--card-bg); color: var(--primary); box-shadow: var(--shadow); }
                 .tab-pane { display: none; animation: fadeIn 0.4s ease; }
@@ -715,12 +738,6 @@ include 'admin_layout/sidebar.php';
                 .unassign-link { color: var(--danger); font-weight: 600; text-decoration: none; font-size: 0.85rem; padding: 6px 12px; border-radius: 6px; transition: all 0.2s; }
                 .unassign-link:hover { background: #fee2e2; }
 
-                tbody tr { cursor: pointer; transition: background 0.2s; }
-                tbody tr:hover { background-color: #f8fafc !important; }
-
-                tbody tr { cursor: pointer; transition: background 0.2s; }
-                tbody tr:hover { background-color: #f8fafc !important; }
-
                 /* ── agency badge ── */
                 .badge-agency { display: inline-block; background: #ede9fe; color: #6d28d9;
                                 padding: 3px 10px; border-radius: 20px; font-size: 0.78rem;
@@ -730,6 +747,28 @@ include 'admin_layout/sidebar.php';
                                 padding: 3px 10px; border-radius: 20px; font-size: 0.78rem;
                                 font-weight: 600; margin: 2px 2px 2px 0; }
                 .badge-none   { color: #9ca3af; font-size: 0.82rem; font-style: italic; }
+
+                @media (max-width: 1024px) {
+                    .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+                }
+
+                @media (max-width: 768px) {
+                    .tab-nav { width: 100%; display: flex; }
+                    .tab-btn { flex: 1; text-align: center; padding: 10px 12px; font-size: 0.85rem; }
+                    .card-header { flex-direction: column; align-items: stretch !important; gap: 12px; }
+                    .card-header .btn { width: 100%; }
+                    
+                    /* Table to Card Layout */
+                    thead { display: none; }
+                    tr { display: block; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+                    td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; width: 100% !important; border-bottom: 1px solid #f1f5f9 !important; text-align: right; }
+                    td:last-child { border-bottom: none !important; flex-direction: row; justify-content: flex-end; gap: 8px; }
+                    td::before { content: attr(data-label); display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; text-align: left; }
+                    
+                    .badge-client { font-size: 0.7rem; padding: 2px 8px; }
+                    .ql-modal-content { width: 95% !important; padding: 16px !important; }
+                    .ql-body-grid { grid-template-columns: 1fr !important; }
+                }
             </style>
 
             <!-- TAB: AGENCIES -->
@@ -757,27 +796,27 @@ include 'admin_layout/sidebar.php';
                                 if ($agencies_result->num_rows > 0): 
                                     while($row = $agencies_result->fetch_assoc()): ?>
                                         <tr id="agency_row_<?php echo $row['id']; ?>" onclick='openQuickLinksModal(<?php echo htmlspecialchars(json_encode($row), ENT_QUOTES); ?>)'>
-                                            <td>#<?php echo $row['id']; ?></td>
-                                            <td>
+                                            <td data-label="ID">#<?php echo $row['id']; ?></td>
+                                            <td data-label="Agency Name">
                                                 <strong><?php echo htmlspecialchars($row['agency_name'] ?: $row['username']); ?></strong>
                                                 <div style="font-size: 0.75rem; color: #64748b; margin-top: 4px;">
                                                     @<?php echo htmlspecialchars($row['username']); ?>
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td data-label="Total Clients">
                                                 <div style="font-weight: 600; font-size: 1rem; color: var(--primary);">
                                                     <span id="table_current_<?php echo $row['id']; ?>"><?php echo $row['current_clients']; ?></span> / 
                                                     <span id="table_max_<?php echo $row['id']; ?>"><?php echo $row['client_limit']; ?></span>
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td data-label="Status">
                                                 <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
                                                     <span style="color: #ef4444; font-weight: 600;">● Suspended</span>
                                                 <?php else: ?>
                                                     <span style="color: var(--success); font-weight: 600;">● Active</span>
                                                 <?php endif; ?>
                                             </td>
-                                            <td style="display: flex; gap: 8px;">
+                                            <td data-label="Control" style="display: flex; gap: 8px;">
                                                 <button class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;" onclick='event.stopPropagation(); openEditModal(<?php echo htmlspecialchars(json_encode($row)); ?>)'>Edit</button>
                                                 <button class="btn" style="padding: 6px 12px; font-size: 0.8rem; background: #fee2e2; color: #991b1b; border: none; width: auto;" onclick="event.stopPropagation(); openDeleteModal(<?php echo $row['id']; ?>, '<?php echo addslashes($row['agency_name'] ?: $row['username']); ?>')">Delete</button>
                                             </td>
@@ -816,10 +855,10 @@ include 'admin_layout/sidebar.php';
                                 <?php if ($supervisors_result && $supervisors_result->num_rows > 0): 
                                     while($sup = $supervisors_result->fetch_assoc()): ?>
                                     <tr>
-                                        <td><strong><?php echo htmlspecialchars($sup['name']); ?></strong></td>
-                                        <td><code><?php echo htmlspecialchars($sup['username']); ?></code></td>
-                                        <td><span class="badge-agency"><?php echo htmlspecialchars($sup['agency_name']); ?></span></td>
-                                        <td>
+                                        <td data-label="Name"><strong><?php echo htmlspecialchars($sup['name']); ?></strong></td>
+                                        <td data-label="Username"><code><?php echo htmlspecialchars($sup['username']); ?></code></td>
+                                        <td data-label="Agency"><span class="badge-agency"><?php echo htmlspecialchars($sup['agency_name']); ?></span></td>
+                                        <td data-label="Assigned Clients">
                                             <?php if ($sup['assigned_clients']): ?>
                                                 <?php foreach (explode(', ', $sup['assigned_clients']) as $cn): ?>
                                                     <span class="badge-client"><?php echo htmlspecialchars($cn); ?></span>
@@ -828,7 +867,7 @@ include 'admin_layout/sidebar.php';
                                                 <span class="badge-none">None</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td style="display: flex; gap: 8px;">
+                                        <td data-label="Control" style="display: flex; gap: 8px;">
                                             <button type="button" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem; width: auto;" onclick='openSupervisorEditModal(<?php echo json_encode($sup); ?>)'>Edit</button>
                                             <button type="button" class="unassign-link" style="border:none; background:none; cursor:pointer;" onclick="openSupervisorDeleteModal(<?php echo $sup['id']; ?>, '<?php echo addslashes($sup['name']); ?>')">Delete</button>
                                         </td>
@@ -922,7 +961,10 @@ include 'admin_layout/sidebar.php';
                             <option value="all" style="font-weight: bold; color: var(--primary);">All Agency (Global Access)</option>
                             <?php 
                             $agencies_result->data_seek(0);
-                            while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                            while($a = $agencies_result->fetch_assoc()) {
+                                $disp = (!empty($a['agency_name'])) ? $a['agency_name'] : $a['username'];
+                                echo "<option value='{$a['id']}'>".htmlspecialchars($disp)."</option>";
+                            }
                             ?>
                         </select>
                     </div>
@@ -1116,7 +1158,10 @@ include 'admin_layout/sidebar.php';
                         <option value="all" style="font-weight: bold; color: var(--primary);">All Agency (Global Access)</option>
                         <?php 
                         $agencies_result->data_seek(0);
-                        while($a = $agencies_result->fetch_assoc()) echo "<option value='{$a['id']}'>".htmlspecialchars($a['username'])."</option>";
+                        while($a = $agencies_result->fetch_assoc()) {
+                            $disp = (!empty($a['agency_name'])) ? $a['agency_name'] : $a['username'];
+                            echo "<option value='{$a['id']}'>".htmlspecialchars($disp)."</option>";
+                        }
                         ?>
                     </select>
                 </div>
@@ -1393,15 +1438,25 @@ include 'admin_layout/sidebar.php';
                 const groupOrder = [];
                 data.forEach(item => {
                     qlSiteDataMap[item.id] = item; // store by mapping id
-                    if (!groups[item.user_id]) {
-                        groups[item.user_id] = { user_id: item.user_id, name: item.company_name || item.name, status: item.status, sites: [] };
-                        groupOrder.push(item.user_id);
+                    
+                    // Grouping by company name (fallback to username) to ensure sites with same name are merged
+                    const groupKey = (item.company_name || item.name || "Unknown").trim().toLowerCase();
+                    
+                    if (!groups[groupKey]) {
+                        groups[groupKey] = { 
+                            user_id: item.user_id, 
+                            name: item.company_name || item.name, 
+                            status: item.status, 
+                            sites: [] 
+                        };
+                        groupOrder.push(groupKey);
                     }
-                    groups[item.user_id].sites.push(item);
+                    groups[groupKey].sites.push(item);
                 });
 
-                groupOrder.forEach(uid => {
-                    const group = groups[uid];
+                groupOrder.forEach(key => {
+                    const group = groups[key];
+                    const uid = group.user_id;
                     const isSuspended = group.status === 'suspended';
                     const statusTag = isSuspended ? `<span style="color:#ef4444; font-size: 0.7rem; font-weight:700;">[SUSPENDED]</span>` : '';
 

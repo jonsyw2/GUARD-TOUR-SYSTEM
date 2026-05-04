@@ -5,6 +5,7 @@
 $current_page = basename($_SERVER['PHP_SELF']);
 ?>
 <aside class="sidebar">
+    <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
     <div class="sidebar-header">ADMIN DASHBOARD</div>
     <ul class="nav-links">
         <li>

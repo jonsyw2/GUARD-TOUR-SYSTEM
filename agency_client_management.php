@@ -493,7 +493,8 @@ if ($inspectors_res) {
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
+        /* Sidebar Styles */
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: transform 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -502,44 +503,85 @@ if ($inspectors_res) {
         .logout-btn { display: block; text-align: center; padding: 12px; background-color: #ef4444; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.3s; }
         .logout-btn:hover { background-color: #dc2626; }
 
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; }
+        /* Main Content Styles */
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
+        .user-info { display: flex; align-items: center; gap: 12px; }
+        .badge { background: #dbeafe; color: #3b82f6; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
 
-        .content-area { padding: 32px; max-width: 1220px; margin: 0 auto; width: 100%; }
-        
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
 
-        .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-weight: 500; }
-        .alert-success { background-color: #d1fae5; color: #065f46; border: 1px solid #34d399; }
-        .alert-error { background-color: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
+        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); margin-bottom: 24px;}
+        .card-header { font-size: 1.125rem; font-weight: 600; color: #111827; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
 
-        .card { background: white; padding: 28px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-        .card-header { font-size: 1.125rem; font-weight: 600; margin-bottom: 20px; border-bottom: 1px solid #e5e7eb; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-        tbody tr { cursor: pointer; transition: background 0.2s; }
-        tbody tr:hover { background-color: #f8fafc; }
-        th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.875rem; }
-        
         .btn-sm { height: 32px; padding: 0 12px; font-size: 0.75rem; border-radius: 6px; cursor: pointer; border: 1px solid transparent; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; transition: all 0.2s; }
         .btn-primary { background: #10b981; color: white; border: none; }
-        .btn-outline { background: white; border: 1.5px solid #e2e8f0; color: #475569; }
-        .btn-outline:hover { background: #f9fafb; }
+        .btn-primary:hover { background-color: #059669; }
 
-        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
-        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; position: relative; text-align: center; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); max-height: 90vh; overflow-y: auto; }
-        .modal.show { display: flex; }
+        /* Table */
+        .table-container { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 16px; text-align: left; border-bottom: 1px solid #f1f5f9; }
+        th { background-color: #f9fafb; font-weight: 600; color: #4b5563; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        td { color: #1f2937; font-size: 0.95rem; }
+        tbody tr:hover { background-color: #f9fafb; cursor: pointer; }
         
+        .status-badge { padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+        .status-active { background-color: #d1fae5; color: #059669; }
+        .status-suspended { background-color: #fee2e2; color: #dc2626; }
+        
+        /* Modal Styles */
+        .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(17, 24, 39, 0.7); z-index: 2000; backdrop-filter: blur(4px); overflow-y: auto; padding: 20px; }
+        .modal.show { display: flex; align-items: flex-start; justify-content: center; }
+        .modal-content { background: white; padding: 32px; border-radius: 12px; width: 100%; max-width: 500px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); position: relative; margin: auto; animation: modalFadeIn 0.3s ease-out forwards; text-align: left; }
+        @keyframes modalFadeIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .modal-close { position: absolute; top: 12px; right: 12px; font-size: 24px; background: none; border: none; color: #9ca3af; cursor: pointer; transition: color 0.2s; line-height: 1; padding: 4px; border-radius: 4px; }
+        .modal-close:hover { color: #111827; background: #f3f4f6; }
+
+        /* Form Controls */
         .form-group { margin-bottom: 16px; }
-        .form-label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 8px; }
-        .form-control { width: 100%; padding: 10px 14px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; }
+        .form-label { display: block; font-size: 0.85rem; font-weight: 600; color: #4b5563; margin-bottom: 8px; }
+        .form-control { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; transition: border-color 0.2s; }
+        .form-control:focus { outline: none; border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
+
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .col-span-2 { grid-column: span 2; }
+
+        /* Mobile Menu Toggle */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            td:last-child { border-bottom: none !important; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+            td::before { content: attr(data-label); font-weight: 700; color: #64748b; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+            .user-info span { display: none; }
+            .user-info strong { display: block; }
+            .form-grid { grid-template-columns: 1fr; }
+            .col-span-2 { grid-column: span 1; }
+        }
     </style>
 </head>
 <body>
 
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Agency Portal</div>
         <ul class="nav-links">
             <li><a href="agency_dashboard.php" class="nav-link">Dashboard</a></li>
@@ -547,6 +589,7 @@ if ($inspectors_res) {
 
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -561,7 +604,10 @@ if ($inspectors_res) {
 
     <main class="main-content">
         <header class="topbar">
-            <h2>Client Profile Management</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Client Profile Management</h2>
+            </div>
         </header>
 
         <div class="content-area">
@@ -607,16 +653,11 @@ if ($inspectors_res) {
                                 $total_slots_used += 1;
                          ?>
                                 <tr onclick='openSummaryModal(<?php echo htmlspecialchars(json_encode($row)); ?>)'>
-                                    <td><?php echo $display_row_index++; ?></td>
-                                    <td>
-                                        <div style="display: flex; align-items: center; gap: 12px;">
-                                            <?php if ($row['company_logo']): ?>
-                                                <img src="<?php echo htmlspecialchars($row['company_logo']); ?>" alt="Logo" style="width: 40px; height: 40px; object-fit: contain; border-radius: 4px; border: 1px solid #e5e7eb;">
-                                            <?php else: ?>
-                                                <div style="width: 40px; height: 40px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: #9ca3af; font-size: 0.75rem;">No Logo</div>
-                                            <?php endif; ?>
-                                            <div>
-                                                <div style="font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                    <td data-label="#">#<?php echo $display_row_index++; ?></td>
+                                    <td data-label="Company Details">
+                                        <div style="display: flex; align-items: center; gap: 12px; justify-content: flex-end;">
+                                            <div style="text-align: right;">
+                                                <div style="font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px; justify-content: flex-end;">
                                                     <?php echo $row['company_name'] ?: 'Client ' . ($client_index + 1); ?>
                                                     <?php if (($row['status'] ?? 'active') === 'suspended'): ?>
                                                         <span style="font-size: 0.65rem; background: #fee2e2; color: #ef4444; padding: 2px 6px; border-radius: 4px; font-weight: 700; text-transform: uppercase;">Suspended</span>
@@ -624,9 +665,14 @@ if ($inspectors_res) {
                                                 </div>
                                                 <div style="font-size: 0.75rem; color: #6b7280; margin-top: 2px;">Account: <strong><?php echo htmlspecialchars($row['client_username']); ?></strong></div>
                                             </div>
+                                            <?php if ($row['company_logo']): ?>
+                                                <img src="<?php echo htmlspecialchars($row['company_logo']); ?>" alt="Logo" style="width: 40px; height: 40px; object-fit: contain; border-radius: 4px; border: 1px solid #e5e7eb;">
+                                            <?php else: ?>
+                                                <div style="width: 40px; height: 40px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: #9ca3af; font-size: 0.75rem;">No Logo</div>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
-                                    <td style="white-space: nowrap;">
+                                    <td data-label="QR Checkpoints" style="white-space: nowrap;">
                                         <?php if ((int)$row['client_limit'] > 0): ?>
                                             <span style="font-weight: 600; color: #10b981;">
                                                 Active: <?php echo $row['qr_countByClient']; ?> / <?php echo $row['qr_limit']; ?>
@@ -635,7 +681,7 @@ if ($inspectors_res) {
                                             <span style="font-size: 0.75rem; color: #9ca3af; font-style: italic;">No Sites Enabled</span>
                                         <?php endif; ?>
                                     </td>
-                                    <td style="white-space: nowrap;">
+                                    <td data-label="Guards Assigned" style="white-space: nowrap;">
                                         <?php if ((int)$row['client_limit'] > 0): ?>
                                             <span style="font-weight: 600; color: #10b981;">
                                                 Active: <?php echo $row['current_guards']; ?> / <?php echo $row['guard_limit']; ?>
@@ -644,7 +690,7 @@ if ($inspectors_res) {
                                             <span style="font-size: 0.75rem; color: #9ca3af; font-style: italic;">---</span>
                                         <?php endif; ?>
                                     </td>
-                                    <td style="white-space: nowrap;">
+                                    <td data-label="Inspectors" style="white-space: nowrap;">
                                         <?php if ((int)$row['client_limit'] > 0): ?>
                                             <span style="font-weight: 600; color: #10b981;">
                                                 Active: <?php echo $row['current_inspectors']; ?> / <?php echo $row['inspector_limit']; ?>
@@ -653,8 +699,8 @@ if ($inspectors_res) {
                                             <span style="font-size: 0.75rem; color: #9ca3af; font-style: italic;">---</span>
                                         <?php endif; ?>
                                     </td>
-                                     <td>
-                                         <div style="display: flex; gap: 8px; justify-content: flex-start; align-items: center;" onclick="event.stopPropagation()">
+                                     <td data-label="Actions">
+                                         <div style="display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap;" onclick="event.stopPropagation()">
                                             <?php if ((int)$row['client_limit'] > 0): ?>
                                                 <button class="btn-sm btn-primary" onclick="openGuardModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Guard</button>
                                                 <button class="btn-sm" style="background:#4f46e5; color:white; border:none;" onclick="openInspectorModal(<?php echo $row['mapping_id']; ?>, '<?php echo addslashes($row['client_username']); ?>')">Assign Inspector</button>
@@ -697,6 +743,27 @@ if ($inspectors_res) {
             </div>
         </main>
 
+    <script>
+        function toggleSidebar() {
+            const sidebar = document.querySelector('.sidebar');
+            const overlay = document.querySelector('.sidebar-overlay');
+            if (!overlay) {
+                const newOverlay = document.createElement('div');
+                newOverlay.className = 'sidebar-overlay';
+                newOverlay.onclick = toggleSidebar;
+                document.body.appendChild(newOverlay);
+            }
+            sidebar.classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
+        function toggleSupervisorFields() {
+            const chk = document.getElementById('create_supervisor_chk');
+            const fields = document.getElementById('supervisor_fields');
+            fields.style.display = chk.checked ? 'block' : 'none';
+        }
+    </script>
+
     <!-- Modal: Add New Client -->
     <div id="addClientModal" class="modal">
         <div class="modal-content" style="max-width: 800px; text-align: left;">
@@ -705,27 +772,27 @@ if ($inspectors_res) {
                 <button type="button" class="btn-sm btn-outline" onclick="closeModal('addClientModal')" style="border:none; font-size: 1.5rem; line-height: 1;">&times;</button>
             </div>
                     <form action="agency_client_management.php" method="POST" enctype="multipart/form-data" autocomplete="off">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-                            <div class="form-group" style="grid-column: span 2;">
+                        <div class="form-grid" style="gap: 24px;">
+                            <div class="form-group col-span-2">
                                 <label class="form-label">Client Username</label>
                                 <input type="text" name="client_username" class="form-control" placeholder="Account login username" required autocomplete="none">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2;">
+                            <div class="form-group col-span-2">
                                 <label class="form-label">Account Password</label>
                                 <input type="password" name="client_password" class="form-control" placeholder="••••••••" required autocomplete="new-password">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                            <div class="form-group col-span-2" style="border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
                                 <label class="form-label" style="font-weight: 700; color: #111827;">COMPANY PROFILE DETAILS</label>
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2;">
+                            <div class="form-group col-span-2">
                                 <label class="form-label">Company Name</label>
                                 <input type="text" name="company_name" class="form-control" placeholder="e.g. Acme Corp" required>
                             </div>
                             
-                            <div class="form-group" style="grid-column: span 2;">
+                            <div class="form-group col-span-2">
                                 <label class="form-label">Company Address</label>
                                 <textarea name="company_address" class="form-control" placeholder="Full Business Address" rows="3"></textarea>
                             </div>
@@ -740,12 +807,12 @@ if ($inspectors_res) {
                                 <input type="email" name="email_address" class="form-control" placeholder="contact@company.com">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2;">
+                            <div class="form-group col-span-2">
                                 <label class="form-label">Website/Social Link (Optional)</label>
                                 <input type="text" name="website_link" class="form-control" placeholder="FB, Viber, or Website URL">
                             </div>
 
-                            <div style="grid-column: span 2; margin-top: 16px; border-top: 1px solid #f3f4f6; padding-top: 24px; margin-bottom: 8px;">
+                            <div class="col-span-2" style="margin-top: 16px; border-top: 1px solid #f3f4f6; padding-top: 24px; margin-bottom: 8px;">
                                 <h4 style="font-size: 0.95rem; font-weight: 700; color: #111827; text-transform: uppercase;">Contact Person Details</h4>
                             </div>
 
@@ -759,14 +826,14 @@ if ($inspectors_res) {
                                 <input type="text" name="contact_person_position" class="form-control" placeholder="Job Title">
                             </div>
 
-                            <div class="form-group" style="grid-column: span 2;">
+                            <div class="form-group col-span-2">
                                 <label class="form-label">Contact No (Contact Person)</label>
                                 <input type="text" name="contact_person_no" class="form-control" placeholder="Personal or Office Phone">
                             </div>
 
 
 
-                            <div class="form-group" style="grid-column: span 2; border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
+                            <div class="form-group col-span-2" style="border-top: 2px solid #f3f4f6; padding-top: 24px; margin-top: 8px;">
                                 <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 4px;">
                                     <input type="checkbox" name="create_supervisor" id="create_supervisor_chk" style="width: 20px; height: 20px; cursor: pointer;" onchange="toggleSupervisorFields()">
                                     <label for="create_supervisor_chk" style="font-weight: 700; color: #111827; cursor: pointer; margin-bottom: 0;">Create Supervisor Account for this Client?</label>
@@ -774,9 +841,9 @@ if ($inspectors_res) {
                                 <p style="font-size: 0.8rem; color: #6b7280; padding-left: 32px;">Register a dedicated supervisor and auto-assign them to this client site.</p>
                             </div>
 
-                            <div id="supervisor_fields" style="grid-column: span 2; display: none; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 8px;">
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                                    <div class="form-group" style="grid-column: span 2;">
+                            <div id="supervisor_fields" class="col-span-2" style="display: none; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px dashed #cbd5e1; margin-top: 8px;">
+                                <div class="form-grid">
+                                    <div class="form-group col-span-2">
                                         <label class="form-label">Supervisor Full Name</label>
                                         <input type="text" name="supervisor_name" id="sup_fullname" class="form-control" placeholder="Complete Name">
                                     </div>
@@ -788,7 +855,7 @@ if ($inspectors_res) {
                                         <label class="form-label">Account Password</label>
                                         <input type="password" name="supervisor_password" id="sup_password" class="form-control" placeholder="••••••••">
                                     </div>
-                                    <div class="form-group" style="grid-column: span 2;">
+                                    <div class="form-group col-span-2">
                                         <label class="form-label">Contact No (Optional)</label>
                                         <input type="text" name="supervisor_contact" id="sup_contact" class="form-control" placeholder="Mobile phone">
                                     </div>
@@ -910,7 +977,7 @@ if ($inspectors_res) {
             <form action="agency_client_management.php" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="mapping_id" id="details_mapping_id">
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="form-grid">
                     <div class="form-group">
                         <label class="form-label">Account Username</label>
                         <input type="text" name="client_username" id="details_client_username" class="form-control" placeholder="Enter Username" required>
@@ -921,12 +988,12 @@ if ($inspectors_res) {
                         <input type="password" name="client_password" id="details_client_password" class="form-control" placeholder="Enter Password">
                     </div>
 
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <label class="form-label">Company Name</label>
                         <input type="text" name="company_name" id="details_company_name" class="form-control" placeholder="e.g. Acme Corp" required>
                     </div>
                     
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <label class="form-label">Company Address</label>
                         <textarea name="company_address" id="details_company_address" class="form-control" placeholder="Full Business Address" rows="2"></textarea>
                     </div>
@@ -941,12 +1008,12 @@ if ($inspectors_res) {
                         <input type="email" name="email_address" id="details_email_address" class="form-control" placeholder="contact@company.com">
                     </div>
 
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <label class="form-label">Website/Social Link (Optional)</label>
                         <input type="text" name="website_link" id="details_website_link" class="form-control" placeholder="FB, Viber, or Website URL">
                     </div>
 
-                    <div style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px; margin-bottom: 16px;">
+                    <div class="col-span-2" style="margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px; margin-bottom: 16px;">
                         <h4 style="font-size: 0.9rem; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.5px;">Contact Person Details</h4>
                     </div>
 
@@ -960,14 +1027,12 @@ if ($inspectors_res) {
                         <input type="text" name="contact_person_position" id="details_contact_person_position" class="form-control" placeholder="Job Title">
                     </div>
 
-                    <div class="form-group" style="grid-column: span 2;">
+                    <div class="form-group col-span-2">
                         <label class="form-label">Contact No (Contact Person)</label>
                         <input type="text" name="contact_person_no" id="details_contact_person_no" class="form-control" placeholder="Personal or Office Phone">
                     </div>
 
-
-
-                    <div class="form-group" style="grid-column: span 2; margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
+                    <div class="form-group col-span-2" style="margin-top: 8px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
                         <label class="form-label">Company Logo (Photo)</label>
                         <input type="file" name="company_logo" id="details_company_logo" class="form-control" accept="image/*">
                         <small style="color: #6b7280; font-size: 0.75rem;">Upload a photo of the client logo.</small>

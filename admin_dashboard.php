@@ -8,14 +8,16 @@ if ($_SESSION['user_level'] !== 'admin') {
 
 // Auto-cleanup trigger (runs once every 24h when admin visits dashboard)
 $last_run_res = $conn->query("SELECT setting_value FROM system_settings WHERE setting_key = 'last_cleanup_run'");
-$last_run = $last_run_res ? (int)$last_run_res->fetch_assoc()['setting_value'] : 0;
+$last_run_row = $last_run_res ? $last_run_res->fetch_assoc() : null;
+$last_run = $last_run_row ? (int)$last_run_row['setting_value'] : 0;
+
 if (time() - $last_run > 86400) { // 24 hours
-    // Trigger cleanup silently in the background (using ignore_user_abort if needed, but here a simple include or fetch works)
-    // For simplicity, we just trigger it and let it finish.
+    // Trigger cleanup silently in the background
     $_GET['manual'] = '1';
+    $is_internal_include = true;
     include 'api/cleanup_retention.php';
-    // Clear the GET to avoid side effects
-    unset($_GET['manual']);
+    // Clear the flags to avoid side effects
+    unset($_GET['manual'], $is_internal_include);
 }
 
 // Fetch statistics
@@ -45,18 +47,26 @@ include 'admin_layout/sidebar.php';
     <main class="main-content">
         <?php include 'admin_layout/topbar.php'; ?>
 
-        <div class="contentArea">
+        <div class="content-area">
             <style>
-                .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-bottom: 40px; }
-                .stat-card { background: white; padding: 32px; border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); position: relative; transition: all 0.3s ease; cursor: pointer; text-decoration: none; display: block; color: inherit; }
+                .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; margin-bottom: 40px; }
+                .stat-card { background: white; padding: 24px; border-radius: 16px; border: 1px solid var(--border); box-shadow: var(--shadow); position: relative; transition: all 0.3s ease; cursor: pointer; text-decoration: none; display: block; color: inherit; }
                 a.stat-card { color: inherit; text-decoration: none; }
                 .stat-card:hover { transform: translateY(-4px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-                .stat-label { font-size: 0.85rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: block; }
-                .stat-value { font-size: 2.5rem; font-weight: 800; color: var(--text-main); letter-spacing: -1px; }
-                .stat-icon { position: absolute; top: 32px; right: 32px; font-size: 2rem; opacity: 0.2; }
+                .stat-label { font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; display: block; }
+                .stat-value { font-size: 2rem; font-weight: 800; color: var(--text-main); letter-spacing: -1px; }
+                .stat-icon { position: absolute; top: 24px; right: 24px; font-size: 1.5rem; opacity: 0.2; }
                 
                 .lists-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px; }
-                @media (max-width: 1024px) { .lists-grid { grid-template-columns: 1fr; } }
+                @media (max-width: 1024px) { 
+                    .lists-grid { grid-template-columns: 1fr; gap: 24px; } 
+                    .stat-value { font-size: 1.75rem; }
+                    .stats-grid { gap: 16px; }
+                }
+                @media (max-width: 640px) {
+                    .stats-grid { grid-template-columns: 1fr; }
+                    .stat-card { padding: 20px; }
+                }
             </style>
 
             <div class="stats-grid">

@@ -124,6 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
         $conn->begin_transaction();
         try {
             $saved = 0;
+            $kept_ids = [];
             for ($i = 0; $i < count($cp_names); $i++) {
                 $cp_id   = (int)($cp_ids[$i]   ?? 0);
                 $cp_name = trim($cp_names[$i]  ?? '');
@@ -138,6 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
                     );
                     $stmt->bind_param('ssii', $cp_name, $cp_code, $cp_id, $mapping_id);
                     $stmt->execute();
+                    $kept_ids[] = $cp_id;
                 } else {
                     // Insert new checkpoint (only if within limit)
                     $count_res = $conn->query("SELECT COUNT(*) as cnt FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)");
@@ -153,9 +155,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_qrs'])) {
                     );
                     $stmt->bind_param('iss', $mapping_id, $cp_name, $cp_code);
                     $stmt->execute();
+                    $kept_ids[] = $conn->insert_id;
                 }
                 $saved++;
             }
+
+            // Deletion logic: Delete regular checkpoints that were NOT in the kept list
+            $kept_ids_str = count($kept_ids) > 0 ? implode(',', $kept_ids) : '0';
+            $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id AND checkpoint_id NOT IN ($kept_ids_str) AND checkpoint_id IN (SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL))");
+            $conn->query("DELETE FROM checkpoints WHERE agency_client_id = $mapping_id AND id NOT IN ($kept_ids_str) AND (is_zero_checkpoint = 0 OR is_zero_checkpoint IS NULL)");
+
             $conn->commit();
             $message = "QR checkpoints saved successfully ($saved updated/added).";
             $message_type = 'success';
@@ -219,78 +228,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['handle_sequence_reques
     $action     = $_POST['action']; // 'approve' or 'deny'
     
     if ($action === 'approve') {
-        $sql = "UPDATE agency_clients SET sequence_change_request = 'approved' WHERE id = $mapping_id";
-        $msg = "Sequence change request approved.";
+        // Approve the specific request
+        $conn->query("UPDATE agency_clients SET sequence_change_request = 'approved' WHERE id = $mapping_id");
+        // Unlock patrol and visual globally for this client (to sync with manage_limits.php behavior)
+        $conn->query("UPDATE agency_clients SET is_patrol_locked = 0, is_visual_locked = 0 WHERE client_id = (SELECT client_id FROM (SELECT client_id FROM agency_clients WHERE id = $mapping_id) as t)");
+        
+        $msg = "Sequence change request approved. Patrol and Visual locks have been removed for this client.";
     } else {
         $sql = "UPDATE agency_clients SET sequence_change_request = 'none' WHERE id = $mapping_id";
+        $conn->query($sql);
         $msg = "Sequence change request denied.";
     }
     
-    if ($conn->query($sql)) {
-        $message = $msg;
-        $message_type = "success";
-        $show_status_modal = true;
-    } else {
-        $message = "Error handling request: " . $conn->error;
-        $message_type = "error";
-        $show_status_modal = true;
-    }
+    $message = $msg;
+    $message_type = "success";
+    $show_status_modal = true;
 }
 
-// Handle Add Client Branch
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['add_client'])) {
-    $agency_id = (int)$_POST['agency_id'];
-    $client_username = $conn->real_escape_string($_POST['client_username']);
-    $password = password_hash($_POST['client_password'], PASSWORD_DEFAULT);
-    $company_name = $conn->real_escape_string($_POST['site_name']); // Use Site Name as Company Name primary display
-    $company_address = $conn->real_escape_string($_POST['company_address'] ?? '');
-    $contact_no = $conn->real_escape_string($_POST['contact_no'] ?? '');
-
-    $conn->begin_transaction();
-    try {
-        // 1. Check if username exists
-        $user_check = $conn->query("SELECT id FROM users WHERE username = '$client_username'");
-        if ($user_check && $user_check->num_rows > 0) {
-            throw new Exception("Username '$client_username' is already taken.");
-        }
-
-        // 2. Check Agency Limit
-        $limit_res = $conn->query("SELECT client_limit FROM users WHERE id = $agency_id AND user_level = 'agency'");
-        if (!$limit_res || $limit_res->num_rows === 0) {
-            throw new Exception("Selected agency not found.");
-        }
-        $client_limit = (int)$limit_res->fetch_assoc()['client_limit'];
-
-        $count_res = $conn->query("SELECT COUNT(DISTINCT client_id) as current_clients FROM agency_clients WHERE agency_id = $agency_id");
-        $current_clients = (int)$count_res->fetch_assoc()['current_clients'];
-
-        if ($client_limit >= 0 && $current_clients >= $client_limit) {
-            throw new Exception("This agency has reached its maximum client limit ($client_limit). Increase their limit first.");
-        }
-
-        // 3. Create User Account
-        if (!$conn->query("INSERT INTO users (username, password, user_level) VALUES ('$client_username', '$password', 'client')")) {
-            throw new Exception("Error creating user: " . $conn->error);
-        }
-        $new_client_id = $conn->insert_id;
-
-        // 4. Create Agency-Client Assignment
-        if (!$conn->query("INSERT INTO agency_clients (agency_id, client_id, company_name, company_address, contact_no, qr_limit, client_limit, guard_limit, inspector_limit, supervisor_limit) 
-                           VALUES ($agency_id, $new_client_id, '$company_name', '$company_address', '$contact_no', 1, 1, 0, 0, 0)")) {
-            throw new Exception("Error creating client profile: " . $conn->error);
-        }
-
-        $conn->commit();
-        $message = "Client site created and assigned successfully!";
-        $message_type = "success";
-        $show_status_modal = true;
-    } catch (Exception $e) {
-        $conn->rollback();
-        $message = "Error: " . $e->getMessage();
-        $message_type = "error";
-        $show_status_modal = true;
-    }
-}
 
 // Fetch all agencies
 $agencies_res = $conn->query("SELECT id, username, agency_name, client_limit FROM users WHERE user_level = 'agency' ORDER BY agency_name ASC");
@@ -323,8 +277,21 @@ $clients_res = $conn->query($clients_sql);
 $clients = [];
 if ($clients_res) while ($r = $clients_res->fetch_assoc()) $clients[] = $r;
 
-// Fetch pending sequence requests
-$pending_requests = array_filter($clients, fn($c) => $c['sequence_change_request'] === 'pending');
+// Fetch pending sequence requests individually to avoid grouping issues
+$pending_requests_res = $conn->query("
+    SELECT ac.id as mapping_id, ac.company_name, ac.site_name, u.username, ag.agency_name, ag.username as agency_username
+    FROM agency_clients ac
+    JOIN users u ON ac.client_id = u.id
+    JOIN users ag ON ac.agency_id = ag.id
+    WHERE ac.sequence_change_request = 'pending'
+    ORDER BY ac.id ASC
+");
+$pending_requests = [];
+if ($pending_requests_res) {
+    while ($row = $pending_requests_res->fetch_assoc()) {
+        $pending_requests[] = $row;
+    }
+}
 
 $page_title = 'Client Management';
 $header_title = 'Client Management';
@@ -400,11 +367,6 @@ include 'admin_layout/sidebar.php';
                             </option>
                         <?php endforeach; ?>
                     </select>
-                </div>
-                <div>
-                    <button type="button" onclick="openAddClientModal()" class="btn btn-success" style="height: 48px; padding: 0 24px; display: flex; align-items: center; gap: 8px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
-                        <span style="font-size: 1.2rem;">+</span> Add Client Site
-                    </button>
                 </div>
             </div>
 
@@ -554,13 +516,6 @@ include 'admin_layout/sidebar.php';
             noMsg.style.display = visible === 0 ? 'block' : 'none';
         }
 
-        function openAddClientModal() {
-            document.getElementById('addClientModal').classList.add('show');
-        }
-
-        function closeAddClientModal() {
-            document.getElementById('addClientModal').classList.remove('show');
-        }
 
         // Handle URL parameters for filtering and auto-alerts
         window.addEventListener('DOMContentLoaded', () => {
@@ -745,14 +700,10 @@ include 'admin_layout/sidebar.php';
             border-radius: 20px;
             white-space: nowrap;
         }
-        .qr-slot-status.existing {
-            background: #d1fae5;
-            color: #065f46;
-        }
-        .qr-slot-status.empty {
-            background: #f1f5f9;
-            color: #94a3b8;
-        }
+        .qr-slot-status.existing { background: #dcfce7; color: #166534; border-color: #86efac; }
+        .qr-slot-status.over-limit { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+        .qr-slot-status.empty { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+
         .qr-auto-badge {
             font-size: 0.68rem;
             color: #94a3b8;
@@ -818,6 +769,30 @@ include 'admin_layout/sidebar.php';
             color: #94a3b8;
         }
         .qr-no-limit .icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+        @media (max-width: 768px) {
+            #qrModal { padding: 10px; }
+            #qrModalBox { max-height: 95vh; width: 100%; border-radius: 12px; }
+            #qrModalHeader { padding: 14px 16px; }
+            #qrModalHeader h3 { font-size: 1rem; }
+            #qrModalMeta { padding: 10px 16px; gap: 8px; flex-direction: column; align-items: flex-start; }
+            #qrModalMeta div { width: 100%; }
+            #qrModalBody { padding: 10px; }
+            .qr-slot-input { font-size: 0.85rem; padding: 8px; }
+            .qr-slots-table th { padding: 8px 4px; font-size: 0.65rem; }
+            .qr-slots-table td { padding: 6px 2px; }
+            .qr-slot-status { font-size: 0.65rem; padding: 2px 6px; }
+            #qrModalFooter { padding: 12px 16px; flex-direction: column; align-items: stretch; text-align: center; }
+            #qrSaveBtn { width: 100%; justify-content: center; padding: 12px; }
+            .qr-slots-table .slot-num { width: 24px; font-size: 0.75rem; }
+        }
+        @media (max-width: 480px) {
+            .qr-slots-table thead { display: none; }
+            .qr-slots-table tr { display: block; margin-bottom: 16px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+            .qr-slots-table td { display: block; width: 100% !important; padding: 4px 0; border: none; text-align: left !important; }
+            .qr-slots-table td::before { content: attr(data-label); font-weight: 700; font-size: 0.7rem; color: #64748b; text-transform: uppercase; display: block; margin-bottom: 2px; }
+            .qr-slots-table .slot-num { display: none; }
+        }
     </style>
 
     <div id="qrModal">
@@ -964,8 +939,8 @@ include 'admin_layout/sidebar.php';
                 const escZCode = escHtml(zcp.checkpoint_code);
                 
                 html += `<tr style="background: #fffbeb;">
-                    <td class="slot-num" style="background:#fef3c7; color:#92400e; font-weight:800;">0</td>
-                    <td>
+                    <td class="slot-num" style="background:#fef3c7; color:#92400e; font-weight:800;" data-label="#">0</td>
+                    <td data-label="Checkpoint Name">
                         <input type="text" class="qr-slot-input"
                             data-idx="zero"
                             data-cpid="${zcp.id}"
@@ -975,7 +950,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow('zero')"
                         />
                     </td>
-                    <td style="display: flex; align-items: center; gap: 8px;">
+                    <td data-label="QR Code / Key" style="display: flex; align-items: center; gap: 8px;">
                         <input type="text" class="qr-slot-input code-input"
                             data-idx="zero"
                             data-cpid="${zcp.id}"
@@ -992,23 +967,32 @@ include 'admin_layout/sidebar.php';
                             👁️
                         </button>
                     </td>
-                    <td style="text-align:center;"><span class="qr-slot-status" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">✓ Start</span></td>
+                    <td data-label="Status" style="text-align:center;"><span class="qr-slot-status" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a;">✓ Start</span></td>
                 </tr>`;
             }
 
-            for (let i = 0; i < limit; i++) {
-                const cp         = existing[i] ?? null;
-                const isExisting = cp !== null;
+            // Display all allowed slots, PLUS any existing checkpoints that exceed the limit
+            const displayCount = Math.max(limit, existing.length);
+            for (let i = 0; i < displayCount; i++) {
+                const cp = existing[i] ?? null;
+                const isOverLimit = i >= limit;
+                const isExisting = !!cp;
                 const cpId       = isExisting ? cp.id : 0;
                 const cpName     = isExisting ? escHtml(cp.name) : '';
                 const cpCode     = isExisting ? escHtml(cp.checkpoint_code) : '';
-                const statusHtml = isExisting
-                    ? '<span class="qr-slot-status existing">✓ Existing</span>'
-                    : '<span class="qr-slot-status empty">Empty</span>';
+                
+                let statusHtml = '';
+                if (isExisting) {
+                    statusHtml = isOverLimit 
+                        ? '<span class="qr-slot-status over-limit">⚠️ OVER LIMIT</span>'
+                        : '<span class="qr-slot-status existing">✓ Existing</span>';
+                } else {
+                    statusHtml = '<span class="qr-slot-status empty">Empty</span>';
+                }
 
                 html += `<tr>
-                    <td class="slot-num">${i + 1}</td>
-                    <td>
+                    <td class="slot-num" data-label="#">${i + 1}</td>
+                    <td data-label="Checkpoint Name">
                         <input type="text" class="qr-slot-input"
                             data-idx="${i}"
                             data-cpid="${cpId}"
@@ -1018,7 +1002,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow(${i})"
                         />
                     </td>
-                    <td style="display: flex; align-items: center; gap: 8px;">
+                    <td data-label="QR Code / Key" style="display: flex; align-items: center; gap: 8px;">
                         <div style="flex: 1; position: relative;">
                             <input type="text" class="qr-slot-input code-input"
                                 data-idx="${i}"
@@ -1042,7 +1026,7 @@ include 'admin_layout/sidebar.php';
                             </button>
                         ` : ''}
                     </td>
-                    <td style="text-align:center;" id="qr-status-${i}">${statusHtml}</td>
+                    <td data-label="Status" style="text-align:center;" id="qr-status-${i}">${statusHtml}</td>
                 </tr>`;
             }
 
@@ -1053,8 +1037,8 @@ include 'admin_layout/sidebar.php';
                 const escECode = escHtml(ecp.checkpoint_code);
                 
                 html += `<tr style="background: #fff5f5;">
-                    <td class="slot-num" style="background:#fee2e2; color:#991b1b; font-weight:800;">E</td>
-                    <td>
+                    <td class="slot-num" style="background:#fee2e2; color:#991b1b; font-weight:800;" data-label="#">E</td>
+                    <td data-label="Checkpoint Name">
                         <input type="text" class="qr-slot-input"
                             data-idx="end"
                             data-cpid="${ecp.id}"
@@ -1064,7 +1048,7 @@ include 'admin_layout/sidebar.php';
                             oninput="syncRow('end')"
                         />
                     </td>
-                    <td style="display: flex; align-items: center; gap: 8px;">
+                    <td data-label="QR Code / Key" style="display: flex; align-items: center; gap: 8px;">
                         <input type="text" class="qr-slot-input code-input"
                             data-idx="end"
                             data-cpid="${ecp.id}"
@@ -1081,7 +1065,7 @@ include 'admin_layout/sidebar.php';
                             👁️
                         </button>
                     </td>
-                    <td style="text-align:center;"><span class="qr-slot-status" style="background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">✓ End</span></td>
+                    <td data-label="Status" style="text-align:center;"><span class="qr-slot-status" style="background:#fef2f2; color:#991b1b; border:1px solid #fca5a5;">✓ End</span></td>
                 </tr>`;
             }
 
@@ -1169,60 +1153,6 @@ include 'admin_layout/sidebar.php';
         </div>
     </div>
 
-    <!-- Add Client Modal -->
-    <div id="addClientModal" class="modal">
-        <div class="modal-content" style="max-width: 500px; padding: 0; overflow: hidden;">
-            <div style="padding: 24px; background: #1e293b; color: white;">
-                <h3 style="margin: 0; display: flex; align-items: center; gap: 10px;">
-                    <span style="background: rgba(255,255,255,0.1); width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">➕</span>
-                    Add New Client Site
-                </h3>
-                <p style="margin: 8px 0 0; font-size: 0.85rem; color: #94a3b8;">Create a new branch and assign it to an agency.</p>
-            </div>
-            
-            <form method="POST" style="padding: 24px;">
-                <input type="hidden" name="add_client" value="1">
-                
-                <div style="margin-bottom: 18px;">
-                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Assign to Agency</label>
-                    <select name="agency_id" class="form-control" required style="font-weight: 600;">
-                        <option value="" disabled selected>-- Select Agency --</option>
-                        <?php foreach ($agencies as $ag): ?>
-                            <option value="<?php echo $ag['id']; ?>">
-                                <?php echo htmlspecialchars($ag['agency_name'] ?: $ag['username']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px;">
-                    <div>
-                        <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Account Username</label>
-                        <input type="text" name="client_username" class="form-control" placeholder="e.g. lbc_main" required>
-                    </div>
-                    <div>
-                        <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Account Password</label>
-                        <input type="password" name="client_password" class="form-control" placeholder="••••••••" required>
-                    </div>
-                </div>
-
-                <div style="margin-bottom: 18px;">
-                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Site / Company Name</label>
-                    <input type="text" name="site_name" class="form-control" placeholder="e.g. LBC Express - Main Branch" required>
-                </div>
-
-                <div style="margin-bottom: 24px;">
-                    <label style="display: block; font-size: 0.75rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Site Address / Location</label>
-                    <textarea name="company_address" class="form-control" rows="2" placeholder="Street, City, Province"></textarea>
-                </div>
-
-                <div style="display: flex; gap: 12px; margin-top: 10px;">
-                    <button type="button" class="btn" style="flex: 1; background: #f1f5f9; color: #475569; font-weight: 600;" onclick="closeAddClientModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary" style="flex: 2; font-weight: 700;">Create Site Account</button>
-                </div>
-            </form>
-        </div>
-    </div>
 
     <?php include 'includes/common_modals.php'; ?>
     <?php include 'admin_layout/footer.php'; ?>

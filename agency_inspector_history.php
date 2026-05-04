@@ -80,7 +80,7 @@ $history_res = $conn->query($history_sql);
         body { display: flex; height: 100vh; background-color: #f3f4f6; color: #1f2937; padding: 0 16px 0 0; gap: 16px; }
 
         /* Sidebar Styles */
-        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: all 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; }
+        .sidebar { width: 250px; background-color: #111827; color: #fff; display: flex; flex-direction: column; transition: transform 0.3s ease; box-shadow: 2px 0 10px rgba(0,0,0,0.1); overflow: hidden; flex-shrink: 0; }
         .sidebar-header { padding: 24px 20px; font-size: 1.5rem; font-weight: 700; text-align: center; border-bottom: 1px solid #374151; letter-spacing: 0.5px; color: #f9fafb; }
         .nav-links { list-style: none; flex: 1; padding-top: 15px; }
         .nav-link { padding: 15px 24px; display: flex; align-items: center; color: #9ca3af; text-decoration: none; font-weight: 500; transition: background 0.2s, color 0.2s, border-color 0.2s; border-left: 4px solid transparent; }
@@ -90,7 +90,7 @@ $history_res = $conn->query($history_sql);
         .logout-btn:hover { background-color: #dc2626; }
 
         /* Main Content Styles */
-        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; width: 100%; }
         .topbar { background: white; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: sticky; top: 0; z-index: 10; }
         .topbar h2 { font-size: 1.25rem; font-weight: 600; color: #111827; }
         .user-info { display: flex; align-items: center; gap: 12px; }
@@ -149,12 +149,42 @@ $history_res = $conn->query($history_sql);
         .photo-modal-content { max-width: 800px !important; }
         .modal-image-container { position: relative; width: 100%; background: #f3f4f6; border-radius: 8px; margin: 20px 0; max-height: 65vh; overflow: auto; }
         #modalImage { max-width: 100%; display: block; border-radius: 8px; margin: 0 auto; }
+
+        /* Mobile Menu Toggle */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1999; backdrop-filter: blur(2px); }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 2000; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close, .mobile-toggle, .sidebar-overlay-bg.show { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .content-area { padding: 24px 16px; }
+
+            .filter-form { flex-direction: column; align-items: stretch !important; }
+            .form-group { width: 100%; min-width: 0; }
+
+            /* Table Cards */
+            thead { display: none; }
+            table, tbody, tr, td { display: block; width: 100%; }
+            tr { border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            td:last-child { border-bottom: none !important; }
+            td::before { content: attr(data-label); font-weight: 700; color: #64748b; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .modal-content { width: 95%; padding: 24px; }
+        }
     </style>
 </head>
 <body>
 
     <!-- Sidebar -->
+    <div class="sidebar-overlay-bg" onclick="toggleSidebar()"></div>
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">
             Agency Portal
         </div>
@@ -163,6 +193,7 @@ $history_res = $conn->query($history_sql);
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link active">Inspector Visits</a></li>
@@ -179,7 +210,10 @@ $history_res = $conn->query($history_sql);
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>Inspector Visit History</h2>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>Inspector Visit History</h2>
+            </div>
             <div class="user-info">
                 <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Agency'; ?></strong></span>
                 <span class="badge" style="background:#dcfce7;color:#166534;">AGENCY</span>
@@ -227,24 +261,26 @@ $history_res = $conn->query($history_sql);
                             <?php if ($history_res && $history_res->num_rows > 0): ?>
                                 <?php while($row = $history_res->fetch_assoc()): ?>
                                     <tr>
-                                        <td><strong><?php echo date('M d, Y h:i A', strtotime($row['scan_time'])); ?></strong></td>
-                                        <td><?php echo htmlspecialchars($row['client_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['site_name']); ?></td>
-                                        <td><?php echo htmlspecialchars($row['inspector_name']); ?></td>
-                                        <td>
+                                        <td data-label="Date & Time"><strong><?php echo date('M d, Y h:i A', strtotime($row['scan_time'])); ?></strong></td>
+                                        <td data-label="Client"><?php echo htmlspecialchars($row['client_name']); ?></td>
+                                        <td data-label="Site"><?php echo htmlspecialchars($row['site_name']); ?></td>
+                                        <td data-label="Inspector"><?php echo htmlspecialchars($row['inspector_name']); ?></td>
+                                        <td data-label="Status">
                                             <span class="status-badge status-<?php echo strtolower(str_replace([' '], ['-'], $row['status'])); ?>">
                                                 <?php echo htmlspecialchars($row['status']); ?>
                                             </span>
                                         </td>
-                                        <td style="font-size: 0.85rem; color: #4b5563; font-style: italic;">
+                                        <td data-label="Remarks" style="font-size: 0.85rem; color: #4b5563; font-style: italic;">
                                             <?php echo htmlspecialchars($row['remarks'] ?? '---'); ?>
                                         </td>
-                                        <td>
-                                            <?php if (!empty($row['photo_path'])): ?>
-                                                <button class="btn-view-photo" onclick="viewPhoto('<?php echo htmlspecialchars($row['photo_path']); ?>', 'Inspector Report - <?php echo htmlspecialchars($row['inspector_name']); ?>')">View Photo</button>
-                                            <?php else: ?>
-                                                <span style="color: #9ca3af; font-size: 0.75rem;">No Photo</span>
-                                            <?php endif; ?>
+                                        <td data-label="Photo">
+                                            <div style="display: flex; justify-content: flex-end;">
+                                                <?php if (!empty($row['photo_path'])): ?>
+                                                    <button class="btn-view-photo" onclick="viewPhoto('<?php echo htmlspecialchars($row['photo_path']); ?>', 'Inspector Report - <?php echo htmlspecialchars($row['inspector_name']); ?>')">View Photo</button>
+                                                <?php else: ?>
+                                                    <span style="color: #9ca3af; font-size: 0.75rem;">No Photo</span>
+                                                <?php endif; ?>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endwhile; ?>
@@ -292,6 +328,11 @@ $history_res = $conn->query($history_sql);
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay-bg').classList.toggle('show');
+        }
+
         function viewPhoto(url, title) {
             const modal = document.getElementById('photoModal');
             const modalImg = document.getElementById('modalImage');

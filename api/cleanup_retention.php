@@ -3,7 +3,9 @@
 // This script purges old patrol history and images based on admin settings.
 // Can be run as a cron job or manually from the admin panel.
 
-require_once '../db_config.php';
+if (!isset($conn)) {
+    require_once __DIR__ . '/../db_config.php';
+}
 
 // Security: If not CLI and not manual trigger from admin, reject.
 // In a real environment, you might use a secret key for the cron job.
@@ -43,7 +45,7 @@ if ($retention_history > 0) {
             // Delete local files if they exist
             foreach (['photo_path', 'justification_photo_path'] as $col) {
                 if (!empty($row[$col]) && strpos($row[$col], 'http') === false) {
-                    $file_path = '../' . $row[$col];
+                    $file_path = __DIR__ . '/../' . $row[$col];
                     if (file_exists($file_path)) {
                         @unlink($file_path);
                         $images_purged++;
@@ -81,7 +83,7 @@ if ($retention_images > 0) {
                 if (!empty($row[$col])) {
                     // If local file, delete it
                     if (strpos($row[$col], 'http') === false) {
-                        $file_path = '../' . $row[$col];
+                        $file_path = __DIR__ . '/../' . $row[$col];
                         if (file_exists($file_path)) {
                             @unlink($file_path);
                         }
@@ -114,7 +116,7 @@ if ($is_cli) {
     echo " - Images purged/unlinked: $images_purged\n";
     echo " - Cutoff History: " . ($retention_history > 0 ? "$retention_history days" : "Infinite") . "\n";
     echo " - Cutoff Images: " . ($retention_images > 0 ? "$retention_images days" : "Infinite") . "\n";
-} else {
+} elseif (!isset($is_internal_include)) {
     header('Content-Type: application/json');
     echo json_encode($response);
 }

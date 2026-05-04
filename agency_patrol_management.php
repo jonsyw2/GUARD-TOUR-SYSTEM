@@ -126,9 +126,16 @@ if (isset($_GET['ajax_checkpoints']) && isset($_GET['mapping_id'])) {
     if ($lock_res && $row = $lock_res->fetch_assoc()) {
         $is_visual_locked = (int)$row['is_visual_locked'];
     }
+
+    // Total patrol minutes
+    $patrol_res = $conn->query("SELECT SUM(interval_minutes + duration_minutes) as total_mins FROM tour_assignments WHERE agency_client_id = $mapping_id");
+    $total_patrol_minutes = 0;
+    if ($patrol_res && $row = $patrol_res->fetch_assoc()) {
+        $total_patrol_minutes = (int)$row['total_mins'];
+    }
     
     header('Content-Type: application/json');
-    echo json_encode(['checkpoints' => $checkpoints, 'shifts' => $shifts, 'is_visual_locked' => $is_visual_locked]);
+    echo json_encode(['checkpoints' => $checkpoints, 'shifts' => $shifts, 'is_visual_locked' => $is_visual_locked, 'total_patrol_minutes' => $total_patrol_minutes]);
     exit();
 }
 
@@ -157,7 +164,7 @@ if (isset($_POST['ajax_save_position']) && isset($_POST['cp_id'])) {
 if (isset($_POST['ajax_lock_visual']) && isset($_POST['mapping_id'])) {
     $mapping_id = (int)$_POST['mapping_id'];
     
-    $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1, visual_saved = 1 WHERE id = ? AND agency_id = ?");
+    $stmt = $conn->prepare("UPDATE agency_clients SET is_visual_locked = 1, visual_saved = 1, is_patrol_locked = 1 WHERE id = ? AND agency_id = ?");
     $stmt->bind_param("ii", $mapping_id, $agency_id);
     $stmt->execute();
     
@@ -314,7 +321,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     $intervals = $_POST['intervals'] ?? [];
     $durations = $_POST['durations'] ?? [];
     $assignment_shifts = $_POST['assignment_shifts'] ?? [];
-    $is_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
+    // is_patrol_locked is now auto-managed based on visual_saved
 
     // Resolve system checkpoint IDs (Start=1, End=2) to exclude them from the sortable middle
     $system_cp_res = $conn->query("SELECT id FROM checkpoints WHERE agency_client_id = $mapping_id AND is_zero_checkpoint != 0");
@@ -324,11 +331,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['save_patrol'])) {
     }
     
     $conn->begin_transaction();
-        try {
-            // Update Lock Status
-            $stmt = $conn->prepare("UPDATE agency_clients SET is_patrol_locked = ? WHERE id = ? AND agency_id = ?");
-            $stmt->bind_param("iii", $is_locked, $mapping_id, $agency_id);
-            $stmt->execute();
+    try {
+        // is_patrol_locked is now auto-managed based on visual_saved
+            // No manual lock update needed here
 
             // Clear existing and save new assignments
             $conn->query("DELETE FROM tour_assignments WHERE agency_client_id = $mapping_id");
@@ -731,6 +736,42 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
         .hamburger { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #374151; padding: 5px; z-index: 1001; }
         .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; backdrop-filter: blur(2px); }
 
+        /* Mobile Adjustments */
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -250px; top: 0; bottom: 0; z-index: 1001; transition: transform 0.3s ease; }
+            .sidebar.show { transform: translateX(250px); }
+            .sidebar-close { display: block; }
+            .hamburger { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 12px 16px; }
+            .content-area { padding: 20px 16px; }
+            
+            .grid-container { grid-template-columns: 1fr; gap: 20px; }
+            
+            /* Table Cards */
+            .table-container thead { display: none; }
+            .table-container table, .table-container tbody, .table-container tr, .table-container td { display: block; width: 100%; }
+            .table-container tr { border: 1px solid #e5e7eb; border-radius: 12px; margin-bottom: 16px; padding: 12px; background: white; }
+            .table-container td { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border: none !important; border-bottom: 1px solid #f3f4f6 !important; text-align: right; }
+            .table-container td:last-child { border-bottom: none !important; }
+            .table-container td::before { content: attr(data-label); font-weight: 700; color: #6b7280; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+            
+            .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 5px; }
+            .tab-btn { padding: 10px 16px; font-size: 0.9rem; white-space: nowrap; }
+            
+            .tour-item { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .setting-inputs { width: 100%; flex-wrap: wrap; }
+            .checkpoint-name { width: 100%; }
+            
+            .visual-container { height: 300px; }
+            .modal-content { width: 95%; padding: 20px; }
+        }
+
+        .sidebar-overlay.show { display: block; }
+
         .content-area { padding: 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
         
         /* Tabs styling */
@@ -757,7 +798,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
         .btn-success:hover { background: #059669; }
 
         /* Patrol Patterns Tab Styles */
-        .tour-list-container { margin-top: 20px; counter-reset: tour-counter -1; }
+        .tour-list-container { margin-top: 20px; counter-reset: tour-counter 0; }
         .tour-list { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
         .tour-item { position: relative; display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 10px; transition: all 0.2s; }
         .tour-item:hover { border-color: #3b82f6; background: #fff; }
@@ -1092,8 +1133,6 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
         }
         
         @media (max-width: 1024px) {
-            .sidebar { position: fixed; left: -250px; height: 100%; z-index: 1000; }
-            .sidebar.show { left: 0; }
             .hamburger { display: block; }
             .sidebar-overlay.show { display: block; }
             .content-area { padding: 16px; }
@@ -1144,6 +1183,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             <li><a href="agency_client_management.php" class="nav-link">Client Management</a></li>
             <li><a href="manage_guards.php" class="nav-link">Manage Guards</a></li>
             <li><a href="manage_inspectors.php" class="nav-link">Manage Inspectors</a></li>
+            <li><a href="manage_supervisors.php" class="nav-link">Manage Supervisors</a></li>
             <li><a href="agency_patrol_management.php" class="nav-link active">Patrol Management</a></li>
             <li><a href="agency_patrol_history.php" class="nav-link">Patrol History</a></li>
             <li><a href="agency_inspector_history.php" class="nav-link">Inspector Visits</a></li>
@@ -1202,10 +1242,6 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                         <form action="agency_patrol_management.php" method="POST">
                             <input type="hidden" name="mapping_id" value="<?php echo $selected_mapping_id; ?>">
                             
-                            <div class="lock-container">
-                                <input type="checkbox" name="is_patrol_locked" id="lockPatrol" <?php echo ($selected_client['is_patrol_locked'] ?? 0) ? 'checked' : ''; ?>>
-                                <label for="lockPatrol" class="lock-label">Lock configuration for client (Agency Exclusive Mode)</label>
-                            </div>
 
                             <?php if (!($selected_client['visual_saved'] ?? 0)): ?>
                             <div style="background: #fef3c7; border: 1.5px solid #fcd34d; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 14px;">
@@ -1244,12 +1280,12 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                                             <div class="setting-inputs">
                                                 <div class="input-group">
                                                     <label>Interval</label>
-                                                    <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0">
+                                                    <input type="number" name="intervals[]" value="<?php echo $start_interval; ?>" min="0" <?php echo !($selected_client['visual_saved'] ?? 0) ? 'disabled' : ''; ?>>
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0">
+                                                    <input type="number" name="durations[]" value="<?php echo $start_duration; ?>" min="0" <?php echo !($selected_client['visual_saved'] ?? 0) ? 'disabled' : ''; ?>>
                                                     <label>min</label>
                                                 </div>
                                                 <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($start_shift ?: 'Day Shift'); ?>">
@@ -1273,12 +1309,12 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                                             <div class="setting-inputs">
                                                 <div class="input-group">
                                                     <label>Interval</label>
-                                                    <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes'] ?: 1; ?>" min="1">
+                                                    <input type="number" name="intervals[]" value="<?php echo $item['interval_minutes'] ?: 1; ?>" min="1" <?php echo !($selected_client['visual_saved'] ?? 0) ? 'disabled' : ''; ?>>
                                                     <label>min</label>
                                                 </div>
                                                 <div class="input-group">
                                                     <label>Duration</label>
-                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?: 1; ?>" min="1">
+                                                    <input type="number" name="durations[]" value="<?php echo $item['duration_minutes'] ?: 1; ?>" min="1" <?php echo !($selected_client['visual_saved'] ?? 0) ? 'disabled' : ''; ?>>
                                                     <label>min</label>
                                                 </div>
                                                 <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($item['shift_name'] ?? 'Day Shift'); ?>">
@@ -1312,12 +1348,12 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                                     <div class="setting-inputs">
                                         <div class="input-group">
                                             <label>Interval</label>
-                                            <input type="number" name="intervals[]" value="<?php echo $end_interval; ?>" min="0">
+                                            <input type="number" name="intervals[]" value="<?php echo $end_interval; ?>" min="0" <?php echo !($selected_client['visual_saved'] ?? 0) ? 'disabled' : ''; ?>>
                                             <label>min</label>
                                         </div>
                                         <div class="input-group">
                                             <label>Duration</label>
-                                            <input type="number" name="durations[]" value="<?php echo $end_duration; ?>" min="0">
+                                            <input type="number" name="durations[]" value="<?php echo $end_duration; ?>" min="0" <?php echo !($selected_client['visual_saved'] ?? 0) ? 'disabled' : ''; ?>>
                                             <label>min</label>
                                         </div>
                                         <input type="hidden" name="assignment_shifts[]" value="<?php echo htmlspecialchars($end_shift ?: 'Day Shift'); ?>">
@@ -1628,7 +1664,21 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 new Sortable(tourList, {
                     handle: '.handle',
                     animation: 150,
-                    ghostClass: 'sortable-ghost'
+                    ghostClass: 'sortable-ghost',
+                    onEnd: function() {
+                        // Reordering might change overall timing if intervals vary
+                        syncAllShifts();
+                    }
+                });
+            }
+
+            // Sync shifts whenever patrol pattern values change
+            const patrolTab = document.getElementById('tab-patrol');
+            if (patrolTab) {
+                patrolTab.addEventListener('input', (e) => {
+                    if (e.target.name === 'intervals[]' || e.target.name === 'durations[]') {
+                        syncAllShifts();
+                    }
                 });
             }
         });
@@ -1707,10 +1757,9 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             // Auto-select if only one site exists
             if (sites.length === 1) {
                 siteSelect.value = sites[0].mapping_id;
-                if (!skipUpdateLimit) updateLimitForm();
-            } else {
-                updateUsageSidebar(null);
             }
+            
+            if (!skipUpdateLimit) updateLimitForm();
 
             // Check limits
             const limit = parseInt(org.client_limit) || 0;
@@ -1823,18 +1872,15 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             // QR Calculations
             const qrLimit = parseInt(client.qr_limit) || 0;
             const qrSiteUsed = parseInt(client.site_used_qrs) || 0;
-            const qrTotalUsed = parseInt(client.total_used_qrs) || 0;
             const qrPercent = qrLimit > 0 ? (qrSiteUsed / qrLimit) * 100 : 0;
             
-            // Guard Calculations
+            // Guard Calculations (Pooled across org, but showing relevant to this client context)
             const grdLimit = parseInt(client.guard_limit) || 0;
-            const grdSiteUsed = parseInt(client.site_used_guards) || 0;
             const grdTotalUsed = parseInt(client.total_used_guards) || 0;
             const grdPercent = grdLimit > 0 ? (grdTotalUsed / grdLimit) * 100 : 0;
 
-            // Inspector Calculations
+            // Inspector Calculations (Pooled)
             const inspLimit = parseInt(client.inspector_limit) || 0;
-            const inspSiteUsed = parseInt(client.site_used_inspectors) || 0;
             const inspTotalUsed = parseInt(client.total_used_inspectors) || 0;
             const inspPercent = inspLimit > 0 ? (inspTotalUsed / inspLimit) * 100 : 0;
 
@@ -1856,7 +1902,6 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                             <div style="width: ${Math.min(100, qrPercent)}%; height: 100%; background: ${getFillColor(qrPercent)}; border-radius: 3px; transition: width 0.3s ease;"></div>
                         </div>
                     </div>
-
 
                     ${client.is_disabled == 1 ? '<div style="margin-top: 15px; padding: 10px; background: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; color: #ef4444; font-size: 0.75rem; font-weight: 700; text-align: center; text-transform: uppercase; letter-spacing: 0.05em;">Account Suspended</div>' : ''}
                     ${client.qr_override == 1 ? '<div style="margin-top:12px; font-size: 0.65rem; color: #10b981; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">✓ Admin Override Active</div>' : ''}
@@ -1916,6 +1961,8 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                     const response = await fetch(`agency_patrol_management.php?ajax_checkpoints=1&mapping_id=${mappingId}`);
                     const data = await response.json();
                     
+                    window.cachedPatrolMinutes = data.total_patrol_minutes || 0;
+                    
                     // Race condition check: only proceed if this was the latest request
                     if (select.dataset.currentLoading !== String(mappingId)) return;
 
@@ -1933,12 +1980,76 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                             addShiftInput(sh.shift_name, sh.id, sh.start_time, sh.end_time, true); // true = skipDirty
                         });
                     }
+                    
+                    // INITIALIZE: Calculate all TO times based on current patrol pattern
+                    syncAllShifts();
                 } catch (e) {
                     console.error('Error fetching site data:', e);
                     addCheckpointInput();
                     addShiftInput();
                 }
             }
+        }
+
+        function calculateTotalPatrolMinutes() {
+            // Target the patrol tab container specifically
+            const patrolPane = document.getElementById('tab-patrol');
+            const intervals = patrolPane ? patrolPane.querySelectorAll('input[name="intervals[]"]') : [];
+            
+            // If the patrol pane is actually populated with inputs, calculate accurately
+            if (intervals.length > 0) {
+                const durations = patrolPane.querySelectorAll('input[name="durations[]"]');
+                let total = 0;
+                intervals.forEach(input => total += (parseInt(input.value) || 0));
+                durations.forEach(input => total += (parseInt(input.value) || 0));
+                return total;
+            }
+
+            // Fallback for QR tab when patrol tab isn't loaded:
+            // Fetch total configured minutes from DB, or estimate based on number of checkpoints
+            let total = window.cachedPatrolMinutes || 0;
+
+            const cpContainer = document.getElementById('checkpoints-container');
+            if (cpContainer && total === 0) {
+                 const count = cpContainer.querySelectorAll('.cp-input-row').length;
+                 // Assuming 1 min interval and 1 min duration per checkpoint by default
+                 total = count * 2;
+            }
+
+            return total;
+        }
+
+        function updateShiftToTime(row) {
+            if (!row) return;
+            const startInput = row.querySelector('input[name="shift_starts[]"]');
+            const endInput = row.querySelector('input[name="shift_ends[]"]');
+            if (!startInput || !endInput) return;
+
+            const startVal = startInput.value;
+            if (!startVal) return;
+
+            const patrolMins = calculateTotalPatrolMinutes();
+            const allowance = 20;
+            const totalMinsToAdd = patrolMins + allowance;
+
+            const [h, m] = startVal.split(':').map(Number);
+            let totalInMins = h * 60 + m + totalMinsToAdd;
+            
+            // Handle rollover
+            totalInMins = totalInMins % 1440;
+            
+            const newH = Math.floor(totalInMins / 60);
+            const newM = totalInMins % 60;
+            
+            const formattedTime = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+            endInput.value = formattedTime;
+            
+            updateDurationDisplay(true); // Update total 24h summary
+        }
+
+        function syncAllShifts() {
+            const rows = document.querySelectorAll('.shift-input-row');
+            rows.forEach(row => updateShiftToTime(row));
         }
 
         function calculateTotalShiftMinutes() {
@@ -2003,11 +2114,11 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 </div>
                 <div style="flex: 1; display: flex; align-items: center; gap: 4px; min-width: 125px; flex-shrink: 0;">
                     <span style="font-size: 0.7rem; color: #64748b; font-weight: 700;">FROM</span>
-                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" style="padding: 8px 4px; font-size: 0.85rem;" onchange="updateDurationDisplay()">
+                    <input type="time" name="shift_starts[]" class="form-control" value="${formattedStart}" required oninput="updateShiftToTime(this.parentElement.parentElement)" onchange="markQrConfigDirty()">
                 </div>
                 <div style="flex: 1; display: flex; align-items: center; gap: 4px; min-width: 125px; flex-shrink: 0;">
                     <span style="font-size: 0.7rem; color: #64748b; font-weight: 700;">TO</span>
-                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" style="padding: 8px 4px; font-size: 0.85rem;" onchange="updateDurationDisplay()">
+                    <input type="time" name="shift_ends[]" class="form-control" value="${formattedEnd}" readonly style="background-color: #f8fafc; cursor: not-allowed; border-style: dashed;" required>
                 </div>
                 <button type="button" class="btn btn-danger" style="background:#ef4444; color:white; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border-radius: 8px; border: none; flex-shrink: 0;" onclick="this.parentElement.remove(); updateDurationDisplay();">✕</button>
             `;
@@ -2070,8 +2181,10 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
             const btn = document.getElementById('add-checkpoint-btn');
             const limitText = document.getElementById('qr-limit-text');
             const container = document.getElementById('checkpoints-container');
-            if (!btn || !limitText || !container) return;
+            const select = document.getElementById('qr_agency_client_id');
+            if (!btn || !limitText || !container || !select) return;
 
+            const mappingId = select.value;
             const limit = parseInt(limitText.dataset.limit || 0);
             const count = container.querySelectorAll('.cp-input-row').length;
             const remaining = Math.max(0, limit - count);
@@ -2182,10 +2295,20 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 if (data.success) {
                     isQrConfigDirty = false; // RESET DIRTY FLAG
 
-                    // UI Cleanup: Update any "New Checkpoint" items in sidebar correctly
                     const siteSelect = document.getElementById('qr_agency_client_id');
                     const mappingId = siteSelect.value;
-                    
+                    const container = document.getElementById('checkpoints-container');
+                    const currentCount = container ? container.querySelectorAll('.cp-input-row').length : 0;
+
+                    // SYNC: Update the local cache object so the sidebar stays correct
+                    const clientRecord = clientsData.find(c => String(c.mapping_id) === String(mappingId));
+                    if (clientRecord) {
+                        clientRecord.site_used_qrs = currentCount;
+                        // Also update site name in case it changed
+                        const siteNameInput = document.getElementById('site_name');
+                        if (siteNameInput) clientRecord.site_name = siteNameInput.value;
+                    }
+
                     // We reload the mapping form to ensure all new checkpoints get their DB IDs
                     await updateLimitForm();
                     
@@ -2242,12 +2365,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
 
             if (!id) return;
 
-            let shiftOptions = '';
-            if (currentShifts.length > 0) {
-                shiftOptions = currentShifts.map(s => `<option value="${s.replace(/"/g, '&quot;')}">${s}</option>`).join('');
-            } else {
-                shiftOptions = '<option value="" disabled selected>No shifts defined</option>';
-            }
+
 
             const list = document.getElementById('tour-list');
             const item = document.createElement('div');
@@ -2267,12 +2385,7 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                         <input type="number" name="durations[]" value="1" min="0">
                         <label>min</label>
                     </div>
-                    <div class="input-group">
-                        <label>Shift Declare</label>
-                        <select name="assignment_shifts[]" class="form-control" style="padding: 4px 8px; font-size: 0.85rem; font-weight: 600; min-width: 120px;">
-                            ${shiftOptions}
-                        </select>
-                    </div>
+                    <input type="hidden" name="assignment_shifts[]" value="Day Shift">
                 </div>
                 <button type="button" class="remove-btn" onclick="removeCheckpoint(this, '${id}', '${name.replace(/'/g, "\\'")}')">&times;</button>
             `;
@@ -2287,8 +2400,8 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
         const select = document.getElementById('checkpoint-select');
         if (!select) return;
 
-        // Get all used checkpoint IDs (from Start, Middle, and End sections)
-        const usedIds = Array.from(document.querySelectorAll('input[name="checkpoint_ids[]"]')).map(input => input.value);
+        // Get all used checkpoint IDs specifically within the Patrol Sequence list
+        const usedIds = Array.from(document.getElementById('tour-list').querySelectorAll('input[name="checkpoint_ids[]"]')).map(input => input.value);
         
         // Loop through options and hide if already in the sequence
         Array.from(select.options).forEach(option => {
@@ -2889,7 +3002,6 @@ $active_tab = (isset($_GET['tab']) && $_GET['tab'] === 'patrol') ? 'patrol' : 'q
                 });
         }
     </script>
-    <?php include_once 'includes/common_modals.php'; ?>
-    <!-- VERSION: 2.1 -->
+    <?php include 'admin_layout/footer.php'; ?>
 </body>
 </html>

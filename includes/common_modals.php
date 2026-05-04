@@ -22,6 +22,23 @@
         box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
         animation: globalModalFadeIn 0.3s ease-out forwards;
         position: relative;
+        margin: 20px;
+        transition: all 0.3s ease;
+    }
+    @media (max-width: 480px) {
+        .global-modal-content {
+            padding: 24px 16px;
+            margin: 10px;
+            max-width: 95%;
+        }
+        .global-modal-icon {
+            width: 48px; height: 48px;
+            font-size: 1.2rem;
+            margin-bottom: 16px;
+        }
+        .global-modal-content h3 { font-size: 1.1rem; }
+        .global-modal-content p { font-size: 0.85rem; margin-bottom: 20px; }
+        .global-modal-btn { padding: 10px 16px; font-size: 0.9rem; }
     }
     @keyframes globalModalFadeIn {
         from { opacity: 0; transform: translateY(20px) scale(0.95); }

@@ -205,12 +205,37 @@ if (!empty($mapping_ids)) {
 
         .status-active { display: inline-flex; align-items: center; gap: 6px; color: #059669; font-size: 0.85rem; font-weight: 600; }
         .status-idle { display: inline-flex; align-items: center; gap: 6px; color: #9ca3af; font-size: 0.85rem; font-weight: 600; }
+
+        /* ── Responsive ── */
+        .mobile-toggle { display: none; background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #111827; padding: 8px; }
+        .sidebar-close { display: none; background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; position: absolute; top: 20px; right: 20px; }
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(2px); }
+        .sidebar-overlay.show { display: block; }
+        @media (max-width: 1024px) {
+            body { padding: 0; gap: 0; }
+            .sidebar { position: fixed; left: -260px; top: 0; bottom: 0; z-index: 1001; width: 250px; transition: left 0.3s ease; box-shadow: 4px 0 20px rgba(0,0,0,0.2); }
+            .sidebar.show { left: 0; }
+            .sidebar-close { display: block; }
+            .main-content { border-radius: 0; border: none; }
+            .topbar { padding: 16px 20px; }
+            .mobile-toggle { display: block; }
+            .content-area { padding: 20px 16px; }
+            .guards-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .topbar h2 { font-size: 1rem; }
+            .user-info span:first-child { display: none; }
+            th, td { padding: 10px 8px; font-size: 0.8rem; }
+            .modal-content { max-width: 95%; padding: 20px; }
+        }
     </style>
 </head>
 <body>
 
     <!-- Sidebar -->
+    <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
     <aside class="sidebar">
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
         <div class="sidebar-header">Client Portal</div>
         <ul class="nav-links">
             <li><a href="client_dashboard.php" class="nav-link">Dashboard</a></li>
@@ -231,9 +256,12 @@ if (!empty($mapping_ids)) {
     <main class="main-content">
         <!-- Topbar -->
         <header class="topbar">
-            <h2>My Guards</h2>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button class="mobile-toggle" onclick="toggleSidebar()">☰</button>
+                <h2>My Guards</h2>
+            </div>
             <div class="user-info">
-                <span>Welcome, <strong><?php echo isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username']) : 'Client'; ?></strong></span>
+                <span>Welcome, <strong><?php echo htmlspecialchars($_SESSION['company_name'] ?? $_SESSION['username']); ?></strong></span>
                 <span class="badge">CLIENT</span>
             </div>
         </header>
@@ -449,6 +477,11 @@ if (!empty($mapping_ids)) {
     </div>
 
     <script>
+        function toggleSidebar() {
+            document.querySelector('.sidebar').classList.toggle('show');
+            document.querySelector('.sidebar-overlay').classList.toggle('show');
+        }
+
         function openGuardModal(name, gender, contact, police, nbi, lesp_no, lesp_expiry, agency, shift) {
             document.getElementById('modal_guard_name').innerText = name;
             document.getElementById('modal_gender').innerText = gender;

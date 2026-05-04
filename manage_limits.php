@@ -17,7 +17,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
     $new_site_limit = (int)$_POST['site_limit'];
     $override = isset($_POST['qr_override']) ? 1 : 0;
     $disabled = isset($_POST['is_disabled']) ? 1 : 0;
-    $patrol_locked = isset($_POST['is_patrol_locked']) ? 1 : 0;
     $visual_locked = isset($_POST['is_visual_locked']) ? 1 : 0;
 
     // Sync limits across ALL mappings for this client under this agency
@@ -26,7 +25,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_limit'])) {
                    client_limit = $new_site_limit, 
                    qr_override = $override, 
                    is_disabled = $disabled,
-                   is_patrol_locked = $patrol_locked,
                    is_visual_locked = $visual_locked
                    WHERE client_id = (SELECT client_id FROM (SELECT client_id FROM agency_clients WHERE id = $mapping_id) as t)";
     
@@ -119,15 +117,15 @@ include 'admin_layout/sidebar.php';
                                             }
                                         ?>
                                         <tr>
-                                            <td>
+                                            <td data-label="Security Agency">
                                                 <div class="fw-bold"><?php echo htmlspecialchars($row['agency_name'] ?: $row['agency_username']); ?></div>
                                                 <div style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">@<?php echo htmlspecialchars($row['agency_username']); ?></div>
                                             </td>
-                                            <td>
+                                            <td data-label="Assigned Client">
                                                 <div class="fw-bold"><?php echo htmlspecialchars($row['company_name'] ?: $row['client_username']); ?></div>
                                                 <div style="font-size: 0.7rem; color: #94a3b8; font-weight: 400;">@<?php echo htmlspecialchars($row['client_username']); ?></div>
                                             </td>
-                                            <td>
+                                            <td data-label="Current Usage">
                                                 <div style="display: flex; flex-direction: column; gap: 6px; min-width: 140px;">
                                                     <span class="limit-pill" style="white-space: nowrap; font-weight: 700; color: #1e293b; background: #f1f5f9; padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; border: 1px solid #e2e8f0; align-self: flex-start;">
                                                         <?php echo $row['total_qrs']; ?> / <?php echo $row['qr_limit']; ?> QRs
@@ -137,10 +135,10 @@ include 'admin_layout/sidebar.php';
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td data-label="Status">
                                                 <span class="status-badge <?php echo $status_class; ?>"><?php echo $status_text; ?></span>
                                             </td>
-                                            <td>
+                                            <td data-label="Configuration">
                                                 <form action="manage_limits.php" method="POST" style="display: flex; gap: 12px; align-items: flex-end;">
                                                     <?php 
                                                         $mids = explode(',', $row['all_mapping_ids']);
@@ -152,7 +150,7 @@ include 'admin_layout/sidebar.php';
                                                         <label class="form-label" style="font-size: 0.75rem;">QR Limit</label>
                                                         <input type="number" name="qr_limit" class="form-control" value="<?php echo $row['qr_limit']; ?>" min="0" required style="padding: 8px 12px; width: 65px;">
                                                     </div>
-
+ 
                                                     <div class="form-group" style="margin-bottom: 0;">
                                                         <label class="form-label" style="font-size: 0.75rem;">Site Limit</label>
                                                         <input type="number" name="site_limit" class="form-control" value="<?php echo $row['client_limit']; ?>" min="0" required style="padding: 8px 12px; width: 65px;">
@@ -166,16 +164,13 @@ include 'admin_layout/sidebar.php';
                                                             <input type="checkbox" name="is_disabled" <?php echo $row['is_disabled'] ? 'checked' : ''; ?> style="accent-color: var(--primary);"> Disable
                                                         </label>
                                                     </div>
-
+ 
                                                     <div style="display: flex; flex-direction: column; gap: 4px; border-left: 1px solid #e2e8f0; padding-left: 12px;">
-                                                        <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);" title="Lock/Unlock Patrol Pattern sequences">
-                                                            <input type="checkbox" name="is_patrol_locked" <?php echo $row['is_patrol_locked'] ? 'checked' : ''; ?> style="accent-color: #f59e0b;"> Patrol Lock
-                                                        </label>
                                                         <label class="d-flex gap-2 align-items-center" style="font-size: 0.8rem; cursor: pointer; color: var(--text-muted);" title="Lock/Unlock Checkpoint Map locations">
                                                             <input type="checkbox" name="is_visual_locked" <?php echo $row['is_visual_locked'] ? 'checked' : ''; ?> style="accent-color: #f59e0b;"> Visual Lock
                                                         </label>
                                                     </div>
-
+ 
                                                     <button type="submit" name="update_limit" class="btn btn-primary" style="padding: 8px 16px; font-size: 0.85rem; width: auto;">Save</button>
                                                 </form>
                                             </td>
@@ -188,8 +183,6 @@ include 'admin_layout/sidebar.php';
                         </table>
                     </div>
                 </div>
-            </div>
-        </div>
             </div>
         </div>
 
@@ -217,6 +210,24 @@ include 'admin_layout/sidebar.php';
                 document.getElementById(modalId).classList.remove('show');
             }
         </script>
+        
+        <style>
+            @media (max-width: 1024px) {
+                .table-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            }
+            @media (max-width: 768px) {
+                tr { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 20px; padding: 16px; background: white; box-shadow: var(--shadow); }
+                td { display: block; padding: 12px 0; border: none !important; width: 100% !important; border-bottom: 1px solid #f1f5f9 !important; }
+                td:last-child { border-bottom: none !important; }
+                td::before { content: attr(data-label); display: block; font-size: 0.7rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px; }
+                thead { display: none; }
+                td[data-label="Configuration"] form { flex-direction: column !important; align-items: stretch !important; gap: 16px !important; }
+                .form-control { width: 100% !important; }
+                .btn { width: 100% !important; }
+                .d-flex.gap-2 { justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+                div[style*="border-left"] { border-left: none !important; padding-left: 0 !important; }
+            }
+        </style>
     </main>
 
 <?php include 'admin_layout/footer.php'; ?>
