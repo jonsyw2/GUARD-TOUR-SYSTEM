@@ -23,6 +23,10 @@ addColumnSafely($conn, 'tour_assignments', 'duration_minutes', 'INT DEFAULT 0');
 // addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes'); // Deprecated
 addColumnSafely($conn, 'checkpoints', 'is_end_checkpoint', 'TINYINT(1) DEFAULT 0');
 addColumnSafely($conn, 'checkpoints', 'shift_name', 'VARCHAR(50)', 'scan_interval');
+// NFC UID: physical NFC tag identifier (SEPARATE from QR code — never merged)
+addColumnSafely($conn, 'checkpoints', 'nfc_uid', 'VARCHAR(50) NULL DEFAULT NULL', 'qr_code_data');
+// scan_type records whether each scan was done via QR or NFC
+addColumnSafely($conn, 'scans', 'scan_type', "ENUM('QR','NFC') NOT NULL DEFAULT 'QR'", 'status');
 addColumnSafely($conn, 'agency_clients', 'is_sequence_fixed', 'TINYINT(1) DEFAULT 0', 'is_visual_locked');
 addColumnSafely($conn, 'agency_clients', 'sequence_change_request', "ENUM('none', 'pending', 'approved') DEFAULT 'none'", 'is_sequence_fixed');
 
@@ -464,12 +468,13 @@ if ($limits_res)
     while ($r = $limits_res->fetch_assoc())
         $limits_data[] = $r;
 
-// Fetch checkpoints for the directory table
+// Fetch checkpoints for the directory table (includes nfc_uid)
 $qrs_sql = "
     SELECT 
         c.id,
         c.name as checkpoint_name,
         c.checkpoint_code,
+        c.nfc_uid,
         c.agency_client_id,
         c.is_zero_checkpoint,
         c.scan_interval,

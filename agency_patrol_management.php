@@ -56,11 +56,15 @@ addColumnSafely($conn, 'agency_clients', 'sequence_change_request', "ENUM('none'
 $conn->query("ALTER TABLE checkpoints ADD COLUMN IF NOT EXISTS visual_pos_x INT DEFAULT 0, ADD COLUMN IF NOT EXISTS visual_pos_y INT DEFAULT 0");
 addColumnSafely($conn, 'checkpoints', 'is_zero_checkpoint', 'TINYINT(1) DEFAULT 0');
 addColumnSafely($conn, 'checkpoints', 'checkpoint_code', 'VARCHAR(50)', 'name');
+// NFC UID: physical tag identifier — SEPARATE from QR code
+addColumnSafely($conn, 'checkpoints', 'nfc_uid', 'VARCHAR(50) NULL DEFAULT NULL', 'qr_code_data');
 addColumnSafely($conn, 'tour_assignments', 'shift_name', 'VARCHAR(50)', 'duration_minutes');
 
 // Scans Table Migrations
 addColumnSafely($conn, 'scans', 'tour_session_id', 'VARCHAR(100)', 'justification_photo_path');
 addColumnSafely($conn, 'scans', 'shift', "VARCHAR(50) DEFAULT 'Day Shift'", 'tour_session_id');
+// scan_type: QR or NFC — never mixed
+addColumnSafely($conn, 'scans', 'scan_type', "ENUM('QR','NFC') NOT NULL DEFAULT 'QR'", 'shift');
 
 $conn->query("CREATE TABLE IF NOT EXISTS shifts (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -245,6 +249,64 @@ if (isset($_POST['ajax_delete_checkpoint']) && isset($_POST['cp_id'])) {
     
     header('Content-Type: application/json');
     echo json_encode(['success' => true]);
+    exit();
+}
+
+// AJAX Handler: Update NFC UID for a checkpoint
+if (isset($_POST['ajax_update_nfc_uid']) && isset($_POST['cp_id'])) {
+    $cp_id  = (int)$_POST['cp_id'];
+    $nfc_uid = trim($_POST['nfc_uid'] ?? '');
+
+    // Security: only allow if checkpoint belongs to this agency
+    $secStmt = $conn->prepare("
+        SELECT cp.id FROM checkpoints cp
+        JOIN agency_clients ac ON cp.agency_client_id = ac.id
+        WHERE cp.id = ? AND ac.agency_id = ? LIMIT 1
+    ");
+    $secStmt->bind_param('ii', $cp_id, $agency_id);
+    $secStmt->execute();
+    $secStmt->store_result();
+    if ($secStmt->num_rows === 0) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Unauthorized']);
+        exit();
+    }
+    $secStmt->close();
+
+    // Validate format (hex bytes, colon-separated)
+    if ($nfc_uid !== '' && !preg_match('/^[0-9A-Fa-f:\ \-]{2,29}$/', $nfc_uid)) {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Invalid NFC UID format. Use hex bytes, e.g. 04:A3:9F:22']);
+        exit();
+    }
+
+    // Normalise to UPPERCASE with colons
+    if ($nfc_uid !== '') {
+        $nfc_uid = strtoupper(str_replace(['-', ' '], ':', $nfc_uid));
+    }
+
+    // Prevent duplicate UID
+    if ($nfc_uid !== '') {
+        $dupChk = $conn->prepare('SELECT id FROM checkpoints WHERE nfc_uid = ? AND id != ? LIMIT 1');
+        $dupChk->bind_param('si', $nfc_uid, $cp_id);
+        $dupChk->execute();
+        $dupChk->store_result();
+        if ($dupChk->num_rows > 0) {
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'This NFC UID is already assigned to another checkpoint.']);
+            exit();
+        }
+        $dupChk->close();
+    }
+
+    $newUid  = ($nfc_uid === '') ? null : $nfc_uid;
+    $updStmt = $conn->prepare('UPDATE checkpoints SET nfc_uid = ? WHERE id = ?');
+    $updStmt->bind_param('si', $newUid, $cp_id);
+    $updStmt->execute();
+    $updStmt->close();
+
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true, 'nfc_uid' => $newUid ?? '']);
     exit();
 }
 
@@ -684,11 +746,11 @@ if ($selected_mapping_id) {
     }
 }
 
-// Fetch checkpoints for table view (Patrol Management Tab)
+// Fetch checkpoints for table view (Patrol Management Tab) — includes nfc_uid
 $checkpoints_result = null;
 if ($selected_mapping_id) {
     $checkpoints_sql = "
-        SELECT cp.id, cp.name, cp.checkpoint_code, cp.is_zero_checkpoint, cp.created_at, c.username as client_name, ac.site_name, ac.company_name
+        SELECT cp.id, cp.name, cp.checkpoint_code, cp.nfc_uid, cp.is_zero_checkpoint, cp.created_at, c.username as client_name, ac.site_name, ac.company_name
         FROM checkpoints cp
         JOIN agency_clients ac ON cp.agency_client_id = ac.id
         JOIN users c ON ac.client_id = c.id
